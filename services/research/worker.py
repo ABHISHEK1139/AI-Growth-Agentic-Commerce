@@ -113,6 +113,7 @@ class ResearchWorker:
         cls,
         *,
         product_id: str,
+        product_title: str | None = None,
         query: str,
         catalog_specs: dict[str, Any],
         external_urls: list[str] | None = None,
@@ -165,7 +166,7 @@ class ResearchWorker:
         # 3. If spec is missing from catalog metadata, perform live internet web search
         if not evidence and enable_web_search and step_count < MAX_SEARCH_STEPS:
             step_count += 1
-            search_query = f"{product_id} {query}".strip()
+            search_query = f"{product_title or product_id} {query}".strip()
             web_results = cls.live_web_search(search_query, limit=2)
 
             for source_url, snippet in web_results:
