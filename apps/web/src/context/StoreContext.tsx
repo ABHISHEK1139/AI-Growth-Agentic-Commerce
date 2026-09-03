@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { ProductItem } from "@/data/products";
 import { bootstrapSession } from "@/lib/api";
 
@@ -52,6 +52,15 @@ export interface UserAIPreferences {
   preferredBrands: string[];
 }
 
+export interface ToastItem {
+  id: string;
+  message: string;
+  type?: "success" | "info" | "cart" | "wishlist" | "compare" | "warning";
+  actionLabel?: string;
+  actionHref?: string;
+  onAction?: () => void;
+}
+
 interface StoreContextType {
   sessionId: string;
   cart: CartItem[];
@@ -59,6 +68,7 @@ interface StoreContextType {
   compareList: string[]; // product IDs
   orders: OrderRecord[];
   returns: ReturnRequest[];
+  toasts: ToastItem[];
   currentIntent: StructuredIntent;
   userPreferences: UserAIPreferences;
   isAiDrawerOpen: boolean;
@@ -78,6 +88,8 @@ interface StoreContextType {
   clearCart: () => void;
   toggleWishlist: (productId: string) => void;
   toggleCompare: (productId: string) => void;
+  showToast: (toast: Omit<ToastItem, "id">) => void;
+  removeToast: (id: string) => void;
   openAiDrawer: (context?: Partial<StoreContextType["aiDrawerContext"]>) => void;
   closeAiDrawer: () => void;
   placeOrder: (order: Omit<OrderRecord, "orderId" | "createdAt" | "status" | "deliveryDate"> & { orderId?: string }) => OrderRecord;
@@ -101,9 +113,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [compareList, setCompareList] = useState<string[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRequest[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState("recommended");
   const [failureSimulation, setFailureSimulation] = useState<StoreContextType["failureSimulation"]>("NONE");
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const showToast = useCallback((toast: Omit<ToastItem, "id">) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newToast: ToastItem = { ...toast, id };
+    setToasts((prev) => [...prev.slice(-3), newToast]);
+
+    setTimeout(() => {
+      removeToast(id);
+    }, 4000);
+  }, [removeToast]);
 
   const [currentIntent, setCurrentIntent] = useState<StructuredIntent>({
     queryText: "",
@@ -193,6 +220,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       return [...prev, { product, quantity }];
     });
+    showToast({
+      message: `Added "${product.title}" to your bag`,
+      type: "cart",
+      actionLabel: "View Bag",
+      actionHref: "/cart",
+    });
   };
 
   const removeFromCart = (productId: string) => {
@@ -224,22 +257,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const clearCart = () => setCart([]);
 
   const toggleWishlist = (productId: string) => {
+    const isSaved = wishlist.includes(productId);
     setWishlist((prev) =>
-      prev.includes(productId)
+      isSaved
         ? prev.filter((id) => id !== productId)
         : [...prev, productId]
     );
+    showToast({
+      message: isSaved ? "Removed from saved items" : "Saved to your wishlist",
+      type: "wishlist",
+      actionLabel: isSaved ? undefined : "View Saved",
+      actionHref: isSaved ? undefined : "/wishlist",
+    });
   };
 
   const toggleCompare = (productId: string) => {
+    const isCompared = compareList.includes(productId);
     setCompareList((prev) => {
-      if (prev.includes(productId)) {
+      if (isCompared) {
         return prev.filter((id) => id !== productId);
       }
       if (prev.length >= 3) {
         return [...prev.slice(1), productId];
       }
       return [...prev, productId];
+    });
+    showToast({
+      message: isCompared ? "Removed from comparison" : "Added to comparison list",
+      type: "compare",
+      actionLabel: isCompared ? undefined : "Compare",
+      actionHref: isCompared ? undefined : "/compare",
     });
   };
 
@@ -348,6 +395,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         compareList,
         orders,
         returns,
+        toasts,
         currentIntent,
         userPreferences,
         isAiDrawerOpen,
@@ -362,6 +410,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         clearCart,
         toggleWishlist,
         toggleCompare,
+        showToast,
+        removeToast,
         openAiDrawer,
         closeAiDrawer,
         placeOrder,

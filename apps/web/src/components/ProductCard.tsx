@@ -8,7 +8,7 @@ import { useStore } from "@/context/StoreContext";
 import { useState } from "react";
 
 export function ProductCard({ product, highlightReason, isBestMatch }: { product: ProductItem; highlightReason?: string; isBestMatch?: boolean }) {
-  const { addToCart, wishlist, toggleWishlist, compareList, toggleCompare } = useStore();
+  const { addToCart, wishlist, toggleWishlist, compareList, toggleCompare, openAiDrawer } = useStore();
   const saved = wishlist.includes(product.id);
   const compared = compareList.includes(product.id);
   const discount = product.originalPriceMinor > product.priceMinor ? Math.round((1 - product.priceMinor / product.originalPriceMinor) * 100) : 0;
@@ -43,11 +43,23 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
         {discount > 0 && <span className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#c65027] shadow-sm backdrop-blur-sm">Save {discount}%</span>}
       </div>
       <button onClick={() => toggleWishlist(product.id)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow-sm backdrop-blur-sm transition-all duration-200 hover:scale-110 active:scale-90 ${saved ? "text-[#c65027]" : "text-[#526058] hover:text-[#c65027]"}`} aria-label={saved ? "Remove from saved products" : "Save product"}><Heart className={`h-4 w-4 transition-transform duration-200 ${saved ? "fill-current scale-110" : ""}`} /></button>
-      {/* Quick view overlay on hover */}
-      <div className="absolute bottom-3 left-3 right-3 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-        <Link href={`/product/${product.id}`} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-white/90 py-2.5 text-[11px] font-bold text-[#174c3c] backdrop-blur-md transition-all duration-200 hover:bg-white hover:shadow-md">
+      {/* Quick view and Ask AI overlay on hover */}
+      <div className="absolute bottom-3 left-3 right-3 flex items-center gap-1.5 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+        <Link href={`/product/${product.id}`} className="flex-1 flex items-center justify-center gap-1 rounded-xl bg-white/95 py-2 text-[11px] font-bold text-[#174c3c] backdrop-blur-md transition-all duration-200 hover:bg-white hover:shadow-md">
           Quick view
         </Link>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            openAiDrawer({ pageType: "product", product });
+          }}
+          className="flex items-center justify-center gap-1 rounded-xl bg-[#174c3c] px-3 py-2 text-[11px] font-bold text-white shadow-sm transition-all duration-200 hover:bg-[#103c2f] hover:scale-105"
+          title="Ask AI Assistant about this product"
+        >
+          <Sparkles className="h-3 w-3 text-[#a9d1b6]" />
+          <span>Ask AI</span>
+        </button>
       </div>
     </div>
     {/* Content Section */}

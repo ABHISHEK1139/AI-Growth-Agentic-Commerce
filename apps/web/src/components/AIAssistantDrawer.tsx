@@ -35,6 +35,7 @@ export function AIAssistantDrawer() {
   const router = useRouter();
   const {
     isAiDrawerOpen,
+    openAiDrawer,
     closeAiDrawer,
     aiDrawerContext,
     currentIntent,
@@ -439,7 +440,27 @@ export function AIAssistantDrawer() {
     }
   };
 
-  if (!isAiDrawerOpen) return null;
+  if (!isAiDrawerOpen) {
+    return (
+      <aside aria-label="AI Shopping Assistant" className="fixed bottom-6 right-6 z-40 hidden md:block animate-fade-in-up">
+        <button
+          type="button"
+          onClick={() => openAiDrawer()}
+          className="group relative flex items-center gap-2.5 rounded-full bg-[#174c3c] px-4 py-3 text-sm font-bold text-white shadow-xl backdrop-blur-md transition-all duration-300 hover:bg-[#103c2f] hover:shadow-2xl hover:scale-105 active:scale-95 ring-2 ring-white/20"
+        >
+          <span className="relative flex h-3 w-3 items-center justify-center">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a9d1b6] opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#a9d1b6]"></span>
+          </span>
+          <span className="font-mono text-xs text-[#a9d1b6]">✦</span>
+          <span>Ask AI Assistant</span>
+          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white/90">
+            Groq LLaMA
+          </span>
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
