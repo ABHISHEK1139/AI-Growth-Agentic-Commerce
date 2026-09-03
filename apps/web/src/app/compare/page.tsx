@@ -2,8 +2,8 @@
 
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { ImageOff, Loader2, ShoppingBag } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { ImageOff, Loader2, ShoppingBag, Plus, X, ArrowRight, Sparkles } from "lucide-react";
 import { formatMinorToMajor } from "@/lib/money";
 import type { ApiError } from "@/lib/api";
 import { useStore } from "@/context/StoreContext";
@@ -27,38 +27,11 @@ import {
 } from "@/catalog/present";
 import type { CatalogSourceName, ExploreOffer } from "@/catalog/types";
 
-/**
- * Side-by-side comparison of *offers*.
- *
- * Offers, not products, because an offer is what a buyer can act on: the price,
- * the stock, the delivery window, the return window, and the validity period all
- * live on the offer record, and two offers for the same product can differ in
- * every one of them.
- *
- * The identifiers come from the address, so a comparison is a shareable thing:
- *
- *     /compare?offers=off_a,off_b
- *     /compare?products=prd_a,prd_b
- *
- * With no identifiers in the address, the comparison list held in this browser is
- * used, and the address-shaped equivalent is offered as a link.
- *
- * On rejected candidates: the catalog answers a search with the offers that
- * matched and reports nothing about the ones it eliminated -- there is no
- * per-candidate rejection field anywhere in the API. So what this page can show,
- * and does, is the reason each *requested* identifier failed to resolve, plus the
- * baseline conditions visible on a resolved record (expired, or no stock), which
- * are the conditions the search itself applies before any stated filter. Anything
- * beyond that would be this screen re-deriving the filter semantics locally, which
- * is the divergence `services/offers/constraints.py` exists to prevent.
- */
-
 interface ResolvedCandidate {
   requested: string;
   kind: "offer" | "product";
   offer: ExploreOffer | null;
   error: ApiError | null;
-  /** True when the identifier was simply not inside the page the catalog returned. */
   outsidePage: boolean;
 }
 
@@ -82,6 +55,7 @@ function parseIdentifiers(raw: string | null): string[] {
 }
 
 function CompareContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { compareList, toggleCompare, addToCart } = useStore();
 
@@ -95,6 +69,7 @@ function CompareContent() {
   const [catalogSource, setCatalogSource] = useState<CatalogSourceName | null>(null);
   const [credentialGap, setCredentialGap] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [categorySuggestions, setCategorySuggestions] = useState<any[]>([]);
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
@@ -208,6 +183,48 @@ function CompareContent() {
   );
   const rejected = candidates.filter((candidate) => candidate.offer === null);
 
+  // Fetch category companions when products are resolved
+  useEffect(() => {
+    if (compared.length === 0) return;
+    const cat = compared[0]?.offer?.category;
+    if (!cat) return;
+
+    fetch("/api/v1/catalog/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: cat, limit: 12 }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        const offers = data?.data?.offers || [];
+        const currentOfferIds = new Set(compared.map((c) => c.offer.offer_id));
+        const currentProductIds = new Set(compared.map((c) => c.offer.product_id));
+        const available = offers.filter(
+          (o: any) => !currentOfferIds.has(o.offer_id) && !currentProductIds.has(o.product_id)
+        );
+        setCategorySuggestions(available.slice(0, 6));
+      })
+      .catch(() => {});
+  }, [compared.length, compared[0]?.offer?.category]);
+
+  const addCandidate = (prodId: string) => {
+    if (fromUrl) {
+      const all = Array.from(new Set([...productIds, prodId])).slice(0, 4);
+      router.push(`/compare?products=${all.join(",")}`);
+    } else {
+      toggleCompare(prodId);
+    }
+  };
+
+  const removeCandidate = (prodId: string) => {
+    if (fromUrl) {
+      const remaining = productIds.filter((id) => id !== prodId);
+      router.push(remaining.length > 0 ? `/compare?products=${remaining.join(",")}` : "/compare");
+    } else {
+      toggleCompare(prodId);
+    }
+  };
+
   const shareHref =
     compared.length > 0
       ? `/compare?offers=${encodeURIComponent(compared.map((entry) => entry.offer.offer_id).join(","))}`
@@ -261,8 +278,12 @@ function CompareContent() {
     );
   }
 
+  const showAddSlot = compared.length < 4;
+  const labelColWidth = "22%";
+  const dataColWidth = `${Math.floor(78 / (compared.length + (showAddSlot ? 1 : 0)))}%`;
+
   return (
-    <div className="space-y-10 pb-16 max-w-7xl mx-auto">
+    <div className="space-y-8 pb-16 max-w-7xl mx-auto">
       {header}
 
       {credentialGap ? (
@@ -282,7 +303,37 @@ function CompareContent() {
         </div>
       ) : null}
 
-      {/* Requested identifiers that produced no offer, with the reason available */}
+      {/* When only 1 product is in compare: show helpful category companion suggestions */}
+      {!loading && compared.length === 1 && categorySuggestions.length > 0 && (
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50/50 border border-emerald-200/80 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[10px] uppercase tracking-wide flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Compare side-by-side
+              </span>
+              <h3 className="text-sm font-black text-emerald-950">Add a second {compared[0].offer.category || "item"} to compare</h3>
+            </div>
+            <p className="text-xs text-emerald-800 leading-relaxed">
+              You are currently viewing 1 product. Select any alternative below to see real-time differences in specs, delivery, and price:
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {categorySuggestions.slice(0, 3).map((s) => (
+              <button
+                key={s.product_id || s.offer_id}
+                onClick={() => addCandidate(s.product_id)}
+                className="px-3.5 py-2 bg-white hover:bg-emerald-100/70 border border-emerald-300 text-[#174c3c] font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center gap-1.5"
+                title={s.title}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {s.title?.split("(")[0]?.trim()}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Requested identifiers that produced no offer */}
       {!loading && rejected.length > 0 ? (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-3">
           <h2 className="text-sm font-black text-slate-900">
@@ -302,28 +353,22 @@ function CompareContent() {
                   {candidate.error
                     ? `${candidate.error.code}: ${candidate.error.message}`
                     : candidate.outsidePage
-                    ? `No offer with this identifier was inside the page of ${LOOKUP_LIMIT} the catalog returned. There is no identifier-scoped lookup open to this browser, so this page cannot say whether one exists further down the ranking.`
+                    ? `No offer with this identifier was inside the page of ${LOOKUP_LIMIT} the catalog returned.`
                     : "The catalog returned no active, in-stock, unexpired offer for this identifier."}
                 </p>
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            The catalog reports the offers that matched a query and nothing about the ones it
-            eliminated, so the reasons above are resolution failures rather than per-constraint
-            rejections. Where a resolved offer fails a baseline condition -- expired, or holding no
-            stock -- that is stated in its column.
-          </p>
         </div>
       ) : null}
 
-      {/* The matrix */}
+      {/* The comparison matrix */}
       {!loading && compared.length > 0 ? (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-x-auto">
-          <table className="w-full text-xs text-left border-collapse min-w-[640px]">
+          <table className="w-full text-xs text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
-                <th className="p-4 sm:p-6 font-bold text-slate-400 uppercase tracking-wider text-[11px] w-1/4">
+                <th className="p-4 sm:p-6 font-bold text-slate-400 uppercase tracking-wider text-[11px]" style={{ width: labelColWidth }}>
                   Offer
                 </th>
                 {compared.map((candidate) => {
@@ -333,11 +378,11 @@ function CompareContent() {
                       ? offer.image_url.trim()
                       : null;
                   return (
-                    <th key={offer.offer_id} className="p-4 sm:p-6 w-1/4 align-top">
+                    <th key={offer.offer_id} className="p-4 sm:p-6 align-top border-l border-slate-100" style={{ width: dataColWidth }}>
                       <div className="space-y-3">
-                        <div className="h-32 w-full rounded-2xl overflow-hidden bg-slate-100 relative">
+                        <div className="h-40 w-full rounded-2xl overflow-hidden bg-slate-100 relative group">
                           {image ? (
-                            <img src={image} alt={offer.title} className="w-full h-full object-cover" />
+                            <img src={image} alt={offer.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                           ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-500">
                               <ImageOff className="h-5 w-5" />
@@ -345,11 +390,11 @@ function CompareContent() {
                             </div>
                           )}
                           <button
-                            onClick={() => toggleCompare(offer.product_id)}
-                            className="absolute top-2 right-2 w-6 h-6 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full text-[10px] flex items-center justify-center"
-                            title="Remove from the browser comparison list"
+                            onClick={() => removeCandidate(offer.product_id)}
+                            className="absolute top-2 right-2 w-7 h-7 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full text-xs flex items-center justify-center transition-all shadow-xs"
+                            title="Remove from comparison"
                           >
-                            &times;
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                         <div>
@@ -383,6 +428,44 @@ function CompareContent() {
                     </th>
                   );
                 })}
+
+                {/* Optional + Add product to compare slot */}
+                {showAddSlot && (
+                  <th className="p-4 sm:p-6 align-top border-l border-slate-100 bg-slate-50/40" style={{ width: dataColWidth }}>
+                    <div className="h-full min-h-[220px] rounded-2xl border-2 border-dashed border-slate-200 hover:border-[#174c3c]/50 p-4 flex flex-col items-center justify-center text-center transition-all bg-white/60">
+                      <div className="w-10 h-10 rounded-full bg-emerald-50 text-[#174c3c] flex items-center justify-center mb-2">
+                        <Plus className="w-5 h-5" />
+                      </div>
+                      <h5 className="font-bold text-slate-800 text-xs mb-0.5">Add to compare</h5>
+                      <p className="text-[10px] text-slate-400 mb-3">Compare up to 4 items</p>
+
+                      {categorySuggestions.length > 0 ? (
+                        <div className="w-full space-y-1.5 text-left">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            Quick picks:
+                          </span>
+                          {categorySuggestions.slice(0, 3).map((s) => (
+                            <button
+                              key={s.product_id || s.offer_id}
+                              onClick={() => addCandidate(s.product_id)}
+                              className="w-full text-left p-1.5 rounded-lg bg-white hover:bg-emerald-50 text-[11px] font-semibold text-[#174c3c] truncate block border border-slate-200 hover:border-emerald-300 transition-colors"
+                              title={s.title}
+                            >
+                              + {s.title?.split("(")[0]?.trim()}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <Link
+                          href="/search"
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded-lg transition-colors"
+                        >
+                          Browse catalog &rarr;
+                        </Link>
+                      )}
+                    </div>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -391,13 +474,14 @@ function CompareContent() {
                 {compared.map((candidate) => (
                   <td
                     key={candidate.offer.offer_id}
-                    className="p-4 font-black text-slate-900 text-sm"
+                    className="p-4 font-black text-slate-900 text-sm border-l border-slate-100"
                     data-amount-minor={candidate.offer.unit_price_minor}
                     data-currency={candidate.offer.currency}
                   >
                     {formatMinorToMajor(candidate.offer.unit_price_minor, candidate.offer.currency)}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
@@ -405,58 +489,64 @@ function CompareContent() {
                 {compared.map((candidate) => (
                   <td
                     key={candidate.offer.offer_id}
-                    className="p-4 text-slate-800 font-medium"
+                    className="p-4 text-slate-800 font-medium border-l border-slate-100"
                     title={pricingSourceDetail(candidate.offer.pricing_source)}
                   >
                     {pricingSourceLabel(candidate.offer.pricing_source)}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Memory</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-semibold">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-semibold border-l border-slate-100">
                     {specValue(candidate.offer, "memory_gb")}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Storage</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-medium">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-medium border-l border-slate-100">
                     {specValue(candidate.offer, "storage_gb")}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Weight</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-medium">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-800 font-medium border-l border-slate-100">
                     {specValue(candidate.offer, "weight_grams")}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Delivery</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-emerald-700 font-bold">
+                  <td key={candidate.offer.offer_id} className="p-4 text-emerald-700 font-bold border-l border-slate-100">
                     {candidate.offer.delivery_days}{" "}
                     {candidate.offer.delivery_days === 1 ? "day" : "days"}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Return window</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-700 font-medium">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-700 font-medium border-l border-slate-100">
                     {candidate.offer.return_period_days} days
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
@@ -464,24 +554,26 @@ function CompareContent() {
                 {compared.map((candidate) => (
                   <td
                     key={candidate.offer.offer_id}
-                    className={`p-4 font-bold ${
+                    className={`p-4 font-bold border-l border-slate-100 ${
                       candidate.offer.available_stock > 0 ? "text-slate-800" : "text-rose-700"
                     }`}
                   >
                     {stockLabel(candidate.offer.available_stock)}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Rating</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-900 font-bold">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-900 font-bold border-l border-slate-100">
                     {candidate.offer.reviews_count > 0
                       ? `${candidate.offer.rating} / 5 (${candidate.offer.reviews_count})`
                       : "No ratings recorded"}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
@@ -491,23 +583,25 @@ function CompareContent() {
                   return (
                     <td
                       key={candidate.offer.offer_id}
-                      className={`p-4 font-medium ${expired ? "text-rose-700" : "text-slate-700"}`}
+                      className={`p-4 font-medium border-l border-slate-100 ${expired ? "text-rose-700" : "text-slate-700"}`}
                     >
                       {expired ? "Expired \u2014 " : "Valid until "}
                       {readableInstant(candidate.offer.expires_at) || "not stated"}
                     </td>
                   );
                 })}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
 
               <tr>
                 <td className="p-4 font-bold text-slate-500 bg-slate-50/40">Identity</td>
                 {compared.map((candidate) => (
-                  <td key={candidate.offer.offer_id} className="p-4 text-slate-500 font-mono text-[11px]">
+                  <td key={candidate.offer.offer_id} className="p-4 text-slate-500 font-mono text-[11px] border-l border-slate-100">
                     {candidate.offer.offer_id}
                     <br />v{candidate.offer.offer_version} &middot; {candidate.offer.merchant_id}
                   </td>
                 ))}
+                {showAddSlot && <td className="p-4 text-center text-slate-300 border-l border-slate-100 bg-slate-50/20">&mdash;</td>}
               </tr>
             </tbody>
           </table>
