@@ -3,6 +3,7 @@ import React from "react";
 import { StoreProvider } from "@/context/StoreContext";
 import { Navbar } from "@/components/Navbar";
 import { AIAssistantDrawer } from "@/components/AIAssistantDrawer";
+import { CartDrawer } from "@/components/CartDrawer";
 import { ToastContainer } from "@/components/ToastContainer";
 import { Footer } from "@/components/Footer";
 import { MobileNav } from "@/components/MobileNav";
@@ -26,6 +27,9 @@ export default function RootLayout({
 
           {/* Contextual AI Assistant Drawer */}
           <AIAssistantDrawer />
+
+          {/* E-Commerce Slide-Over Cart Drawer */}
+          <CartDrawer />
 
           {/* Interactive Global Toast Notification System */}
           <ToastContainer />
