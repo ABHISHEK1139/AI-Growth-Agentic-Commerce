@@ -160,8 +160,8 @@ async function requestFlat<T>(
     };
   }
 
-  if (res.status === 401 && !path.includes("/auth/") && !options.skipAuthBootstrap) {
-    const ok = await bootstrapSession();
+  if ((res.status === 401 || res.status === 403) && !path.includes("/auth/") && !options.skipAuthBootstrap) {
+    const ok = await bootstrapSession("merchant_admin");
     if (ok) {
       return requestFlat<T>(path, init, { ...options, skipAuthBootstrap: true });
     }
