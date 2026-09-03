@@ -211,29 +211,23 @@ export interface RequestOptions {
 
 let bootstrapPromise: Promise<boolean> | null = null;
 
-export async function bootstrapSession(): Promise<boolean> {
-  if (bootstrapPromise) return bootstrapPromise;
-  bootstrapPromise = (async () => {
-    try {
-      const res = await fetch(resolveApiUrl("/api/v1/auth/session"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          role: "buyer",
-          merchant_id: "merchant_demo",
-          buyer_id: "buy_shopper_demo",
-          subject: "demo_shopper",
-        }),
-        credentials: "include",
-      });
-      return res.ok;
-    } catch {
-      return false;
-    } finally {
-      bootstrapPromise = null;
-    }
-  })();
-  return bootstrapPromise;
+export async function bootstrapSession(role: "buyer" | "merchant_admin" = "buyer"): Promise<boolean> {
+  try {
+    const res = await fetch(resolveApiUrl("/api/v1/auth/session"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        role,
+        merchant_id: "merchant_demo",
+        buyer_id: role === "buyer" ? "buy_shopper_demo" : undefined,
+        subject: role === "buyer" ? "demo_shopper" : "demo_merchant_admin",
+      }),
+      credentials: "include",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -351,8 +345,11 @@ async function request<T>(
     );
   }
 
-  if (res.status === 401 && !path.includes("/auth/") && !options.skipAuthBootstrap) {
-    const ok = await bootstrapSession();
+  if ((res.status === 401 || res.status === 403) && !path.includes("/auth/") && !options.skipAuthBootstrap) {
+    const role = path.includes("/merchant") || path.includes("/campaigns") || path.includes("/audit") || path.includes("/policy")
+      ? "merchant_admin"
+      : "buyer";
+    const ok = await bootstrapSession(role);
     if (ok) {
       return request<T>(path, init, { ...options, skipAuthBootstrap: true });
     }

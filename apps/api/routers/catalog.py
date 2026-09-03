@@ -23,17 +23,21 @@ router = APIRouter(prefix="/api/v1", tags=["catalog"])
 
 
 def _get_optional_db():
+    session = None
     try:
         from apps.api.db import get_session_factory
 
         factory = get_session_factory()
         session = factory()
-        try:
-            yield session
-        finally:
-            session.close()
     except Exception:
         yield None
+        return
+
+    try:
+        yield session
+    finally:
+        if session is not None:
+            session.close()
 
 
 OptionalDatabaseSession = Annotated[Session | None, Depends(_get_optional_db)]

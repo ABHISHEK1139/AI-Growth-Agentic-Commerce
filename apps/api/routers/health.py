@@ -50,15 +50,15 @@ def health_db(response: Response, settings: AppSettings) -> dict[str, Any]:
     db_ok, db_error = check_database()
     redis_ok, redis_error = _check_redis(settings.redis_url)
 
-    ok = db_ok and redis_ok
+    ok = db_ok and (redis_ok or settings.is_local)
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     # Warnings name the component, never the DSN or the driver text.
     warnings = [
         EnvelopeWarning(code="DATASTORE_UNREACHABLE", message=f"{name} is not reachable.")
-        for name, component_ok in (("postgres", db_ok), ("redis", redis_ok))
-        if not component_ok
+        for name, component_ok in (("database", db_ok), ("redis", redis_ok))
+        if not component_ok and not (name == "redis" and settings.is_local)
     ]
 
     return probe_payload(
