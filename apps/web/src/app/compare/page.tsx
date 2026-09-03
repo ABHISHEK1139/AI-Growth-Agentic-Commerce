@@ -183,16 +183,17 @@ function CompareContent() {
   );
   const rejected = candidates.filter((candidate) => candidate.offer === null);
 
+  const primaryCategory = compared[0]?.offer?.category;
+  const comparedCount = compared.length;
+
   // Fetch category companions when products are resolved
   useEffect(() => {
-    if (compared.length === 0) return;
-    const cat = compared[0]?.offer?.category;
-    if (!cat) return;
+    if (comparedCount === 0 || !primaryCategory) return;
 
     fetch("/api/v1/catalog/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: cat, limit: 12 }),
+      body: JSON.stringify({ category: primaryCategory, limit: 12 }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -205,7 +206,7 @@ function CompareContent() {
         setCategorySuggestions(available.slice(0, 6));
       })
       .catch(() => {});
-  }, [compared.length, compared[0]?.offer?.category]);
+  }, [comparedCount, primaryCategory]);
 
   const addCandidate = (prodId: string) => {
     if (fromUrl) {
