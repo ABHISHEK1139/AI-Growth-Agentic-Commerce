@@ -438,6 +438,31 @@ export default function GatedCheckoutPage() {
           </div>
         </div>
 
+        {/* Trust & Policy Assurance Bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-white border border-[#e6e8df] text-xs shadow-2xs">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f0e9] text-base">🔒</span>
+            <div>
+              <p className="font-bold text-[#17231e]">Razorpay Standard</p>
+              <p className="text-[10px] text-[#68736d]">256-bit TLS Encrypted Checkout</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-white border border-[#e6e8df] text-xs shadow-2xs">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f0e9] text-base">🛡️</span>
+            <div>
+              <p className="font-bold text-[#17231e]">SHA-256 Price Freeze</p>
+              <p className="text-[10px] text-[#68736d]">Authoritative Gateway Nonce</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-white border border-[#e6e8df] text-xs shadow-2xs">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f0e9] text-base">⚡</span>
+            <div>
+              <p className="font-bold text-[#17231e]">Bounded Ceiling</p>
+              <p className="text-[10px] text-[#68736d]">Hard Limit ₹70,000 • Auto ₹5,000</p>
+            </div>
+          </div>
+        </div>
+
         {/* PRICE CHANGED STOPPAGE STATE (Requirement 13: Stoppage before payment) */}
         {failureSimulation === "PRICE_CHANGED" && (
           <div className="p-6 bg-amber-50 border-2 border-amber-500 rounded-3xl space-y-3 text-xs text-amber-950 animate-in zoom-in-95">

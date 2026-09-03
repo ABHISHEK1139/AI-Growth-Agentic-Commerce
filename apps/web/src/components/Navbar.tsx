@@ -31,7 +31,20 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const totalCartCount = cart.reduce((total, item) => total + item.quantity, 0);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        setSearchFocused(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -85,12 +98,20 @@ export function Navbar() {
           <form onSubmit={submit} className="relative">
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#68736d] transition-colors" />
             <input
+              ref={inputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setSearchFocused(true)}
               placeholder="Search products or describe what you need..."
-              className="h-11 w-full rounded-full border border-[#dfe4dd] bg-white px-11 pr-12 text-sm text-[#17231e] outline-none transition-all duration-300 placeholder:text-[#8a938e] focus:border-[#174c3c] focus:ring-4 focus:ring-[#e5f0e9] focus:shadow-sm"
+              className="h-11 w-full rounded-full border border-[#dfe4dd] bg-white px-11 pr-14 text-sm text-[#17231e] outline-none transition-all duration-300 placeholder:text-[#8a938e] focus:border-[#174c3c] focus:ring-4 focus:ring-[#e5f0e9] focus:shadow-sm"
             />
+            {!searchQuery && (
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 hidden sm:flex items-center pointer-events-none">
+                <kbd className="rounded border border-[#dfe4dd] bg-[#f7f7f2] px-1.5 py-0.5 text-[10px] font-mono font-semibold text-[#8a938e]">
+                  ⌘K
+                </kbd>
+              </div>
+            )}
             {searchQuery && (
               <button
                 type="button"
@@ -125,6 +146,26 @@ export function Navbar() {
         </div>
 
         <nav className="ml-auto flex items-center gap-2">
+          {/* Quick switcher for judges & testers */}
+          <Link
+            href="/merchant"
+            className="relative hidden items-center gap-1.5 rounded-full border border-[#174c3c]/20 bg-[#e5f0e9]/70 px-3 py-1.5 text-xs font-bold text-[#174c3c] shadow-xs transition-all duration-200 hover:bg-[#174c3c] hover:text-white lg:inline-flex"
+            title="Track 01 Merchant Control Plane & AI Growth Engine"
+          >
+            <span>💼 Merchant</span>
+            <span className="rounded-md bg-[#174c3c]/15 px-1 py-0.2 text-[9px] font-extrabold uppercase tracking-wide">
+              Console
+            </span>
+          </Link>
+
+          <Link
+            href="/scenarios"
+            className="relative hidden items-center gap-1.5 rounded-full border border-amber-600/20 bg-amber-50/80 px-2.5 py-1.5 text-xs font-bold text-amber-900 transition-all duration-200 hover:bg-amber-600 hover:text-white xl:inline-flex"
+            title="Adversarial Failure Simulator & Security Suite"
+          >
+            <span>🛡️ Security Lab</span>
+          </Link>
+
           <Link
             href="/orders"
             className="relative hidden items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-[#3d4942] transition-all duration-200 hover:bg-[#e5f0e9] hover:text-[#174c3c] sm:inline-flex"
@@ -204,6 +245,18 @@ export function Navbar() {
               {label}
             </Link>
           ))}
+          <Link
+            href="/merchant"
+            className="rounded-lg bg-[#e5f0e9] px-2.5 py-1 text-xs font-bold text-[#174c3c] transition-colors hover:bg-[#174c3c] hover:text-white"
+          >
+            💼 Merchant Console
+          </Link>
+          <Link
+            href="/scenarios"
+            className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-600 hover:text-white"
+          >
+            🛡️ Security Lab
+          </Link>
         </div>
       </div>
     </header>
