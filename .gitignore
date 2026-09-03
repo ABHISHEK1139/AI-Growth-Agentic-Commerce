@@ -34,8 +34,7 @@ data/raw/*
 !data/raw/README.md
 data/out/*
 !data/out/.gitkeep
-!datasets/
-!datasets/**
+datasets/
 !data/seed/
 !data/seed/**
 
