@@ -81,7 +81,11 @@ interface StoreContextType {
   sortBy: string;
   failureSimulation: "NONE" | "PRICE_CHANGED" | "PAYMENT_UNCERTAIN" | "POLICY_BLOCKED" | "OFFER_EXPIRED";
 
-  addToCart: (product: ProductItem, quantity?: number) => void;
+  isCartDrawerOpen: boolean;
+  openCartDrawer: () => void;
+  closeCartDrawer: () => void;
+
+  addToCart: (product: ProductItem, quantity?: number, openDrawer?: boolean) => void;
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   switchCartItem: (oldProductId: string, newProduct: ProductItem) => void;
@@ -152,6 +156,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     preferredBrands: ["Lenovo", "Dell", "Sony"],
   });
 
+  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const openCartDrawer = () => setIsCartDrawerOpen(true);
+  const closeCartDrawer = () => setIsCartDrawerOpen(false);
+
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
   const [aiDrawerContext, setAiDrawerContext] = useState<StoreContextType["aiDrawerContext"]>({
     pageType: "home",
@@ -208,7 +216,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("agentpay_user_prefs", JSON.stringify(userPreferences));
   }, [userPreferences, hydrated]);
 
-  const addToCart = (product: ProductItem, quantity = 1) => {
+  const addToCart = (product: ProductItem, quantity = 1, openDrawer = true) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -220,6 +228,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       return [...prev, { product, quantity }];
     });
+    if (openDrawer) {
+      setIsCartDrawerOpen(true);
+    }
     showToast({
       message: `Added "${product.title}" to your bag`,
       type: "cart",
@@ -398,6 +409,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         toasts,
         currentIntent,
         userPreferences,
+        isCartDrawerOpen,
+        openCartDrawer,
+        closeCartDrawer,
         isAiDrawerOpen,
         aiDrawerContext,
         highlightedProductId,

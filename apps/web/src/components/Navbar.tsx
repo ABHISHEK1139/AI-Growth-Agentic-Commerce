@@ -26,7 +26,7 @@ const trendingSearches = [
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { cart, wishlist, compareList } = useStore();
+  const { cart, wishlist, compareList, openCartDrawer } = useStore();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -187,8 +187,9 @@ export function Navbar() {
             )}
           </Link>
 
-          <Link
-            href="/cart"
+          <button
+            type="button"
+            onClick={openCartDrawer}
             className="relative inline-flex items-center gap-2 rounded-full bg-[#174c3c] px-3.5 py-2 text-sm font-bold text-white transition-all duration-200 hover:bg-[#103c2f] hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
             aria-label="Shopping bag"
           >
@@ -199,7 +200,7 @@ export function Navbar() {
                 {totalCartCount}
               </span>
             )}
-          </Link>
+          </button>
 
           <button
             onClick={() => setMenuOpen(!menuOpen)}

@@ -73,24 +73,27 @@ export default function ConsumerHomePage() {
   const [prompt, setPrompt] = useState("");
   const [picks, setPicks] = useState<ProductItem[]>([]);
   const [deals, setDeals] = useState<ProductItem[]>([]);
+  const [allItems, setAllItems] = useState<ProductItem[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState("all");
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadLiveCatalogFeatured() {
       try {
-        const result = await runCatalogSearch({ limit: 8 });
+        const result = await runCatalogSearch({ limit: 32 });
         if (!cancelled && result.kind === "ok" && result.outcome.offers.length > 0) {
           const liveItems: ProductItem[] = result.outcome.offers.map((offer) =>
             exploreOfferToProductItem(offer, result.outcome.catalogSource)
           );
 
           if (liveItems.length > 0) {
-            setPicks(liveItems.slice(0, 4));
+            setAllItems(liveItems);
+            setPicks(liveItems.slice(0, 8));
             const liveDeals = liveItems.filter(
               (p) => p.originalPriceMinor > p.priceMinor
             );
-            setDeals(liveDeals.length > 0 ? liveDeals.slice(0, 3) : liveItems.slice(4, 7));
+            setDeals(liveDeals.length > 0 ? liveDeals.slice(0, 4) : liveItems.slice(8, 12));
           }
         }
       } catch (err) {
@@ -317,24 +320,59 @@ export default function ConsumerHomePage() {
       {/* Popular Products */}
       <section>
         <ScrollReveal>
-          <div className="mb-7 flex items-end justify-between">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-[.15em] text-[#174c3c]">Picked with care</p>
               <h2 className="mt-2 text-2xl font-extrabold tracking-tight sm:text-3xl">Popular right now</h2>
-              <p className="mt-2 text-sm text-[#68736d]">Great products, clear prices, no decision fatigue.</p>
+              <p className="mt-1 text-sm text-[#68736d]">Curated electronics, guaranteed 2-day delivery, verified prices.</p>
             </div>
             <Link
               href="/search"
-              className="inline-flex items-center gap-1 text-sm font-bold text-[#174c3c] transition-all duration-200 hover:gap-2"
+              className="inline-flex items-center gap-1 text-sm font-bold text-[#174c3c] transition-all duration-200 hover:gap-2 self-start sm:self-auto"
             >
               View all <ArrowRight className="inline h-4 w-4" />
             </Link>
           </div>
         </ScrollReveal>
+
+        {/* Category quick filter pills */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {[
+            { id: "all", label: "✨ All Products" },
+            { id: "laptop", label: "💻 Laptops" },
+            { id: "smartphone", label: "📱 Smartphones" },
+            { id: "audio", label: "🎧 Audio" },
+            { id: "monitor", label: "🖥️ Monitors" },
+            { id: "accessory", label: "⌨️ Keyboards & Accessories" },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                selectedCategory === cat.id
+                  ? "bg-[#174c3c] text-white shadow-xs"
+                  : "bg-white border border-[#e6e8df] text-[#526058] hover:bg-[#eef4f0] hover:text-[#174c3c]"
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {picks.map((product, index) => (
-            <ScrollReveal key={product.id} delay={index * 100} direction="up">
-              <ProductCard product={product} isBestMatch={index === 0} />
+          {(selectedCategory === "all"
+            ? (allItems.length > 0 ? allItems.slice(0, 8) : picks)
+            : allItems.filter((p) => {
+                const cat = (p.category || "").toLowerCase();
+                const title = (p.title || "").toLowerCase();
+                if (selectedCategory === "accessory") {
+                  return cat.includes("accessor") || cat.includes("keyboard") || title.includes("keyboard") || title.includes("mouse");
+                }
+                return cat.includes(selectedCategory) || title.includes(selectedCategory);
+              }).slice(0, 8)
+          ).map((product, index) => (
+            <ScrollReveal key={product.id} delay={index * 50} direction="up">
+              <ProductCard product={product} isBestMatch={index === 0 && selectedCategory === "all"} />
             </ScrollReveal>
           ))}
         </div>
