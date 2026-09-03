@@ -63,7 +63,7 @@ const categories = [
     detail: "Make room to focus",
     Icon: Monitor,
     image:
-      "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=800&q=80",
+      "https://images.unsplash.com/photo-1586210579191-33b45e38fa2c?auto=format&fit=crop&w=800&q=80",
   },
 ];
 

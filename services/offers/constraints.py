@@ -214,8 +214,11 @@ def offer_matches(
     if offer.available_quantity < constraints.quantity:
         return False
 
-    if constraints.category is not None and candidate.category_id != constraints.category:
-        return False
+    if constraints.category is not None:
+        target_cat = "computer_accessory" if constraints.category in ("accessory", "computer_accessory") else constraints.category
+        cand_cat = "computer_accessory" if candidate.category_id in ("accessory", "computer_accessory") else candidate.category_id
+        if cand_cat != target_cat:
+            return False
     if (
         constraints.max_price_minor is not None
         and offer.unit_price_minor > constraints.max_price_minor
