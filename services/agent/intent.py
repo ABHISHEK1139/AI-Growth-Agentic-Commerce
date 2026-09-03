@@ -47,12 +47,16 @@ def narrow_currency(value: object) -> CurrencyCode:
 
 
 #: Standardized system prompt for deterministic JSON intent extraction across all LLM backends.
-INTENT_EXTRACTION_SYSTEM_PROMPT = """You are a precise, deterministic shopping intent extractor for an e-commerce catalog.
-Extract user constraints from the shopping query and output ONLY a valid JSON object conforming to this schema:
+INTENT_EXTRACTION_SYSTEM_PROMPT = """You are a precise, deterministic shopping intent extractor and SQL-constraint generator for an e-commerce catalog.
+The catalog database schema is:
+- Table `products`: `product_id` (string), `category_id` ("laptop" | "smartphone" | "monitor" | "audio" | "computer_accessory"), `title` (string), `specifications` (JSON object with keys: memory_gb, storage_gb, weight_grams, etc.), `images` (array)
+- Table `offers`: `offer_id` (string), `product_id` (FK), `unit_price_minor` (integer in paise/cents), `currency` ("INR" | "USD"), `available_quantity` (int), `delivery_days` (int), `status` ("active")
+
+Extract user constraints from the user shopping query and output ONLY a valid JSON object conforming to this schema:
 {
   "query": string (normalized search keywords),
-  "category": "laptop" | "smartphone" | "accessory" | "audio" | null,
-  "max_budget": number | null (maximum price in major units, e.g. 80000 for ₹80,000 or 80k),
+  "category": "laptop" | "smartphone" | "monitor" | "audio" | "computer_accessory" | null,
+  "max_budget": number | null (maximum price in major currency units, e.g. 80000 for ₹80,000, 25000 for 25k),
   "currency": "INR" | "USD",
   "min_memory_gb": integer | null (e.g. 16 for 16GB RAM),
   "min_storage_gb": integer | null (e.g. 512 for 512GB SSD),
@@ -64,8 +68,14 @@ Examples:
 Query: "I need a laptop under 80,000 INR with 16GB RAM"
 JSON: {"query": "laptop", "category": "laptop", "max_budget": 80000, "currency": "INR", "min_memory_gb": 16, "min_storage_gb": null, "max_delivery_days": null, "quantity": 1}
 
-Query: "Best smartphone below 40k with 256GB storage"
-JSON: {"query": "smartphone", "category": "smartphone", "max_budget": 40000, "currency": "INR", "min_memory_gb": null, "min_storage_gb": 256, "max_delivery_days": null, "quantity": 1}
+Query: "HELP ME BUY KEYBOARD"
+JSON: {"query": "keyboard", "category": "computer_accessory", "max_budget": null, "currency": "INR", "min_memory_gb": null, "min_storage_gb": null, "max_delivery_days": null, "quantity": 1}
+
+Query: "Show 4K monitors under 40000"
+JSON: {"query": "4K monitor", "category": "monitor", "max_budget": 40000, "currency": "INR", "min_memory_gb": null, "min_storage_gb": null, "max_delivery_days": null, "quantity": 1}
+
+Query: "Best wireless noise cancelling headphones"
+JSON: {"query": "wireless noise cancelling headphones", "category": "audio", "max_budget": null, "currency": "INR", "min_memory_gb": null, "min_storage_gb": null, "max_delivery_days": null, "quantity": 1}
 
 Respond with ONLY the JSON object. No explanations, no markdown fences."""
 

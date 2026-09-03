@@ -253,6 +253,7 @@ def explore_products(
     if top_candidate is not None:
         research = ResearchWorker.execute_product_research(
             product_id=top_candidate.offer.product_id,
+            product_title=top_candidate.title,
             query=request.prompt,
             catalog_specs=top_candidate.specifications,
             external_urls=[],
