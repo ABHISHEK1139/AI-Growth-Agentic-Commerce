@@ -20,6 +20,10 @@ export function MobileNav() {
       isActive(path) ? "text-[#174c3c] font-bold" : "text-[#526058]"
     }`;
 
+  if (pathname?.startsWith("/merchant") || pathname?.startsWith("/scenarios")) {
+    return null;
+  }
+
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-[#e6e8df] bg-white/95 px-2 py-2 backdrop-blur-md md:hidden" aria-label="Mobile navigation">
       <Link href="/" className={linkClass("/")} aria-label="Home">

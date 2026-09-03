@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useStore } from "@/context/StoreContext";
 import type { ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
@@ -33,6 +33,7 @@ interface Message {
 
 export function AIAssistantDrawer() {
   const router = useRouter();
+  const pathname = usePathname();
   const {
     isAiDrawerOpen,
     openAiDrawer,
@@ -439,6 +440,10 @@ export function AIAssistantDrawer() {
       setLoading(false);
     }
   };
+
+  if (pathname?.startsWith("/merchant") || pathname?.startsWith("/scenarios")) {
+    return null;
+  }
 
   if (!isAiDrawerOpen) {
     return (
