@@ -109,10 +109,18 @@ class IntentValidator:
                 category = "laptop"
             elif "phone" in category or "smartphone" in category or "mobile" in category:
                 category = "smartphone"
+            elif "monitor" in category or "display" in category or "screen" in category:
+                category = "monitor"
             elif "audio" in category or "headphone" in category or "earbuds" in category:
                 category = "audio"
-            elif "accessory" in category or "cable" in category or "sleeve" in category:
-                category = "accessory"
+            elif (
+                "accessory" in category
+                or "cable" in category
+                or "sleeve" in category
+                or "keyboard" in category
+                or "mouse" in category
+            ):
+                category = "computer_accessory"
         elif prompt_text:
             p_lower = prompt_text.lower()
             if any(w in p_lower for w in ("laptop", "notebook", "ultrabook", "macbook")):
@@ -120,14 +128,18 @@ class IntentValidator:
             elif any(w in p_lower for w in ("smartphone", "phone", "iphone", "android")):
                 category = "smartphone"
             elif any(
+                w in p_lower for w in ("monitor", "display", "screen", "4k", "uhd")
+            ):
+                category = "monitor"
+            elif any(
                 w in p_lower for w in ("audio", "headphone", "earphone", "earbuds", "speaker")
             ):
                 category = "audio"
             elif any(
                 w in p_lower
-                for w in ("accessory", "charger", "cable", "mouse", "keyboard", "sleeve")
+                for w in ("accessory", "charger", "cable", "mouse", "keyboard", "sleeve", "trackpad", "dock", "ipad")
             ):
-                category = "accessory"
+                category = "computer_accessory"
 
         # 2. Normalize Financial Constraints
         if fin_obj is None:

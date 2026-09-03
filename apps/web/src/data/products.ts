@@ -781,9 +781,9 @@ export const ALL_PRODUCTS: ProductItem[] = [
     stock: 7,
     deliveryDays: 2,
     returnDays: 10,
-    imageUrl: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=1000&q=80",
+    imageUrl: "https://images.unsplash.com/photo-1547082299-de196ea013d6?auto=format&fit=crop&w=1000&q=80",
     gallery: [
-      "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1547082299-de196ea013d6?auto=format&fit=crop&w=1000&q=80",
     ],
     aiBadge: "✦ Best All-In-One Mac/PC Monitor",
     shortSpecs: "4K IPS • 96W USB-C Power • DCI-P3 95% • HDR400 • Height/Pivot Stand",

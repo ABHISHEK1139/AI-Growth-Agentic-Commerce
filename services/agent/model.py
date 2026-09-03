@@ -154,15 +154,32 @@ class MockModelProvider:
         if self.behavior == "error":
             raise DomainError("Model provider error.", code=ErrorCode.SERVICE_UNAVAILABLE)
 
-        # Default mock intent extraction JSON
+        # Category extraction in mock intent
         p_lower = prompt.lower()
+        category = "smartphone"
+        if any(k in p_lower for k in ["laptop", "ultrabook", "notebook", "macbook", "computer"]):
+            category = "laptop"
+        elif any(k in p_lower for k in ["monitor", "display", "screen", "4k", "uhd"]):
+            category = "monitor"
+        elif any(k in p_lower for k in ["audio", "headphone", "earphone", "earbud", "sound", "anc", "music"]):
+            category = "audio"
+        elif any(k in p_lower for k in ["keyboard", "mouse", "trackpad", "accessory", "accessories", "dock", "ipad"]):
+            category = "computer_accessory"
+        elif any(k in p_lower for k in ["phone", "smartphone", "mobile", "pixel", "iphone"]):
+            category = "smartphone"
+
+        # Budget extraction: apply ceiling when budget specified, otherwise allow broad catalog
+        budget_minor = (
+            7000000
+            if ("70000" in prompt or "70,000" in prompt or "under" in p_lower or "budget" in p_lower)
+            else 25000000
+        )
+
         mock_intent = {
             "schema_version": "1.0",
             "query": prompt[:100],
-            "category": "laptop"
-            if ("laptop" in p_lower or "ultrabook" in p_lower or "computer" in p_lower)
-            else "smartphone",
-            "financial": {"budget_minor": 7000000, "currency": "INR"},
+            "category": category,
+            "financial": {"budget_minor": budget_minor, "currency": "INR"},
             "min_memory_gb": 16 if "16" in prompt else (32 if "32" in prompt else None),
             "min_storage_gb": 512 if "512" in prompt else None,
             "max_delivery_days": 3
