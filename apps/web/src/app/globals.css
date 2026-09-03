@@ -1,0 +1,156 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #17231e;
+  --muted: #68736d;
+  --canvas: #f7f7f2;
+  --paper: #ffffff;
+  --line: #e6e8df;
+  --forest: #174c3c;
+  --moss: #e5f0e9;
+  --clay: #e87544;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { color: var(--ink); background: var(--canvas); font-family: "DM Sans", Arial, sans-serif; }
+h1, h2, h3, h4 { font-family: "Manrope", "DM Sans", Arial, sans-serif; }
+button, a, input, select { -webkit-tap-highlight-color: transparent; }
+::selection { background: #b7ddc6; color: #102d23; }
+
+/* --- Keyframe Animations ---
+   Core keyframes (fadeInUp, fadeInDown, fadeIn, slideInRight, slideInLeft,
+   pulseGlow, floatGentle, floatSlow, shimmer, gradientShift, scaleIn,
+   bounceSubtle, marquee) are defined in tailwind.config.js and generated
+   via animate-* utility classes. Only non-Tailwind keyframes remain here.
+*/
+
+@keyframes barFill {
+  0% { width: 0%; }
+  100% { width: var(--bar-width); }
+}
+
+@keyframes typing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes wave {
+  0% { transform: translateX(0) translateZ(0) scaleY(1); }
+  50% { transform: translateX(-25%) translateZ(0) scaleY(0.55); }
+  100% { transform: translateX(-50%) translateZ(0) scaleY(1); }
+}
+
+@keyframes countUp {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  0% { opacity: 0; transform: translateY(100%); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Animation Utilities --- */
+
+@layer utilities {
+  .font-display { font-family: "Manrope", "DM Sans", Arial, sans-serif; }
+  .shadow-soft { box-shadow: 0 12px 35px rgba(35, 53, 43, .08); }
+  .shadow-lift { box-shadow: 0 20px 45px rgba(20, 53, 41, .14); }
+  .shadow-hover { box-shadow: 0 25px 50px rgba(20, 53, 41, .18), 0 8px 16px rgba(20, 53, 41, .08); }
+  .paper-grid { background-image: radial-gradient(#dfe6dd 1px, transparent 1px); background-size: 22px 22px; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Animated gradient background */
+  .animated-gradient {
+    background-size: 200% 200%;
+    animation: gradientShift 8s ease infinite;
+  }
+
+  /* Glassmorphism */
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  /* Shimmer loading effect */
+  .shimmer-bg {
+    background: linear-gradient(90deg, #eef1eb 25%, #f7f7f2 50%, #eef1eb 75%);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Image skeleton loading */
+  .skeleton-pulse {
+    background: linear-gradient(90deg, #eef1eb 0%, #f7f7f2 50%, #eef1eb 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* Staggered animation delays */
+  .stagger-1 { animation-delay: 0.1s; }
+  .stagger-2 { animation-delay: 0.2s; }
+  .stagger-3 { animation-delay: 0.3s; }
+  .stagger-4 { animation-delay: 0.4s; }
+  .stagger-5 { animation-delay: 0.5s; }
+  .stagger-6 { animation-delay: 0.6s; }
+
+  /* Scroll-triggered navbar */
+  .navbar-scrolled {
+    background: rgba(247, 247, 242, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.03);
+  }
+
+  /* Bar fill animation for review bars */
+  .animate-bar-fill {
+    animation: barFill 1s ease-out forwards;
+  }
+
+  /* Typing cursor for search placeholder */
+  .typing-cursor::after {
+    content: "|";
+    animation: typing 1s infinite;
+    margin-left: 1px;
+    color: #68736d;
+  }
+
+  /* Infinite marquee scroll */
+  .animate-marquee {
+    animation: marquee 30s linear infinite;
+  }
+  .animate-marquee:hover {
+    animation-play-state: paused;
+  }
+}
+
+/* Keep the existing secondary routes visually aligned while they transition to
+   the storefront component system. */
+.bg-indigo-600 { background-color: #174c3c !important; }
+.bg-indigo-700, .hover\:bg-indigo-700:hover { background-color: #103c2f !important; }
+.text-indigo-600, .hover\:text-indigo-600:hover { color: #174c3c !important; }
+.text-indigo-700, .text-indigo-800 { color: #174c3c !important; }
+.bg-indigo-50 { background-color: #e5f0e9 !important; }
+.border-indigo-600, .border-indigo-500 { border-color: #174c3c !important; }
+.ring-indigo-600 { --tw-ring-color: #174c3c !important; }
+
+/* --- Accessibility: Reduced Motion --- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

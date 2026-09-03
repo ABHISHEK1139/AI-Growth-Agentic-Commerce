@@ -1,0 +1,163 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentpay"
+version = "0.1.0"
+description = "AgentPay - merchant-side AI commerce gateway for agentic commerce"
+requires-python = ">=3.12"
+readme = "README.md"
+
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "psycopg[binary]==3.2.3",
+    "pgvector==0.3.6",
+    "redis==5.2.1",
+    "httpx==0.28.1",
+    "jsonschema==4.23.0",
+    "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+razorpay = [
+    "razorpay==1.4.2",
+]
+
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+    "import-linter==2.1",
+    "hypothesis==6.152.9",
+    "types-jsonschema==4.23.0.20241208",
+]
+
+# ---------------------------------------------------------------------------
+# Packaging
+# ---------------------------------------------------------------------------
+# Automatic discovery rather than an explicit list: a dozen more service
+# packages are coming, and a hand-maintained list is a build break waiting to
+# happen. apps/web is a Next.js app with no __init__.py, so it is never found.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "packages*", "services*", "pipeline*"]
+exclude = ["apps.web*", "tests*", "infra*", "docs*", "data*"]
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: requires PostgreSQL and Redis to be running",
+    "contract: drives the public agent API as an unprivileged external client",
+    "security: asserts a specific security control",
+    "evaluation: measures agent quality, may be slow",
+]
+filterwarnings = ["error::DeprecationWarning"]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["apps/web", "infra/migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "C4",       # comprehensions
+    "UP",       # pyupgrade
+    "S",        # bandit
+    "T20",      # no print in library code
+    "RET",      # return simplification
+    "SIM",      # simplify
+    "PTH",      # prefer pathlib
+]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B008",  # FastAPI Depends() in defaults is the documented idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use assert, hardcoded test secrets, and print.
+"tests/**" = ["S101", "S105", "S106", "S108", "S311", "T20"]
+# The pipeline is a set of operator-facing CLI scripts; console output is the interface.
+"pipeline/**" = ["T20"]
+# Non-cryptographic hashing (SHA-1 for stable IDs) and seeded PRNG are deliberate.
+"pipeline/build_catalog.py" = ["T20", "S324", "S311"]
+# Sample data uses seeded PRNG for deterministic synthetic fixtures.
+"pipeline/sample_data.py" = ["T20", "S311"]
+# The audit package is an operator CLI and execution harness.
+"audit/**" = ["T20", "S603", "S602", "S101", "S105", "S106"]
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+exclude = ["apps/web", "infra/migrations/versions"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["razorpay.*", "pgvector.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Architecture boundaries (NFR-2)
+# ---------------------------------------------------------------------------
+# These contracts are what turn "the LLM cannot touch money" from a promise
+# into a failing build. Enforced in CI by `lint-imports`.
+[tool.importlinter]
+root_packages = ["apps", "packages", "services", "pipeline"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "The agent layer has no database access"
+type = "forbidden"
+source_modules = ["services.agent"]
+forbidden_modules = ["sqlalchemy", "psycopg"]
+
+[[tool.importlinter.contracts]]
+name = "The payment layer never reaches the model gateway or the agent"
+type = "forbidden"
+source_modules = ["services.payments"]
+forbidden_modules = ["services.agent"]
+
+[[tool.importlinter.contracts]]
+name = "Domain services never import the API or web layers"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["apps.api", "apps.worker"]
+
+[[tool.importlinter.contracts]]
+name = "The pipeline is standalone and never imports domain services"
+type = "forbidden"
+source_modules = ["pipeline"]
+forbidden_modules = ["services", "apps.api"]

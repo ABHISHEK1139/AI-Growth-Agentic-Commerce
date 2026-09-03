@@ -1,0 +1,17 @@
+field_name,present_count,missing_count,percentage_present
+product_id,100,0,100.0
+external_product_id,100,0,100.0
+category_id,100,0,100.0
+main_category,100,0,100.0
+title,100,0,100.0
+store,100,0,100.0
+status,100,0,100.0
+normalized_features,100,0,100.0
+description,100,0,100.0
+specifications,100,0,100.0
+images,100,0,100.0
+average_rating,100,0,100.0
+rating_number,100,0,100.0
+completeness_score,100,0,100.0
+source_price,100,0,100.0
+provenance,100,0,100.0

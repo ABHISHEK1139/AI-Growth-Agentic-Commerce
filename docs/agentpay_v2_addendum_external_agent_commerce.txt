@@ -1,0 +1,569 @@
+AGENTPAY
+Addendum: External Agent Commerce, Capability Discovery, Negotiation, Reservation, and Revenue Layer
+Version 2.0 — Supplement to the Phase-by-Phase Architecture Plan
+
+Prepared: 21 August 2026
+
+======================================================================
+0. PURPOSE OF THIS ADDENDUM
+======================================================================
+
+The base architecture document (v1.0) is sound and does not need to be rewritten. This addendum adds nine concrete, buildable pieces that convert AgentPay from "AI shopping application" into demonstrable "AI commerce infrastructure that independent agents can transact against."
+
+Nothing here replaces the golden path defined in v1.0:
+
+INTENT -> DISCOVERY -> OFFER -> CHECKOUT -> POLICY -> AUTHORIZATION -> PAYMENT -> VERIFICATION -> ORDER -> AUDIT
+
+These additions attach to that path. Build them in this order, after the golden path with 100 products is working end to end with your own frontend:
+
+1. Agent capability discovery endpoint.
+2. External AI buyer simulator (separate process/repo).
+3. Contract test suite driven by the external buyer.
+4. Inventory reservation lifecycle.
+5. Bounded offer negotiation.
+6. Precise protocol language for documentation and README.
+7. One measurable cross-sell revenue feature.
+8. Simplified initial infra decision (already mostly in v1.0, restated here as a hard rule).
+9. Final "up-to-mark" checklist mapped to concrete artifacts.
+
+======================================================================
+1. WHY THE EXTERNAL BUYER MATTERS MORE THAN ANYTHING ELSE
+======================================================================
+
+The single biggest weakness identified is architectural, not technical: if the only client ever shown to the judges is your own React frontend, the demo proves you built an ecommerce site with an AI feature. It does not prove you built merchant infrastructure for agent-to-agent commerce.
+
+The fix is cheap relative to its payoff. You do not need a second AI, a second LLM integration, or a second UI. You need a second, independent, un-privileged HTTP client that:
+
+- Has never seen your frontend code.
+- Has no admin access, no database access, no special headers.
+- Authenticates the same way any third-party AI shopping agent would.
+- Talks to AgentPay purely through the documented /api/v1/agent/* surface.
+- Completes an entire purchase using nothing but the public contract.
+
+If that client can complete a real test-mode Razorpay transaction, you have proven the actual thesis of the project. This is the highest-leverage addition in the whole plan.
+
+======================================================================
+2. AGENT CAPABILITY DISCOVERY
+======================================================================
+
+2.1 Purpose
+
+An AI buyer that has never talked to AgentPay before should be able to ask, in one call, "what can I do here, and how." This is the machine-readable equivalent of a merchant's storefront homepage. It also gives you a natural place to advertise schema version, supported protocols, and authentication method, which makes the "AI-readable merchant" claim concrete rather than rhetorical.
+
+2.2 Endpoint
+
+GET /.well-known/agent-commerce
+GET /api/v1/agent/capabilities
+
+Both should return the same payload; the well-known path is for automatic discovery by generic agents, the versioned path is for buyers that already know they are talking to AgentPay.
+
+2.3 Response contract
+
+{
+  "merchant_id": "merchant_demo",
+  "merchant_name": "Demo Merchant",
+  "schema_version": "1.0",
+  "protocol_notes": "Canonical AgentPay commerce model with ACP-like and AP2-like concepts. Not a certified implementation of any external standard.",
+  "base_url": "https://agentpay.example.com/api/v1",
+  "authentication": {
+    "type": "bearer_token",
+    "token_endpoint": "/api/v1/agent/auth/token",
+    "scopes": ["catalog:read", "checkout:write", "payment:write"]
+  },
+  "capabilities": {
+    "catalog_search": true,
+    "offer_query": true,
+    "offer_negotiation": true,
+    "inventory_check": true,
+    "checkout": true,
+    "authorization": true,
+    "payment": true,
+    "payment_provider": "razorpay",
+    "payment_mode": "test",
+    "webhooks": true
+  },
+  "limits": {
+    "max_search_results": 20,
+    "checkout_expiry_seconds": 900,
+    "authorization_expiry_seconds": 900,
+    "max_transaction_amount_minor": 7000000
+  },
+  "endpoints": {
+    "search": "/agent/search",
+    "offers": "/agent/offers/query",
+    "offer_negotiate": "/agent/offers/{offer_id}/negotiate",
+    "checkout": "/agent/checkout",
+    "authorization": "/agent/authorization",
+    "payment": "/agent/payment",
+    "order": "/agent/order/{order_id}"
+  },
+  "policy_summary": {
+    "auto_approval_limit_minor": 500000,
+    "requires_human_approval_above_limit": true,
+    "allowed_categories": ["electronics"]
+  }
+}
+
+2.4 Design rules
+
+- This document is generated from the live policy and capability configuration, never hand-maintained as static JSON that can drift from reality.
+- Version it. If capabilities change, bump schema_version and keep the previous version available for a deprecation window.
+- Do not expose secrets, internal IDs, or infrastructure details.
+- Cache this response for a short period since it changes rarely.
+
+======================================================================
+3. EXTERNAL AI BUYER SIMULATOR
+======================================================================
+
+3.1 Purpose
+
+A standalone client that plays the role of an independent AI shopping agent. It is intentionally separate from the AgentPay codebase's frontend and ideally from its backend repository, to make the "independence" claim visually and technically obvious during the demo.
+
+3.2 Repository placement
+
+Keep it physically separate:
+
+buyer-agent/
+  buyer_agent/
+    __init__.py
+    client.py
+    capability.py
+    intent.py
+    negotiate.py
+    checkout_flow.py
+    cli.py
+  tests/
+  README.md
+  pyproject.toml
+
+This can live as a sibling folder or, better for the demo narrative, a separate GitHub repository named something like "agentpay-external-buyer-demo," with its own README stating explicitly: "This client has no special access to AgentPay. It only uses the public agent-commerce API documented at /api/v1/agent/capabilities."
+
+3.3 Responsibilities
+
+The buyer agent must independently:
+
+1. Call the capability discovery endpoint.
+2. Obtain an access token through the documented auth flow.
+3. Convert a natural-language or scripted goal into a structured intent using its own small reasoning step (this can call the same GPT-OSS model, or even a simpler rule-based translator for reliability during a live demo).
+4. Call search and offer-query endpoints.
+5. Optionally negotiate an offer within policy bounds.
+6. Create a checkout.
+7. Request authorization and, if required, simulate the human-in-the-loop approval step (in a real external-agent scenario this would be the end user approving inside the agent's own app; for the demo, expose a simple approval prompt in the buyer agent's own CLI or a small UI it owns).
+8. Create a payment.
+9. Poll or listen for payment verification.
+10. Fetch the final order and print/display a receipt.
+
+3.4 Minimal client interface
+
+class AgentPayClient:
+    def get_capabilities(self) -> dict: ...
+    def authenticate(self, api_key: str) -> str: ...
+    def search(self, intent: dict) -> list[dict]: ...
+    def query_offers(self, product_id: str, filters: dict) -> list[dict]: ...
+    def negotiate_offer(self, offer_id: str, proposed_price_minor: int) -> dict: ...
+    def create_checkout(self, offer_id: str, quantity: int, idempotency_key: str) -> dict: ...
+    def request_authorization(self, checkout_id: str) -> dict: ...
+    def create_payment(self, checkout_id: str, authorization_id: str, idempotency_key: str) -> dict: ...
+    def get_payment_status(self, payment_id: str) -> dict: ...
+    def get_order(self, order_id: str) -> dict: ...
+
+3.5 CLI demo flow
+
+A single command should run the whole scenario live:
+
+python -m buyer_agent.cli run --goal "laptop under 70000, 16GB RAM, delivery within 3 days"
+
+Console output should print each step with timestamps and IDs, so during the recorded demo you can show, in a terminal window entirely separate from your web app, an independent process discovering, negotiating, checking out, authorizing, and paying.
+
+3.6 Why this is technically credible, not theater
+
+- It uses the same API surface any real external agent would use; you are not adding a private backdoor.
+- It authenticates like a third party (API key or OAuth-style token), not as a logged-in browser session.
+- It cannot bypass policy, authorization, or payment verification, because those live in the deterministic core, not in the client.
+- If it succeeds, you have empirically demonstrated interoperability, not just claimed it.
+
+======================================================================
+4. CONTRACT TEST SUITE DRIVEN BY THE EXTERNAL BUYER
+======================================================================
+
+4.1 Purpose
+
+Turn the external buyer into your primary evaluation harness, not just a demo prop. This becomes the strongest piece of engineering evidence in the whole project because it proves the public contract is stable, safe, and independent of your own frontend's assumptions.
+
+4.2 Location
+
+tests/contract/
+  test_capability_discovery.py
+  test_full_purchase_flow.py
+  test_negotiation_bounds.py
+  test_authorization_binding.py
+  test_idempotent_payment.py
+  test_price_change_rejected.py
+  test_payment_timeout_recovery.py
+  test_unauthorized_access_blocked.py
+
+4.3 Representative test: full purchase flow
+
+def test_external_buyer_completes_purchase(fake_payment_provider, seeded_catalog):
+    client = AgentPayClient(base_url=TEST_BASE_URL, api_key=EXTERNAL_BUYER_KEY)
+    caps = client.get_capabilities()
+    assert caps["capabilities"]["checkout"] is True
+
+    offers = client.search({"category": "laptop", "max_price_minor": 7000000, "ram_min_gb": 16})
+    assert len(offers) > 0
+
+    chosen = offers[0]
+    checkout = client.create_checkout(chosen["offer_id"], quantity=1, idempotency_key="test-key-001")
+    assert checkout["status"] == "CHECKOUT_CREATED"
+
+    auth = client.request_authorization(checkout["checkout_id"])
+    assert auth["status"] in ("AUTHORIZATION_PENDING", "AUTHORIZED")
+
+    if auth["status"] == "AUTHORIZATION_PENDING":
+        auth = approve_authorization_as_buyer(auth["authorization_id"])
+
+    payment = client.create_payment(checkout["checkout_id"], auth["authorization_id"], idempotency_key="test-key-001-pay")
+    assert payment["status"] in ("PAYMENT_CREATED", "PAYMENT_PENDING")
+
+    final_status = wait_for_payment_verification(client, payment["payment_id"])
+    assert final_status == "PAYMENT_VERIFIED"
+
+    order = client.get_order(payment["order_id"])
+    assert order["status"] == "ORDER_CONFIRMED"
+
+4.4 Representative test: authorization binding cannot be reused
+
+def test_authorization_cannot_pay_different_checkout(seeded_catalog, fake_payment_provider):
+    client = AgentPayClient(base_url=TEST_BASE_URL, api_key=EXTERNAL_BUYER_KEY)
+    checkout_a = create_and_authorize_checkout(client, offer_id="offer_a")
+    checkout_b = create_and_authorize_checkout(client, offer_id="offer_b")
+
+    response = client.create_payment(
+        checkout_id=checkout_b["checkout_id"],
+        authorization_id=checkout_a["authorization_id"],
+        idempotency_key="cross-checkout-attempt",
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "AUTHORIZATION_CHECKOUT_MISMATCH"
+
+4.5 Representative test: idempotent payment retry
+
+def test_duplicate_payment_request_is_idempotent(seeded_catalog, fake_payment_provider):
+    client = AgentPayClient(base_url=TEST_BASE_URL, api_key=EXTERNAL_BUYER_KEY)
+    checkout = create_and_authorize_checkout(client, offer_id="offer_a")
+    key = "idempotent-pay-001"
+
+    first = client.create_payment(checkout["checkout_id"], checkout["authorization_id"], idempotency_key=key)
+    second = client.create_payment(checkout["checkout_id"], checkout["authorization_id"], idempotency_key=key)
+
+    assert first["payment_id"] == second["payment_id"]
+    assert fake_payment_provider.order_count_for(checkout["checkout_id"]) == 1
+
+4.6 Reporting
+
+Run this suite in CI on every pull request touching /api/v1/agent/*. Publish a short contract-compliance summary (pass count, coverage of state transitions, coverage of failure codes) as a markdown artifact in docs/. This becomes a strong slide in the final presentation: "N contract tests, driven by an independent client, covering M of the documented state transitions."
+
+======================================================================
+5. INVENTORY RESERVATION LIFECYCLE
+======================================================================
+
+5.1 States
+
+AVAILABLE
+  -> RESERVED
+  -> PAID
+
+RESERVED
+  -> RELEASED   (on checkout expiry, cancellation, or authorization rejection)
+
+5.2 Fields on the offer/inventory record
+
+- available_quantity.
+- reserved_quantity.
+- version (optimistic concurrency token).
+
+5.3 Reservation on checkout creation
+
+Use an atomic conditional update rather than a read-then-write pattern:
+
+UPDATE inventory
+SET reserved_quantity = reserved_quantity + :qty,
+    version = version + 1
+WHERE offer_id = :offer_id
+  AND (available_quantity - reserved_quantity) >= :qty
+  AND version = :expected_version
+RETURNING reserved_quantity, version;
+
+If zero rows are affected, return INVENTORY_UNAVAILABLE or VERSION_CONFLICT and do not create the checkout.
+
+5.4 Release on expiry
+
+A background worker scans checkouts past expires_at that are still in CHECKOUT_CREATED or POLICY_CHECKED or AUTHORIZATION_PENDING and:
+
+1. Transitions the checkout to CHECKOUT_EXPIRED.
+2. Decrements reserved_quantity by the reserved amount.
+3. Emits INVENTORY_RELEASED and CHECKOUT_EXPIRED audit events.
+
+This worker must be idempotent: releasing an already-released reservation must be a no-op, not a negative-quantity bug. Use a reservation_id per checkout and check its release status before decrementing.
+
+5.5 Commit on payment verification
+
+Only after PAYMENT_VERIFIED does the system move the reserved quantity into a permanently deducted state:
+
+UPDATE inventory
+SET reserved_quantity = reserved_quantity - :qty,
+    available_quantity = available_quantity - :qty
+WHERE offer_id = :offer_id;
+
+5.6 Why this matters for the demo
+
+This turns a normally invisible backend concern into a visible, explainable diagram: two AI buyers competing for the last unit of an item, one getting RESERVED, one getting INVENTORY_UNAVAILABLE, and the first reservation either completing to PAID or expiring back to AVAILABLE. That is a concrete concurrency story judges can follow in thirty seconds.
+
+======================================================================
+6. BOUNDED OFFER NEGOTIATION
+======================================================================
+
+6.1 Purpose
+
+Move beyond "AI compares fixed offers" toward "AI buyer and merchant policy engine negotiate within explicit bounds," which is closer to genuine agent-to-agent commerce.
+
+6.2 Negotiation state machine
+
+OFFER_RETURNED
+  -> OFFER_REQUESTED (buyer proposes a price or terms)
+  -> OFFER_EVALUATED
+      -> OFFER_ACCEPTED
+      -> OFFER_COUNTERED
+      -> OFFER_REJECTED
+
+Negotiation must terminate. Limit to a small fixed number of rounds, for example three, after which the system returns the best remaining valid offer and stops.
+
+6.3 Endpoint
+
+POST /api/v1/agent/offers/{offer_id}/negotiate
+
+Request:
+
+{
+  "proposed_price_minor": 6200000,
+  "justification": "buyer_budget_constraint",
+  "round": 1
+}
+
+Response when rejected:
+
+{
+  "ok": true,
+  "result": "OFFER_COUNTERED",
+  "counter_offer": {
+    "offer_id": "offer_123",
+    "price_minor": 6499900,
+    "reason": "MAX_DISCOUNT_EXCEEDED",
+    "max_discount_percent": 10,
+    "floor_price_minor": 6499900
+  },
+  "round": 1,
+  "max_rounds": 3
+}
+
+6.4 Deterministic negotiation policy
+
+The negotiation decision must be computed by the policy engine, never by the LLM. Example rule set per merchant:
+
+- max_discount_percent: 10.
+- floor_price_minor = list_price_minor * (1 - max_discount_percent / 100).
+- If proposed_price_minor >= floor_price_minor: OFFER_ACCEPTED at proposed price.
+- If proposed_price_minor < floor_price_minor: OFFER_COUNTERED with floor_price_minor.
+- If round > max_rounds: return the best previously offered price and close negotiation.
+
+6.5 Role of the LLM in negotiation
+
+The model may:
+- Decide whether to propose a lower price based on the buyer's stated budget.
+- Decide whether to accept a counter-offer.
+- Explain the negotiation outcome in natural language.
+
+The model may not:
+- Set or override the floor price.
+- Grant a discount beyond merchant configuration.
+- Skip the deterministic evaluation step.
+
+6.6 Example demo narrative
+
+Buyer agent: "Can you do INR 62,000?"
+Policy: floor price is INR 64,999 given a 10% maximum discount off the INR 69,999 (approx) list price band.
+System: "INR 62,000 is not available. The lowest valid offer is INR 64,999."
+Buyer agent: accepts INR 64,999 and proceeds to checkout.
+
+This is a small feature to build (a handful of endpoints and one deterministic function) but it visibly demonstrates agent-to-agent bargaining bounded by merchant-defined policy, which is a distinctive feature almost no other student submission will have.
+
+======================================================================
+7. PRECISE PROTOCOL LANGUAGE
+======================================================================
+
+7.1 Rule
+
+Never write "we implemented ACP" or "we implemented AP2" unless every mandatory element of that specification's current dated release is actually implemented and testable. Given the scope of this project, that will not be the case, and an incorrect claim is a credibility risk in front of judges who may know the specifications well.
+
+7.2 Approved phrasing for README, docs, and pitch
+
+Use sentences such as:
+
+"AgentPay defines its own canonical commerce model (Intent, Offer, Checkout, Authorization, Payment, Order, Event) and provides adapters whose design is inspired by current agent-commerce protocol concepts, including the general shape of the Agentic Commerce Protocol's checkout/order objects and AP2's mandate-based authorization pattern. AgentPay is not a certified or complete implementation of ACP, AP2, or MCP."
+
+"Where AgentPay does implement a real interoperable interface, it is the MCP-style tool-calling surface used by the external buyer agent, documented at /api/v1/agent/capabilities."
+
+7.3 Documentation artifact
+
+Add docs/protocol-scope.md listing, in a table, each external concept referenced (ACP checkout object, ACP order object, AP2 checkout mandate, AP2 payment mandate, MCP tool schema) against a column stating "conceptually inspired" or "structurally implemented" or "not implemented," with one sentence of justification each. This single page pre-empts the most likely tough question from a technically literate judge.
+
+======================================================================
+8. CROSS-SELL REVENUE FEATURE
+======================================================================
+
+8.1 Scope
+
+Exactly one feature, built only after the golden path, external buyer, and negotiation are stable.
+
+8.2 Mechanism
+
+Trigger: a checkout is created for a product in a category with configured "commonly paired" categories, and the checkout does not already include an item from that paired category.
+
+Compatibility rule source: a simple merchant-configured mapping table, not free-form LLM invention.
+
+category_pairings:
+  laptop: [mouse, sleeve, laptop_stand]
+  camera: [memory_card, camera_bag]
+
+8.3 Endpoint
+
+POST /api/v1/agent/checkout/{checkout_id}/recommendations
+
+Response:
+
+{
+  "recommendations": [
+    {
+      "product_id": "mouse_881",
+      "title": "Wireless Mouse",
+      "price_minor": 79900,
+      "reason": "commonly_purchased_with_category:laptop",
+      "in_stock": true
+    }
+  ],
+  "policy": {
+    "max_recommendations": 2,
+    "requires_explicit_add": true
+  }
+}
+
+8.4 Rules
+
+- Never auto-add an item to the checkout; the buyer or buyer agent must explicitly accept.
+- Respect inventory and merchant category rules.
+- Cap the number of recommendations, for example two.
+- Always attach a machine-readable reason code, and have the model translate that reason code into natural language rather than inventing its own justification.
+
+8.5 Measurement
+
+Track and report, from real logged data during your evaluation runs, not fabricated numbers:
+
+- baseline_average_order_value: mean order total for checkouts with no recommendation shown.
+- assisted_average_order_value: mean order total for checkouts where a recommendation was shown.
+- attachment_rate: percentage of shown recommendations that were accepted.
+
+Present these three numbers plainly in the demo and README. Even modest, honestly measured numbers from a synthetic evaluation run (for example, 40 simulated checkouts) are more credible than an impressive but invented percentage.
+
+======================================================================
+9. INITIAL INFRASTRUCTURE — HARD RULE
+======================================================================
+
+Restating and hardening the v1.0 recommendation as a non-negotiable constraint for a solo or small-team student build:
+
+Ship the MVP with exactly:
+- React or Next.js frontend.
+- FastAPI backend (modular monolith).
+- PostgreSQL with pgvector.
+- Redis.
+- One worker process for expiry sweeps, webhook retries, and payment status polling.
+
+Do not add before the golden path, external buyer, and contract tests are complete:
+- Kubernetes.
+- Multiple microservices with independent deployments.
+- Kafka or another message broker.
+- Grafana/Prometheus stack (structured JSON logs plus a simple query script are sufficient for a demo).
+- Multiple LLM providers.
+- A second database engine.
+
+Every hour spent on infrastructure not required by the golden path or the nine additions above is an hour not spent proving the actual thesis of the project.
+
+======================================================================
+10. FINAL "UP-TO-MARK" CHECKLIST
+======================================================================
+
+Map each of the eight target capabilities to a concrete, demoable artifact:
+
+1. AI-readable merchant
+   Artifact: GET /api/v1/agent/capabilities returning live catalog, offer, policy, and inventory capability data.
+
+2. Independent AI buyer
+   Artifact: buyer-agent/ standalone client, run from a separate terminal/repo, authenticating as an external API consumer.
+
+3. Intelligent decision-making
+   Artifact: agent trace showing intent extraction, offer comparison, and a plain-language decision explanation with evidence, for a request such as the INR 70,000 laptop scenario.
+
+4. Deterministic financial core
+   Artifact: unit tests proving the LLM cannot alter price, inventory, policy, authorization amount, or payment amount, plus a code-review note showing the LLM has no write path to these tables.
+
+5. Safe authorization
+   Artifact: contract test test_authorization_cannot_pay_different_checkout passing, plus a UI/CLI screen showing exact merchant, amount, and expiry at approval time.
+
+6. Real Razorpay test transaction
+   Artifact: recorded demo segment showing order creation, payment, signature-verified webhook, and order confirmation in Razorpay test mode.
+
+7. Graceful failure
+   Artifact: recorded demo segment showing PRICE_CHANGED or PAYMENT_UNKNOWN handled without duplicate charge, plus the corresponding contract tests.
+
+8. Revenue feature
+   Artifact: cross-sell recommendation flow plus a short table of baseline versus assisted average order value and attachment rate from a real evaluation run.
+
+When all eight rows have a working, runnable artifact rather than a slide, the project has moved from a 9/10 architecture document to a 9.5-10/10 submission, because every claim in the pitch is backed by something a judge can watch execute live.
+
+======================================================================
+11. REVISED BUILD ORDER (SUPERSEDING SPRINT PLAN SECTION FOR THESE ADDITIONS)
+======================================================================
+
+Insert these after Sprint 6 (reliability) and before Sprint 7 (agent) in the original plan, or run them in parallel with Sprints 7-9 if team capacity allows:
+
+Sprint 6a: capability discovery
+- Build /api/v1/agent/capabilities from live config.
+- Add schema versioning.
+- Contract test: test_capability_discovery.py.
+
+Sprint 6b: inventory reservation
+- Add reserved_quantity and version columns.
+- Implement atomic reservation and release.
+- Add expiry sweep worker job.
+- Contract test: two concurrent checkouts contending for last unit.
+
+Sprint 6c: external buyer simulator
+- Build buyer-agent/ as a separate package.
+- Implement full CLI purchase flow against the fake provider first, then against Razorpay test mode.
+- Record a rehearsal run.
+
+Sprint 6d: contract suite
+- Port the external buyer's flow into tests/contract/.
+- Add authorization-binding and idempotency contract tests.
+- Wire into CI.
+
+Sprint 7a: negotiation
+- Add negotiate endpoint and deterministic floor-price policy.
+- Extend buyer agent to attempt one negotiation round in the demo script.
+
+Sprint 9a: cross-sell
+- Add category pairing config.
+- Add recommendation endpoint.
+- Instrument baseline versus assisted AOV logging.
+- Run a 40-plus checkout synthetic evaluation and record the numbers.
+
+Everything else in the original v1.0 plan (catalog scaling to 20,000, research agent, protocol documentation page, frontend polish) proceeds as previously ordered, after these additions are stable.

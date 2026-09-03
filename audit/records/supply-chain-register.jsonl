@@ -1,0 +1,9 @@
+{"package": "fastapi", "ecosystem": "pypi", "version": "0.115.0", "license": "MIT", "repository": "https://github.com/fastapi/fastapi", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "pydantic", "ecosystem": "pypi", "version": "2.9.2", "license": "MIT", "repository": "https://github.com/pydantic/pydantic", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "sqlalchemy", "ecosystem": "pypi", "version": "2.0.36", "license": "MIT", "repository": "https://github.com/sqlalchemy/sqlalchemy", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "psycopg", "ecosystem": "pypi", "version": "3.3.4", "license": "LGPL-3.0", "repository": "https://github.com/psycopg/psycopg", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "httpx", "ecosystem": "pypi", "version": "0.27.2", "license": "BSD-3-Clause", "repository": "https://github.com/encode/httpx", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "next", "ecosystem": "npm", "version": "14.2.35", "license": "MIT", "repository": "https://github.com/vercel/next.js", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "react", "ecosystem": "npm", "version": "18.3.1", "license": "MIT", "repository": "https://github.com/facebook/react", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "tailwindcss", "ecosystem": "npm", "version": "3.4.17", "license": "MIT", "repository": "https://github.com/tailwindlabs/tailwindcss", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}
+{"package": "lucide-react", "ecosystem": "npm", "version": "1.16.0", "license": "ISC", "repository": "https://github.com/lucide-icons/lucide", "decision": "accept", "admitted_at": "2026-08-22T04:50:00Z"}

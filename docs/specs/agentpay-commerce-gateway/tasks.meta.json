@@ -1,0 +1,621 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "2. Fix the container build and prove the stack starts clean": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309363769
+      },
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309375457
+      },
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787310683433
+      }
+    ],
+    "3. Cross-cutting middleware": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309363841
+      },
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787310696470
+      },
+      {
+        "executionId": "2f4b41da-058b-4950-b8d1-497d02597729",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787315757427
+      }
+    ],
+    "4. Authentication, RBAC, and tenant isolation": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309363904
+      },
+      {
+        "executionId": "2f4b41da-058b-4950-b8d1-497d02597729",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787315790477
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472182
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318487792
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787319044793
+      }
+    ],
+    "5. Money and schema packages": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309363952
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472257
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787319066797
+      }
+    ],
+    "6. Pipeline stage 1: candidate extraction": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364006
+      },
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787310722220
+      },
+      {
+        "executionId": "2f4b41da-058b-4950-b8d1-497d02597729",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787313056512
+      }
+    ],
+    "7. Pipeline stages 2 and 3: selection and image manifest": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364057
+      },
+      {
+        "executionId": "2f4b41da-058b-4950-b8d1-497d02597729",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787315812648
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472320
+      }
+    ],
+    "8. Pipeline stages 4, 5, and 6: offers, reviews, report": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364149
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472372
+      }
+    ],
+    "9. PostgreSQL schema and migrations": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364202
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472420
+      }
+    ],
+    "10. State transition engine": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364263
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472479
+      }
+    ],
+    "11. Audit ledger": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364338
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472526
+      }
+    ],
+    "12. Catalog import to PostgreSQL with atomic publish": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364395
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472581
+      }
+    ],
+    "13. Catalog and offer read APIs": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364474
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472639
+      }
+    ],
+    "14. Inventory reservation": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364527
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472711
+      }
+    ],
+    "15. Checkout with price integrity": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364586
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472759
+      }
+    ],
+    "16. Deterministic policy engine": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364634
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472810
+      }
+    ],
+    "17. Authorization binding": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364682
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472860
+      }
+    ],
+    "18. Payment provider interface and fake provider": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364752
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472918
+      }
+    ],
+    "19. Payment creation endpoint": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364810
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318472981
+      }
+    ],
+    "20. Idempotency layer": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364868
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473036
+      }
+    ],
+    "21. Razorpay adapter": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364940
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473091
+      }
+    ],
+    "22. Webhook processing": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309364993
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473148
+      }
+    ],
+    "23. Failure detection and recovery worker": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365049
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473218
+      }
+    ],
+    "24. Capability discovery": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365106
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473270
+      }
+    ],
+    "25. Public agent surface": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365168
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473330
+      }
+    ],
+    "26. External buyer agent, separate repository": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365221
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473391
+      }
+    ],
+    "27. Contract test suite in CI": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365279
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473446
+      }
+    ],
+    "28. Model gateway": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365336
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473496
+      }
+    ],
+    "29. Intent extraction and prompt guard": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365386
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473550
+      }
+    ],
+    "30. Tool loop": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365483
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473601
+      }
+    ],
+    "31. Frontend foundation": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365535
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473671
+      }
+    ],
+    "32. Buyer intent capture and AI activity": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365588
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473724
+      }
+    ],
+    "33. Offer results, filters, and comparison": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365638
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473777
+      }
+    ],
+    "34. Product detail with dynamic emphasis": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365699
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473836
+      }
+    ],
+    "35. Authorization screen": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365764
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473892
+      }
+    ],
+    "36. Payment progress and receipt": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365822
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318473962
+      }
+    ],
+    "37. Transaction timeline and failure screens": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365874
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474021
+      }
+    ],
+    "38. Merchant console and agent activity inspection": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365919
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474098
+      }
+    ],
+    "39. Merchant catalog operations": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309365964
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474151
+      }
+    ],
+    "40. Merchant AI policy control": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366015
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474203
+      }
+    ],
+    "41. Audit explorer": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366076
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474253
+      }
+    ],
+    "42. Interface quality and accessibility pass": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366129
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474314
+      }
+    ],
+    "43. Security test suite": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366192
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474372
+      }
+    ],
+    "44. Real-service integration tests": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366249
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474424
+      }
+    ],
+    "45. Documentation and demo": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366298
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474482
+      }
+    ],
+    "46. [POST] Semantic retrieval": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366345
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474538
+      }
+    ],
+    "47. [POST] Bounded negotiation and research agent": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366395
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474601
+      }
+    ],
+    "48. [POST] Cross-sell with measured effect": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366446
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474663
+      }
+    ],
+    "49. [POST] Scale to twenty thousand products and agent evaluation": [
+      {
+        "executionId": "3bc3e7e3-e658-490f-90f2-556d9c572afa",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787309366503
+      },
+      {
+        "executionId": "4cba1ffc-6401-4538-a0fc-c6c43bc784ec",
+        "chatSessionId": "sess_83f60fa9-7daa-4b3e-b06c-fa6d88a4fe4e",
+        "timestamp": 1787318474721
+      }
+    ]
+  }
+}
