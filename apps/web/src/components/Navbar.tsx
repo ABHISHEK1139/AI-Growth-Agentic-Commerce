@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Heart, Menu, Search, ShoppingBag, Scale, X, TrendingUp, Package, Sparkles } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useStore } from "@/context/StoreContext";
@@ -25,7 +25,9 @@ const trendingSearches = [
 
 export function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const { cart, wishlist, compareList } = useStore();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -77,6 +79,10 @@ export function Navbar() {
     setSearchFocused(false);
     router.push(`/search?q=${encodeURIComponent(query)}`);
   };
+
+  if (pathname?.startsWith("/merchant") || pathname?.startsWith("/scenarios")) {
+    return null;
+  }
 
   return (
     <header
@@ -146,26 +152,6 @@ export function Navbar() {
         </div>
 
         <nav className="ml-auto flex items-center gap-2">
-          {/* Quick switcher for judges & testers */}
-          <Link
-            href="/merchant"
-            className="relative hidden items-center gap-1.5 rounded-full border border-[#174c3c]/20 bg-[#e5f0e9]/70 px-3 py-1.5 text-xs font-bold text-[#174c3c] shadow-xs transition-all duration-200 hover:bg-[#174c3c] hover:text-white lg:inline-flex"
-            title="Track 01 Merchant Control Plane & AI Growth Engine"
-          >
-            <span>💼 Merchant</span>
-            <span className="rounded-md bg-[#174c3c]/15 px-1 py-0.2 text-[9px] font-extrabold uppercase tracking-wide">
-              Console
-            </span>
-          </Link>
-
-          <Link
-            href="/scenarios"
-            className="relative hidden items-center gap-1.5 rounded-full border border-amber-600/20 bg-amber-50/80 px-2.5 py-1.5 text-xs font-bold text-amber-900 transition-all duration-200 hover:bg-amber-600 hover:text-white xl:inline-flex"
-            title="Adversarial Failure Simulator & Security Suite"
-          >
-            <span>🛡️ Security Lab</span>
-          </Link>
-
           <Link
             href="/orders"
             className="relative hidden items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-[#3d4942] transition-all duration-200 hover:bg-[#e5f0e9] hover:text-[#174c3c] sm:inline-flex"
@@ -245,18 +231,6 @@ export function Navbar() {
               {label}
             </Link>
           ))}
-          <Link
-            href="/merchant"
-            className="rounded-lg bg-[#e5f0e9] px-2.5 py-1 text-xs font-bold text-[#174c3c] transition-colors hover:bg-[#174c3c] hover:text-white"
-          >
-            💼 Merchant Console
-          </Link>
-          <Link
-            href="/scenarios"
-            className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 transition-colors hover:bg-amber-600 hover:text-white"
-          >
-            🛡️ Security Lab
-          </Link>
         </div>
       </div>
     </header>
