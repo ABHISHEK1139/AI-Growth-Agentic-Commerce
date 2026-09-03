@@ -1,0 +1,271 @@
+/**
+ * Presentation helpers for catalog records.
+ *
+ * Nothing here computes a monetary value. Formatting of money is
+ * `formatMinorToMajor` from `@/lib/money` and nowhere else; this module only
+ * labels, normalises text, and translates a route slug into the category
+ * identifier the catalog actually stores.
+ */
+
+import type {
+  CatalogProduct,
+  CatalogSourceName,
+  ExploreOffer,
+  PricingSource,
+} from "./types";
+
+// ---------------------------------------------------------------------------
+// Provenance labels
+// ---------------------------------------------------------------------------
+
+/**
+ * How a price came to exist. Shown wherever a price is shown.
+ *
+ * `OfferV1.pricing_source` has exactly two values, and neither of them is
+ * "observed on another site". Saying so where the buyer can read it is the point:
+ * a figure generated inside a band is not a market price and must not be mistaken
+ * for one.
+ */
+export function pricingSourceLabel(source: PricingSource | null | undefined): string {
+  switch (source) {
+    case "merchant_configured":
+      return "Merchant-configured price";
+    case "synthetic_band_random":
+      return "Generated demo price";
+    default:
+      return "Price provenance not reported";
+  }
+}
+
+export function pricingSourceDetail(source: PricingSource | null | undefined): string {
+  switch (source) {
+    case "merchant_configured":
+      return "Set by the merchant in their own catalog record. Not scraped from any marketplace.";
+    case "synthetic_band_random":
+      return "Generated inside a configured price band for demonstration. Not a market price and not scraped from any marketplace.";
+    default:
+      return "This record did not state how its price was set.";
+  }
+}
+
+/** Which catalog answered (`apps/api/catalog_source.py`). */
+export function catalogSourceLabel(source: CatalogSourceName | null | undefined): string {
+  switch (source) {
+    case "postgresql":
+      return "Published catalog";
+    case "seed_fixture":
+      return "Seed import artifacts";
+    default:
+      return "Catalog source not reported";
+  }
+}
+
+export function catalogSourceDetail(source: CatalogSourceName | null | undefined): string {
+  switch (source) {
+    case "postgresql":
+      return "Answered by the merchant's published catalog in PostgreSQL.";
+    case "seed_fixture":
+      return "The published catalog was unreachable, so this answer came from the seed import artifacts. The filter semantics are identical; the record set is smaller.";
+    default:
+      return "This response did not name the catalog that answered it.";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Category slugs
+// ---------------------------------------------------------------------------
+
+/**
+ * Route slug to the `category_id` the catalog stores.
+ *
+ * The two vocabularies genuinely differ: the routes were written as plurals
+ * (`/category/laptops`) and the catalog stores the singular subcategory the
+ * importer wrote (`laptop`, `smartphone`, `monitor`, `audio`,
+ * `computer_accessory` -- see `data/seed/catalog/products.jsonl` and
+ * `services/offers/seed.py`). This map is the translation and nothing more; it
+ * invents no category. A slug that is absent from it has no catalog category, and
+ * the category screen says that rather than searching for a value that cannot
+ * match.
+ */
+export const CATEGORY_SLUG_TO_ID: Record<string, string> = {
+  laptops: "laptop",
+  laptop: "laptop",
+  phones: "smartphone",
+  smartphones: "smartphone",
+  smartphone: "smartphone",
+  monitors: "monitor",
+  monitor: "monitor",
+  audio: "audio",
+  headphones: "audio",
+  accessories: "computer_accessory",
+  keyboards: "computer_accessory",
+  computer_accessory: "computer_accessory",
+};
+
+/** Display wording for a route slug. Falls back to the slug itself. */
+export const CATEGORY_SLUG_TITLE: Record<string, string> = {
+  laptops: "Laptops",
+  phones: "Phones",
+  monitors: "Monitors",
+  audio: "Headphones & audio",
+  keyboards: "Keyboards & peripherals",
+  accessories: "Computer accessories",
+};
+
+export function categoryIdForSlug(slug: string): string | null {
+  return CATEGORY_SLUG_TO_ID[slug.toLowerCase()] ?? null;
+}
+
+export function categoryTitleForSlug(slug: string): string {
+  return CATEGORY_SLUG_TITLE[slug.toLowerCase()] ?? slug;
+}
+
+// ---------------------------------------------------------------------------
+// Specifications
+// ---------------------------------------------------------------------------
+
+/** A specification row ready to render: a label and an already-formatted value. */
+export interface SpecRow {
+  key: string;
+  label: string;
+  value: string;
+}
+
+const SPEC_LABELS: Record<string, string> = {
+  memory_gb: "Memory",
+  storage_gb: "Storage",
+  weight_grams: "Weight",
+  length_mm: "Length",
+  width_mm: "Width",
+  height_mm: "Height",
+};
+
+const SPEC_UNITS: Record<string, string> = {
+  memory_gb: "GB",
+  storage_gb: "GB",
+  weight_grams: "g",
+  length_mm: "mm",
+  width_mm: "mm",
+  height_mm: "mm",
+};
+
+function titleCase(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+/**
+ * Turn a raw specifications object into rows.
+ *
+ * A key the catalog does not hold is dropped rather than rendered as "N/A" or
+ * zero: `services/offers/seed.py` is explicit that an absent specification stays
+ * null because a zero would claim a fact. The unit comes from the key's own
+ * suffix, so no unit is invented for a key that does not name one.
+ */
+export function specRows(specs: Record<string, unknown> | null | undefined): SpecRow[] {
+  if (!specs) return [];
+  const rows: SpecRow[] = [];
+  Object.keys(specs).forEach((key) => {
+    const raw = specs[key];
+    if (raw === null || raw === undefined || raw === "") return;
+    let value: string;
+    if (typeof raw === "number") {
+      const unit = SPEC_UNITS[key];
+      value = unit ? `${new Intl.NumberFormat("en-IN").format(raw)} ${unit}` : String(raw);
+    } else if (typeof raw === "boolean") {
+      value = raw ? "Yes" : "No";
+    } else if (typeof raw === "string") {
+      value = raw;
+    } else if (Array.isArray(raw)) {
+      value = raw.map((entry) => String(entry)).join(", ");
+    } else {
+      return; // a nested object has no agreed rendering; omitted rather than guessed
+    }
+    rows.push({ key, label: SPEC_LABELS[key] ?? titleCase(key), value });
+  });
+  return rows;
+}
+
+/**
+ * A one-line specification summary for a card, built only from the keys present.
+ * Returns an empty string when the record holds none, which the card labels.
+ */
+export function specSummary(specs: Record<string, unknown> | null | undefined): string {
+  const rows = specRows(specs).filter((row) => row.key in SPEC_LABELS);
+  return rows.map((row) => `${row.label} ${row.value}`).join(" \u00b7 ");
+}
+
+// ---------------------------------------------------------------------------
+// Text normalisation
+// ---------------------------------------------------------------------------
+
+/**
+ * The product description as paragraphs.
+ *
+ * The column holds whatever the importer wrote: the seed artifacts write a list
+ * of strings, another writer may hold one string. Both are accepted; anything
+ * else yields no paragraphs and the screen says the record carries no
+ * description.
+ */
+export function descriptionParagraphs(description: unknown): string[] {
+  if (typeof description === "string") {
+    const trimmed = description.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (Array.isArray(description)) {
+    return description
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  return [];
+}
+
+/** Usable image URLs from a product record, in the order the catalog gave them. */
+export function productImageUrls(product: CatalogProduct | null | undefined): string[] {
+  if (!product || !Array.isArray(product.images)) return [];
+  const urls: string[] = [];
+  product.images.forEach((image) => {
+    const url = image?.source_url;
+    if (typeof url === "string" && url.trim()) urls.push(url.trim());
+  });
+  return urls;
+}
+
+/** Whether an offer expiry has already passed, judged against a supplied clock. */
+export function isExpired(expiresAt: string | null | undefined, nowMs: number): boolean {
+  if (!expiresAt) return false;
+  const parsed = Date.parse(expiresAt);
+  return Number.isNaN(parsed) ? false : parsed <= nowMs;
+}
+
+/** A date-time as plain readable text, or null when it cannot be parsed. */
+export function readableInstant(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Stock wording that never overstates: the figure is the offer's own. */
+export function stockLabel(available: number): string {
+  if (available <= 0) return "Out of stock";
+  if (available === 1) return "1 unit left";
+  return `${available} in stock`;
+}
+
+/** A short, honest label for an explore offer with no image. */
+export const MISSING_IMAGE_NOTE = "No catalog image";
+
+export function offerImageUrl(offer: ExploreOffer | null | undefined): string | null {
+  const url = offer?.image_url;
+  return typeof url === "string" && url.trim() ? url.trim() : null;
+}

@@ -1,0 +1,113 @@
+# ---------------------------------------------------------------------------
+# AgentPay local development stack
+# ---------------------------------------------------------------------------
+# Exactly five services, per the addendum's hard infrastructure rule: api,
+# worker, web, postgres, redis. Nothing else is added until the golden path,
+# the external buyer, and the contract tests are complete.
+# ---------------------------------------------------------------------------
+
+name: agentpay
+
+services:
+  postgres:
+    # pgvector ships on top of the official postgres image; we need it for the
+    # semantic retrieval phase and enable the extension in the first migration.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: agentpay
+      POSTGRES_PASSWORD: agentpay
+      POSTGRES_DB: agentpay
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentpay -d agentpay"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Override the host-side URLs with in-network service names.
+      DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mounted for hot reload in development.
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./services:/app/services
+      - ./pipeline:/app/pipeline
+      - ./infra:/app/infra
+      # Raw datasets are mounted read-only. They are immutable inputs.
+      - ${AGENTPAY_RAW_DIR:-../datasets}:/app/data/raw:ro
+      - ./data/out:/app/data/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/health').status_code==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./services:/app/services
+      - ${AGENTPAY_RAW_DIR:-../datasets}:/app/data/raw:ro
+      - ./data/out:/app/data/out
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

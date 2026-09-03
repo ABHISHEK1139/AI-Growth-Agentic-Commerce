@@ -1,0 +1,232 @@
+AGENTPAY
+Dataset Acquisition and Catalog Pipeline Plan — Version 2.0
+Supersedes: agentpay_dataset_pipeline_plan.txt (v1.0)
+Reflects: the actual implemented build_catalog.py pipeline
+
+Prepared: 21 August 2026
+
+======================================================================
+0. WHAT CHANGED FROM V1.0
+======================================================================
+
+Version 1.0 described the pipeline conceptually: stream, filter, score, select, generate offers, link reviews. That design is now implemented as a single runnable script, build_catalog.py, organized into six independent, resumable stages. This document updates the plan to match the real, working structure — file names, table schemas, function names, and command-line stages — so the plan and the code no longer drift apart.
+
+Nothing in the underlying architecture changed. The separation between dataset-provided product identity and AgentPay-generated commerce facts (price, inventory, delivery, returns) is unchanged from v1.0 and from the base architecture document. This version simply replaces prose pseudocode with the actual implementation contract.
+
+======================================================================
+1. SOURCE FILES (CONFIRMED, .gz, NEVER MANUALLY UNZIPPED)
+======================================================================
+
+Both metadata and review files are consumed directly in compressed form via Python's gzip module opened in text mode, one line at a time. The raw .gz files are the immutable source of truth and are never extracted to disk and never modified.
+
+Expected raw layout (RAW_DIR in build_catalog.py):
+
+meta_Electronics.jsonl.gz                    Electronics.jsonl.gz
+meta_Cell_Phones_and_Accessories.jsonl.gz     Cell_Phones_and_Accessories.jsonl.gz
+meta_Home_and_Kitchen.jsonl.gz                Home_and_Kitchen.jsonl.gz
+meta_Appliances.jsonl.gz                      Appliances.jsonl.gz
+
+Each meta_*.jsonl.gz line is one product record (title, features, description, price, images, videos, store, categories, details, parent_asin). Each plain <Category>.jsonl.gz line is one review record (rating, title, text, asin, parent_asin, timestamp, helpful_vote, verified_purchase). The join key across both file types is parent_asin, confirmed as the correct canonical identifier in the official documentation.
+
+======================================================================
+2. IMPLEMENTED PIPELINE STRUCTURE
+======================================================================
+
+The pipeline is one file, build_catalog.py, with six stages runnable independently or via "all". Each stage reads only what it needs and writes durable intermediate output, so the process can be stopped and resumed at any stage boundary without reprocessing earlier work.
+
+DOWNLOADED .jsonl.gz FILES (raw, untouched)
+        |
+        v
+STAGE 1: products   -> streams meta_*.jsonl.gz, filters, scores, classifies
+        |                writes to candidates.sqlite (resumable)
+        v
+STAGE 2: select      -> reads candidates.sqlite, applies per-subcategory quota
+        |                writes catalog/products.jsonl + raw_metadata/<id>.json
+        v
+STAGE 3: images      -> reads products.jsonl, resolves best image URL per slot
+        |                writes catalog/images_manifest.jsonl (URLs only, no download yet)
+        v
+STAGE 4: offers      -> reads products.jsonl, generates seeded synthetic INR offers
+        |                writes catalog/offers.jsonl
+        v
+STAGE 5: reviews     -> streams <Category>.jsonl.gz, keeps only parent_asins
+        |                already present in products.jsonl, writes reviews.sqlite
+        v
+STAGE 6: report      -> reads products.jsonl, offers.jsonl, reviews.sqlite
+                         writes catalog/quality_report.json with real computed counts
+
+Command reference:
+
+python build_catalog.py products
+python build_catalog.py select
+python build_catalog.py images
+python build_catalog.py offers
+python build_catalog.py reviews
+python build_catalog.py report
+python build_catalog.py all
+
+======================================================================
+3. STAGE 1 — CANDIDATE EXTRACTION (products)
+======================================================================
+
+3.1 What it reads
+
+All four meta_*.jsonl.gz files, one line at a time, via iter_jsonl_gz(), which yields a parsed dict per line and silently skips malformed JSON lines rather than aborting the run.
+
+3.2 Normalization performed per record
+
+- normalize_images(): handles both the native JSONL shape (list of {thumb, large, hi_res, variant} dicts) and the Hugging Face columnar shape (parallel lists under hi_res/large/thumb/variant keys), producing one common internal list regardless of source loader.
+- normalize_details(): handles details arriving as a real dict or as a JSON-encoded string; falls back to an empty dict on parse failure rather than crashing the run.
+- normalize_text_list(): normalizes features and description, which may arrive as a list, a single string, or be absent.
+- classify_subcategory(): keyword-rule classifier run against title + features, assigning one AgentPay subcategory label (laptop, smartphone, monitor, audio, camera, computer_accessory, kitchen_appliance, home_electronics, appliance, or uncategorized_review as fallback).
+- completeness_score(): a 0-100 point transparent score rewarding title quality, presence of features, presence of description, presence of a usable image, detail richness, rating volume, and rating quality. This is the same scoring rubric defined in v1.0 Section 3.3, now implemented exactly as specified.
+
+3.3 Hard-reject rules (implemented, record never enters candidates.sqlite)
+
+- Missing parent_asin.
+- Missing, too-short (under 8 characters), or too-long (over 300 characters) title.
+- No image with a usable URL in any of hi_res, large, or thumb.
+- parent_asin already seen earlier in this run (in-memory set, cross-file dedup).
+
+3.4 Output
+
+candidates.sqlite, table candidates, one row per surviving record, indexed on (subcategory, score DESC) for fast top-N selection in Stage 2. Each row retains the full original raw JSON record (raw_json column) so nothing from the source is discarded, matching the "preserve original metadata alongside normalized fields" principle from the base architecture document.
+
+3.5 Memory behavior
+
+Records are written to SQLite in batches of 2,000 and never accumulated in a Python list beyond one batch. One category file is fully streamed and flushed before starting the next. This is the concrete implementation of the streaming-not-bulk-loading rule from v1.0 Section 2.
+
+======================================================================
+4. STAGE 2 — QUOTA-BASED SELECTION (select)
+======================================================================
+
+4.1 Quota table (implemented, adjustable)
+
+laptop                4,000
+smartphone            2,500
+monitor               2,000
+audio                 2,000
+computer_accessory    2,500
+camera                1,500
+home_electronics      2,000
+kitchen_appliance     1,000
+appliance             1,000
+uncategorized_review    500
+-----------------------------
+Total                20,000
+
+This differs slightly from the v1.0 planning table by explicitly including an uncategorized_review bucket with a small quota, rather than silently dropping records the keyword classifier could not confidently place. This keeps the catalog honest about classifier coverage and gives the merchant-review workflow real records to act on.
+
+4.2 Selection rule
+
+For each subcategory, SELECT ... ORDER BY score DESC, rating_number DESC LIMIT quota against candidates.sqlite. This is the exact ranking rule specified in v1.0 Section 5.3, now expressed as a single SQL query per subcategory rather than an abstract description.
+
+4.3 Output
+
+catalog/products.jsonl — one normalized AgentPay Product JSON object per line, including product_id (deterministic, derived from parent_asin via SHA-1), external_product_id (the original parent_asin), category_id (the assigned subcategory), specifications, normalized_features, images, rating fields, and source_price_usd carried through only as reference metadata with an explicit note that it is not authoritative.
+
+catalog/raw_metadata/<product_id>.json — the complete original source record for every selected product, preserved verbatim for traceability and later debugging.
+
+======================================================================
+5. STAGE 3 — IMAGE MANIFEST (images)
+======================================================================
+
+5.1 Behavior
+
+Reads products.jsonl only (not the raw source files again), applies best_image_url() per image entry using the hi_res -> large -> thumb fallback order, deduplicates URLs within a product, and writes one manifest line per unique image with a proposed storage_key of the form <product_id>/<variant>.jpg.
+
+5.2 What this stage deliberately does not do
+
+It does not download any image. This matches v1.0 Section 6.5's guidance to lock the final product selection before spending any bandwidth or disk space. A separate downloader script (not yet part of build_catalog.py) should consume images_manifest.jsonl asynchronously, with resumability based on checking whether a storage_key already exists on disk before re-downloading.
+
+======================================================================
+6. STAGE 4 — SYNTHETIC OFFER GENERATION (offers)
+======================================================================
+
+6.1 Determinism
+
+seeded_price_paise() and seeded_choice() both derive their random seed from a SHA-256 hash of the parent_asin (plus a salt for choice fields), so re-running this stage always produces the same price, delivery window, return policy, and inventory count for a given product. This makes the pipeline fully reproducible without needing to persist random state separately.
+
+6.2 Price bands
+
+PRICE_BANDS_INR defines a (low, high) paise range per subcategory (for example, laptop: INR 25,000 to 150,000). The generated price is a seeded-random draw within that band, not a currency-converted version of the dataset's USD price. This is the concrete implementation of the "synthetic_band_random" pricing source defined in v1.0 Section 7.3.
+
+6.3 Output fields per offer
+
+offer_id, product_id, merchant_id (fixed to merchant_demo for the MVP), price_minor_units, currency ("INR"), inventory_quantity, reserved_quantity (initialized to 0, ready for the reservation lifecycle in the v2.0 addendum), delivery_min_days/delivery_max_days, return_policy_days, offer_version (starts at 1), pricing_source, and status.
+
+Every offer explicitly carries pricing_source: "synthetic_band_random" so the catalog, the dashboard, and the demo narration can honestly state that prices are generated, not scraped current market prices.
+
+======================================================================
+7. STAGE 5 — REVIEW LINKING (reviews)
+======================================================================
+
+7.1 Scope reduction
+
+Before streaming any review file, the stage first loads the set of parent_asins already present in the final products.jsonl. Only reviews whose parent_asin is in that set are kept; everything else is streamed past and discarded. This means a 570M-review source dataset never results in more than a few hundred thousand rows in reviews.sqlite, sized to the actual 20,000-product catalog rather than the full source scale.
+
+7.2 Deduplication
+
+Each review gets a deterministic review_id from a SHA-1 hash of parent_asin + asin + timestamp + title, preventing duplicate rows if the stage is re-run or if a review appears in more than one pass.
+
+7.3 Output
+
+reviews.sqlite, table reviews, indexed on parent_asin for fast lookup by product when the AI buyer or research agent needs review-based evidence (the "which laptop has better battery experience" scenario from v1.0 Section 9).
+
+======================================================================
+8. STAGE 6 — QUALITY REPORT (report)
+======================================================================
+
+Reads the three real outputs (products.jsonl, offers.jsonl, reviews.sqlite) and computes, rather than estimates:
+
+- total_products.
+- by_subcategory counts.
+- by_status counts (valid vs. needs_review).
+- missing_description_count.
+- offers_generated.
+- reviews_linked.
+- target (20,000) for comparison.
+
+Written to catalog/quality_report.json. This is the exact source of the numbers that should appear on the merchant onboarding "catalog health" dashboard screen described in the base architecture document (Phase 13) — the numbers shown to judges must come from this file, never be typed in by hand.
+
+======================================================================
+9. RECOMMENDED VALIDATION RUN BEFORE THE FULL 20,000
+======================================================================
+
+Before running all four categories at full scale, set MAX_LINES_DEBUG in build_catalog.py to a bounded value (for example 200,000) and run the full six-stage sequence once. This produces a small, fast, inspectable end-to-end catalog that surfaces schema or classifier bugs cheaply. Inspect quality_report.json and spot-check 10-15 products.jsonl entries against their raw_metadata/<product_id>.json counterparts before removing the debug cap and running the full pipeline.
+
+This directly implements the 100 -> 1,000 -> 20,000 staged build order from v1.0 Section 10, now expressed as one config flag rather than three separate manual runs.
+
+======================================================================
+10. WHAT STILL NEEDS TO BE BUILT (NOT YET IN build_catalog.py)
+======================================================================
+
+The following remain as documented plans, not yet implemented in code, and should be built in this order after the six existing stages are validated:
+
+1. Image downloader consuming images_manifest.jsonl — async, rate-limited, resumable, content-hashing, as specified in v1.0 Section 6.4.
+2. PostgreSQL import path that reads catalog/products.jsonl and catalog/offers.jsonl and performs the draft-version / validate / merchant-review / atomic-publish flow from the base architecture document's Phase 2.
+3. Embedding generation over search_text (title + normalized_features + description) for pgvector-based semantic retrieval, per the base architecture document's Phase 3.
+4. The near-duplicate secondary pass (normalized title + store fuzzy match) described in v1.0 Section 4.2, currently only implemented as exact parent_asin dedup in Stage 1.
+5. Wiring quality_report.json into the merchant dashboard's live "catalog health" view rather than a static JSON file read manually.
+
+======================================================================
+11. FILE AND TABLE REFERENCE (QUICK LOOKUP)
+======================================================================
+
+RAW_DIR/
+  meta_Electronics.jsonl.gz, Electronics.jsonl.gz
+  meta_Cell_Phones_and_Accessories.jsonl.gz, Cell_Phones_and_Accessories.jsonl.gz
+  meta_Home_and_Kitchen.jsonl.gz, Home_and_Kitchen.jsonl.gz
+  meta_Appliances.jsonl.gz, Appliances.jsonl.gz
+
+OUT_DIR/
+  candidates.sqlite            table: candidates (parent_asin PK, subcategory, score, status, raw_json, ...)
+  reviews.sqlite                table: reviews (review_id PK, parent_asin, rating, text, ...)
+  catalog/
+    products.jsonl              final selected AgentPay Product records
+    offers.jsonl                 generated synthetic INR Offer records
+    images_manifest.jsonl        resolved image URLs pending download
+    quality_report.json          computed catalog health numbers
+    raw_metadata/<product_id>.json   verbatim original source record per selected product
+
+This reference should be treated as the authoritative schema map for anyone extending build_catalog.py or writing the PostgreSQL import step that follows it.

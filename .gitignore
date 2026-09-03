@@ -1,0 +1,60 @@
+# --- Secrets --------------------------------------------------------------
+# Only .env.example is ever committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# --- Node / Next.js -------------------------------------------------------
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# --- Data -----------------------------------------------------------------
+# Raw outputs and temporary pipeline artifacts are excluded.
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/README.md
+data/out/*
+!data/out/.gitkeep
+!datasets/
+!datasets/**
+!data/seed/
+!data/seed/**
+
+# --- Local tooling & databases --------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+.audit/
+*.db
+*.db-journal
+*.sqlite3
+data/local_dev.db
+.agents/
+apps/web/test-results/
+baseline_failures.txt
+final_run.txt
+qa_db*.py
+qa_verify.py
+make_report.py
+

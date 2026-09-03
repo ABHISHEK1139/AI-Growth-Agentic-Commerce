@@ -1,0 +1,3 @@
+category,source_file,records_seen,records_parsed,records_failed,records_valid,records_rejected,records_with_id,records_with_title,records_with_description,records_with_price,records_with_images,records_with_categories,duplicate_ids,fallback_id_count,fallback_title_count,duration_ms,run_id
+electronics,products.jsonl,100,100,0,0,100,0,100,71,0,100,0,0,0,0,36,run_08287c11562b46cc
+electronics,products.jsonl,100,100,0,100,0,100,100,71,0,100,0,0,100,0,30,run_ba317e5b6b374ddd
