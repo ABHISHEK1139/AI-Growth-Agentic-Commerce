@@ -10,10 +10,8 @@ const links = [
   ["Laptops", "/category/laptops"],
   ["Phones", "/category/phones"],
   ["Audio", "/category/audio"],
-  ["Cameras", "/category/cameras"],
   ["Monitors", "/category/monitors"],
-  ["Keyboards", "/category/keyboards"],
-  ["Appliances", "/category/appliances"],
+  ["Keyboards & Tech", "/category/keyboards"],
   ["Deals", "/search?deals=true"],
 ] as const;
 
@@ -154,6 +152,15 @@ export function Navbar() {
         </div>
 
         <nav className="ml-auto flex items-center gap-2">
+          <Link
+            href="/chat"
+            className="relative hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50/80 border border-emerald-300/80 transition-all duration-200 hover:bg-emerald-100 hover:shadow-xs sm:inline-flex"
+            aria-label="Gemini Chatbot"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Gemini Chat</span>
+          </Link>
+
           <Link
             href="/orders"
             className="relative hidden items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-[#3d4942] transition-all duration-200 hover:bg-[#e5f0e9] hover:text-[#174c3c] sm:inline-flex"

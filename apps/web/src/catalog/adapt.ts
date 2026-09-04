@@ -23,7 +23,7 @@
  */
 
 import type { ProductItem } from "@/data/products";
-import type { CatalogOffer, CatalogSourceName, ExploreOffer } from "./types";
+import type { CatalogOffer, CatalogSourceName, ExploreOffer, CatalogProduct } from "./types";
 import { specSummary } from "./present";
 
 /** True when this record came from the API rather than the static demo list. */
@@ -253,5 +253,62 @@ export function catalogOfferToProductItem(
     qa: [],
     merchant: { id: offer.merchant_id, name: offer.merchant_id, verified: false, rating: 0 },
     crossSell: { id: "", title: "", priceMinor: 0, imageUrl: "" },
+  };
+}
+
+/**
+ * Adapt a local ProductItem into an ExploreOffer view model.
+ * Used as an authoritative fallback when remote catalog lookup does not find an entry.
+ */
+export function productItemToExploreOffer(item: ProductItem): ExploreOffer {
+  return {
+    offer_id: item.offerId || `off_${item.id}`,
+    product_id: item.id,
+    merchant_id: item.merchant?.id || "merchant_verified",
+    title: item.title,
+    category: item.category,
+    unit_price_minor: item.priceMinor,
+    currency: item.currency || "INR",
+    available_stock: item.stock || 12,
+    delivery_days: item.deliveryDays || 2,
+    return_period_days: item.returnDays || 10,
+    expires_at: item.expiresAt || item.offerExpiresAt || new Date(Date.now() + 86400000 * 30).toISOString(),
+    offer_version: item.offerVersion || 1,
+    pricing_source: (item.pricingSource as any) || "merchant_configured",
+    rating: item.rating || 4.5,
+    reviews_count: item.reviewCount || 100,
+    image_url: item.imageUrl || null,
+    specs: {
+      brand: item.brand,
+      shortSpecs: item.shortSpecs,
+      ...item.specsGrouped?.performance,
+      ...item.specsGrouped?.display,
+      ...item.specsGrouped?.connectivity,
+    },
+  };
+}
+
+/**
+ * Adapt a local ProductItem into a CatalogProduct view model.
+ */
+export function productItemToCatalogProduct(item: ProductItem): CatalogProduct {
+  return {
+    product_id: item.id,
+    external_product_id: item.id,
+    category_id: item.category,
+    title: item.title,
+    status: "published",
+    description: item.whyFitsYou?.summary || item.shortSpecs || "",
+    specifications: {
+      brand: item.brand,
+      ...item.specsGrouped?.performance,
+      ...item.specsGrouped?.display,
+      ...item.specsGrouped?.connectivity,
+    },
+    average_rating: item.rating,
+    rating_number: item.reviewCount,
+    images: item.gallery && item.gallery.length > 0
+      ? item.gallery.map((url, i) => ({ source_url: url, storage_key: null, resolution: null, position: i }))
+      : [{ source_url: item.imageUrl, storage_key: null, resolution: null, position: 0 }],
   };
 }

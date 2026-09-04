@@ -11,6 +11,7 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  X,
 } from "lucide-react";
 import { OfferCard } from "@/components/OfferCard";
 import { useStore } from "@/context/StoreContext";
@@ -385,57 +386,61 @@ function SearchAndFilterContent() {
             </div>
           </div>
 
-          <div className="space-y-2.5 pt-4 border-t border-slate-100">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">RAM (Memory)</label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {MEMORY_CHOICES.map((m) => {
-                const isSelected = minMemoryGb === m.value;
-                return (
-                  <button
-                    key={m.label}
-                    type="button"
-                    onClick={() => {
-                      setMinMemoryGb(m.value);
-                      executeSearch({ ...currentFilters(), min_memory_gb: m.value });
-                    }}
-                    className={`py-2 px-3 text-center rounded-xl text-xs font-bold border transition-all ${
-                      isSelected
-                        ? "bg-[#174c3c] border-[#174c3c] text-white"
-                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {["all", "laptops", "laptop", "phones", "smartphones", "smartphone"].includes(categorySlug) && (
+            <>
+              <div className="space-y-2.5 pt-4 border-t border-slate-100">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">RAM (Memory)</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {MEMORY_CHOICES.map((m) => {
+                    const isSelected = minMemoryGb === m.value;
+                    return (
+                      <button
+                        key={m.label}
+                        type="button"
+                        onClick={() => {
+                          setMinMemoryGb(m.value);
+                          executeSearch({ ...currentFilters(), min_memory_gb: m.value });
+                        }}
+                        className={`py-2 px-3 text-center rounded-xl text-xs font-bold border transition-all ${
+                          isSelected
+                            ? "bg-[#174c3c] border-[#174c3c] text-white"
+                            : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-          <div className="space-y-2.5 pt-4 border-t border-slate-100">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Storage (SSD/HDD)</label>
-            <div className="grid grid-cols-2 gap-1.5">
-              {STORAGE_CHOICES.map((s) => {
-                const isSelected = minStorageGb === s.value;
-                return (
-                  <button
-                    key={s.label}
-                    type="button"
-                    onClick={() => {
-                      setMinStorageGb(s.value);
-                      executeSearch({ ...currentFilters(), min_storage_gb: s.value });
-                    }}
-                    className={`py-2 px-3 text-center rounded-xl text-xs font-bold border transition-all ${
-                      isSelected
-                        ? "bg-[#174c3c] border-[#174c3c] text-white"
-                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+              <div className="space-y-2.5 pt-4 border-t border-slate-100">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Storage (SSD/HDD)</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {STORAGE_CHOICES.map((s) => {
+                    const isSelected = minStorageGb === s.value;
+                    return (
+                      <button
+                        key={s.label}
+                        type="button"
+                        onClick={() => {
+                          setMinStorageGb(s.value);
+                          executeSearch({ ...currentFilters(), min_storage_gb: s.value });
+                        }}
+                        className={`py-2 px-3 text-center rounded-xl text-xs font-bold border transition-all ${
+                          isSelected
+                            ? "bg-[#174c3c] border-[#174c3c] text-white"
+                            : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </aside>
 
         <main className="lg:col-span-9 space-y-6">
@@ -557,6 +562,158 @@ function SearchAndFilterContent() {
           )}
         </main>
       </div>
+
+      {/* Mobile Filter Slide-Over Drawer */}
+      {mobileFilterOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileFilterOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative w-full max-w-xs bg-white h-full shadow-2xl flex flex-col z-10 overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-[#174c3c]" />
+                <h3 className="font-extrabold text-slate-900 text-sm">Filters</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileFilterOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-6 flex-1">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Price Budget</label>
+                <div className="space-y-1">
+                  {PRICE_PRESETS.map((p) => {
+                    const isSelected = maxPriceMinor === p.value;
+                    return (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() => handlePriceSelect(p.value)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                          isSelected
+                            ? "bg-[#e5f0e9] text-[#174c3c] font-bold border border-[#bcd7c4]"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span>{p.label}</span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-[#174c3c]" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-4 border-t border-slate-100">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Delivery Speed</label>
+                <div className="space-y-1">
+                  {DELIVERY_CHOICES.map((d) => {
+                    const isSelected = maxDeliveryDays === d.value;
+                    return (
+                      <button
+                        key={d.label}
+                        type="button"
+                        onClick={() => {
+                          setMaxDeliveryDays(d.value);
+                          executeSearch({ ...currentFilters(), max_delivery_days: d.value });
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                          isSelected
+                            ? "bg-[#e5f0e9] text-[#174c3c] font-bold border border-[#bcd7c4]"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span>{d.label}</span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-[#174c3c]" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {["all", "laptops", "laptop", "phones", "smartphones", "smartphone"].includes(categorySlug) && (
+                <>
+                  <div className="space-y-2 pt-4 border-t border-slate-100">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">RAM (Memory)</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {MEMORY_CHOICES.map((m) => {
+                        const isSelected = minMemoryGb === m.value;
+                        return (
+                          <button
+                            key={m.label}
+                            type="button"
+                            onClick={() => {
+                              setMinMemoryGb(m.value);
+                              executeSearch({ ...currentFilters(), min_memory_gb: m.value });
+                            }}
+                            className={`py-2 px-2.5 text-center rounded-xl text-xs font-bold border transition-all ${
+                              isSelected
+                                ? "bg-[#174c3c] border-[#174c3c] text-white"
+                                : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-4 border-t border-slate-100">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Storage</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {STORAGE_CHOICES.map((s) => {
+                        const isSelected = minStorageGb === s.value;
+                        return (
+                          <button
+                            key={s.label}
+                            type="button"
+                            onClick={() => {
+                              setMinStorageGb(s.value);
+                              executeSearch({ ...currentFilters(), min_storage_gb: s.value });
+                            }}
+                            className={`py-2 px-2.5 text-center rounded-xl text-xs font-bold border transition-all ${
+                              isSelected
+                                ? "bg-[#174c3c] border-[#174c3c] text-white"
+                                : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-2">
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-100"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileFilterOpen(false)}
+                className="flex-1 py-2.5 bg-[#174c3c] text-white text-xs font-bold rounded-xl hover:bg-[#103c2f]"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

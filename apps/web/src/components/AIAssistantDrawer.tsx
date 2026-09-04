@@ -2,16 +2,28 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { Sparkles, Maximize2, Zap, Cpu, ShoppingBag, ShieldCheck, RefreshCw } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
-import type { ProductItem } from "@/data/products";
+import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
 import { exploreCatalog, askProductQuestion } from "@/catalog/client";
 import { exploreOfferToProductItem } from "@/catalog/adapt";
+import {
+  sendGeminiChatMessage,
+  type GeminiRole,
+  type ModelTier,
+  type ChatHistoryItem,
+} from "@/catalog/geminiClient";
 
 interface Message {
   id: string;
   sender: "user" | "agent";
   text: string;
+  modelUsed?: string;
+  fallbackNotice?: string | null;
+  durationMs?: number;
+  followUps?: string[];
   matchedProducts?: ProductItem[];
   highlightedProduct?: ProductItem;
   structuredIntent?: Record<string, any>;
@@ -52,6 +64,8 @@ export function AIAssistantDrawer() {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeProductsInView, setActiveProductsInView] = useState<ProductItem[]>([]);
+  const [geminiRole, setGeminiRole] = useState<GeminiRole>("concierge");
+  const [modelTier, setModelTier] = useState<ModelTier>("auto");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -230,13 +244,73 @@ export function AIAssistantDrawer() {
       return;
     }
 
-    // 2. PRODUCT SPEC Q&A & RESEARCH: Route to POST /api/v1/research/ask
+    // 2. GEMINI MULTI-TURN CHATBOT (Server-Side @google/genai with Model Tiering & Role System Instructions)
+    try {
+      const historyPayload: ChatHistoryItem[] = messages.slice(-10).map((m) => ({
+        role: m.sender === "user" ? "user" : "model",
+        text: m.text,
+      }));
+
+      const activeProd = aiDrawerContext.product || activeProductsInView[0];
+
+      const geminiRes = await sendGeminiChatMessage({
+        message: query,
+        history: historyPayload,
+        role: geminiRole,
+        modelPreference: modelTier,
+        activeProductId: activeProd?.id,
+      });
+
+      if (geminiRes.ok && geminiRes.answer) {
+        if (geminiRes.matchedProducts && geminiRes.matchedProducts.length > 0) {
+          setActiveProductsInView(geminiRes.matchedProducts);
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `agt_${Date.now()}`,
+            sender: "agent",
+            text: geminiRes.answer!,
+            modelUsed: geminiRes.modelUsed,
+            fallbackNotice: geminiRes.fallbackNotice,
+            durationMs: geminiRes.durationMs,
+            matchedProducts: geminiRes.matchedProducts,
+            followUps: geminiRes.followUps,
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+        setLoading(false);
+        return;
+      }
+    } catch (gErr) {
+      console.warn("Gemini Chat note, attempting catalog fallback:", gErr);
+    }
+
+    // 3. PRODUCT SPEC Q&A & RESEARCH FALLBACK: Route to POST /api/v1/research/ask
     const isProductSpecQuestion =
       Boolean(aiDrawerContext.product) ||
+      qLower.includes("search") ||
+      qLower.includes("internet") ||
+      qLower.includes("web") ||
+      qLower.includes("online") ||
+      qLower.includes("research") ||
+      qLower.includes("compare") ||
+      qLower.includes("vs") ||
+      qLower.includes("versus") ||
+      qLower.includes("benchmark") ||
+      qLower.includes("battery") ||
+      qLower.includes("docker") ||
+      qLower.includes("linux") ||
+      qLower.includes("issue") ||
+      qLower.includes("problem") ||
+      qLower.includes("heating") ||
+      qLower.includes("thermal") ||
+      qLower.includes("upgrade") ||
       qLower.includes("usb") ||
       qLower.includes("hdmi") ||
       qLower.includes("port") ||
-      qLower.includes("ram upgradable") ||
+      qLower.includes("ram") ||
       qLower.includes("expandable") ||
       qLower.includes("displayport") ||
       qLower.includes("thunderbolt") ||
@@ -253,7 +327,16 @@ export function AIAssistantDrawer() {
       qLower.includes("feedback") ||
       qLower.includes("battery life");
 
-    const targetProductForQA = aiDrawerContext.product || activeProductsInView[0];
+    const matchedCatalogProduct =
+      ALL_PRODUCTS.find(
+        (p) =>
+          qLower.includes(p.title.toLowerCase().slice(0, 15)) ||
+          qLower.includes(p.brand.toLowerCase())
+      ) ||
+      activeProductsInView[0] ||
+      ALL_PRODUCTS[0];
+
+    const targetProductForQA = aiDrawerContext.product || matchedCatalogProduct;
 
     if (isProductSpecQuestion && targetProductForQA) {
       try {
@@ -391,13 +474,14 @@ export function AIAssistantDrawer() {
             id: `agt_${Date.now()}`,
             sender: "agent",
             text:
-              `Found **${matchedItems.length} verified offer${matchedItems.length > 1 ? "s" : ""}** satisfying your request:\n` +
+              data.message ||
+              (`Found **${matchedItems.length} verified offer${matchedItems.length > 1 ? "s" : ""}** satisfying your request:\n` +
               `• **Top Match:** ${top.title} (${formatMinorToMajor(top.priceMinor, top.currency)})\n` +
               (data.intent?.category ? `• **Category:** ${data.intent.category}\n` : "") +
               (data.intent?.budget_minor
                 ? `• **Budget Ceiling:** ≤ ${formatMinorToMajor(data.intent.budget_minor, data.intent.currency || "INR")}\n`
                 : "") +
-              `• **Delivery:** Guaranteed within ${top.deliveryDays} days`,
+              `• **Delivery:** Guaranteed within ${top.deliveryDays} days`),
             matchedProducts: matchedItems.slice(0, 3),
             highlightedProduct: top,
             structuredIntent: data.intent || undefined,
@@ -460,7 +544,7 @@ export function AIAssistantDrawer() {
           <span className="font-mono text-xs text-[#a9d1b6]">✦</span>
           <span>Ask AI Assistant</span>
           <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white/90">
-            Groq LLaMA
+            Gemini AI
           </span>
         </button>
       </aside>
@@ -479,20 +563,64 @@ export function AIAssistantDrawer() {
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
         <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col justify-between border-l border-slate-200">
           {/* Drawer Header */}
-          <div className="p-4 border-b border-slate-200 bg-slate-50/90 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold font-mono">✦</span>
-              <div>
-                <h3 className="font-black text-slate-900 text-sm">AgentPay Shopping Assistant</h3>
-                <p className="text-[11px] text-slate-500">Context-Aware AI &amp; Hardware Spec Intelligence</p>
+          <div className="p-3.5 border-b border-slate-200 bg-slate-50 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-[#174c3c] text-white rounded-xl text-xs font-bold font-mono">
+                  <Sparkles className="h-3.5 w-3.5" />
+                </span>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Gemini Shopping Assistant</h3>
+                  <p className="text-[10px] text-slate-500">Multi-Turn AI with Dynamic Model Routing</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Link
+                  href="/chat"
+                  onClick={closeAiDrawer}
+                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-emerald-800 transition-colors"
+                  title="Open in full screen chat"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </Link>
+                <button
+                  onClick={closeAiDrawer}
+                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 font-bold text-xs transition-colors"
+                >
+                  ✕
+                </button>
               </div>
             </div>
-            <button
-              onClick={closeAiDrawer}
-              className="p-1.5 hover:bg-slate-200 rounded-xl text-slate-400 hover:text-slate-700 font-black text-sm transition-all"
-            >
-              ✕
-            </button>
+
+            {/* Persona & Model Controls Bar */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-medium">Role:</span>
+                <select
+                  value={geminiRole}
+                  onChange={(e) => setGeminiRole(e.target.value as GeminiRole)}
+                  className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[11px] focus:outline-none"
+                >
+                  <option value="concierge">🛍️ Concierge</option>
+                  <option value="hardware_specialist">🔬 Hardware Specialist</option>
+                  <option value="merchant_auditor">🛡️ Risk Auditor</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-medium">Model:</span>
+                <select
+                  value={modelTier}
+                  onChange={(e) => setModelTier(e.target.value as ModelTier)}
+                  className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[11px] focus:outline-none"
+                >
+                  <option value="auto">🤖 Auto</option>
+                  <option value="gemini-3.1-flash-lite">⚡ Lite</option>
+                  <option value="gemini-3.5-flash">✨ Flash</option>
+                  <option value="gemini-3.1-pro-preview">🧠 Pro</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           {/* Active Intent Context Bar */}
@@ -531,6 +659,20 @@ export function AIAssistantDrawer() {
                       : "bg-slate-100/90 text-slate-800 rounded-bl-xs border border-slate-200/60"
                   }`}
                 >
+                  {msg.modelUsed && (
+                    <div className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 w-fit">
+                      <Sparkles className="h-2.5 w-2.5 text-emerald-600" />
+                      <span>{msg.modelUsed}</span>
+                      {msg.durationMs ? <span className="text-slate-400">• {msg.durationMs}ms</span> : null}
+                    </div>
+                  )}
+
+                  {msg.fallbackNotice && (
+                    <div className="text-[10px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                      {msg.fallbackNotice}
+                    </div>
+                  )}
+
                   <p className="whitespace-pre-line leading-relaxed font-medium">{msg.text}</p>
 
                   {/* Matched Products Card List */}
@@ -653,6 +795,22 @@ export function AIAssistantDrawer() {
                     </div>
                   )}
 
+                  {/* Follow-up Suggestion Chips */}
+                  {msg.followUps && msg.followUps.length > 0 && (
+                    <div className="pt-1.5 flex flex-wrap gap-1">
+                      {msg.followUps.map((chip, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleUserSubmit(chip)}
+                          className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 transition-colors"
+                        >
+                          💡 {chip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Action Suggestion CTA */}
                   {msg.actionSuggestion && (
                     <button
@@ -684,6 +842,12 @@ export function AIAssistantDrawer() {
               className="text-[10px] px-2.5 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 rounded-lg text-slate-600 font-semibold transition-all"
             >
               ⭐ Which is best?
+            </button>
+            <button
+              onClick={() => handleUserSubmit("Search internet for real-world reviews and battery test")}
+              className="text-[10px] px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-700 border border-slate-200 rounded-lg text-slate-600 font-semibold transition-all"
+            >
+              🌐 Web research & reviews
             </button>
             <button
               onClick={() => handleUserSubmit("Show me the cheapest one")}

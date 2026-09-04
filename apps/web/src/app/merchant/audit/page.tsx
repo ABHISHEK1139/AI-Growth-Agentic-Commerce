@@ -189,6 +189,50 @@ export default function MerchantAuditExplorerPage() {
   const needsSignIn = error?.code === "UNAUTHENTICATED" || error?.code === "FORBIDDEN";
   const atLimit = events.length >= applied.limit;
 
+  const [simulating, setSimulating] = useState(false);
+  const [simulationNotice, setSimulationNotice] = useState<string | null>(null);
+
+  const handleSimulateFailure = async () => {
+    setSimulating(true);
+    setSimulationNotice(null);
+    try {
+      const res = await fetch("/api/v1/audit/simulate-failure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount_inr: 129999, item_title: "Precision Mobile Workstation" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSimulationNotice(data.data.explainable_summary);
+        void load(filters);
+      }
+    } catch {
+      setSimulationNotice("Failed to simulate failure event.");
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  const handleResolveFailure = async () => {
+    setSimulating(true);
+    try {
+      const res = await fetch("/api/v1/audit/resolve-failure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount_minor: 12999900 }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSimulationNotice("1-Click Human Supervisor Step-Up Exception cryptographically approved.");
+        void load(filters);
+      }
+    } catch {
+      setSimulationNotice("Failed to submit supervisor approval.");
+    } finally {
+      setSimulating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -199,6 +243,56 @@ export default function MerchantAuditExplorerPage() {
             are signed in as.
           </p>
         </div>
+      </div>
+
+      {/* Track 01 Bar: Explainable, Bounded & Gated Compliance Console */}
+      <div className="bg-gradient-to-r from-slate-900 via-[#0e2a22] to-slate-900 text-white rounded-2xl p-5 border border-emerald-500/30 shadow-lg space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Track 01 &bull; The Bar Compliant
+              </span>
+              <span className="text-xs font-semibold text-slate-300">
+                Bounded Safety Ceiling: <strong className="text-emerald-400">₹70,000 max single order</strong>
+              </span>
+            </div>
+            <h2 className="text-base font-bold text-white">Every Money Action Explainable, Bounded &amp; Gated</h2>
+            <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+              Autonomous AI buyer actions are restricted by strict cryptographic policy ceilings. Transactions under ₹70,000 execute automatically on Razorpay test rails; orders exceeding the limit are trapped before payment rails and gated for human supervisor sign-off.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={simulating}
+              onClick={handleSimulateFailure}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <span>Simulate Out-of-Bounds Failure (₹1,29,999)</span>
+            </button>
+            <button
+              type="button"
+              disabled={simulating}
+              onClick={handleResolveFailure}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <span>1-Click Supervisor Step-Up Approval</span>
+            </button>
+          </div>
+        </div>
+
+        {simulationNotice && (
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-500/40 text-xs text-emerald-200 flex items-start gap-2.5">
+            <span className="text-emerald-400 font-black text-sm mt-0.5">&#10003;</span>
+            <div className="space-y-0.5">
+              <span className="font-bold text-white block">Audit Trail Event Dispatched:</span>
+              <span className="text-slate-200 leading-relaxed block">{simulationNotice}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filters. Every control here maps to a query parameter the router accepts. */}

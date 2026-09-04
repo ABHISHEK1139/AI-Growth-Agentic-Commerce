@@ -9,8 +9,8 @@ import { Footer } from "@/components/Footer";
 import { MobileNav } from "@/components/MobileNav";
 
 export const metadata = {
-  title: "AgentPay — AI-Native Shopping & Autonomous Commerce Gateway",
-  description: "Shop the way you think with conversational search, web research, and Razorpay standard checkout.",
+  title: "AI-Growth Agentic Commerce",
+  description: "Merchant-side AI commerce gateway and storefront for agentic commerce, featuring autonomous purchasing, dynamic catalog, and merchant console.",
 };
 
 export default function RootLayout({

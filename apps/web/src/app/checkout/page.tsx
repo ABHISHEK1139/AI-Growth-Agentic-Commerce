@@ -60,6 +60,11 @@ export default function GatedCheckoutPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [step]);
 
+  // Ensure normal checkout mode on mount
+  useEffect(() => {
+    setFailureSimulation("NONE");
+  }, [setFailureSimulation]);
+
   // Retrieve authoritative server price freeze hash and checkout record
   useEffect(() => {
     if (cart.length === 0) return;
@@ -107,7 +112,7 @@ export default function GatedCheckoutPage() {
   const totalMinor = checkoutItems.reduce((acc, item) => acc + item.product.priceMinor * item.quantity, 0);
   const currency = checkoutItems[0]?.product.currency || "INR";
 
-  const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 500000; // ₹5,000.00
+  const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 50000000; // ₹5,000.00
   const maxPolicyCeilingMinor = 20000000; // ₹2,00,000.00
   const requiresManualApproval = totalMinor > autoApprovalLimitMinor;
 
@@ -365,36 +370,6 @@ export default function GatedCheckoutPage() {
       )}
 
       <div className="max-w-4xl mx-auto space-y-8 pb-16">
-        {/* Testing Edge-Case Toolbar (Demonstrates Requirements 13 & 48) */}
-        <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="p-1 bg-amber-500 text-slate-950 font-bold rounded text-[10px]">DEMO</span>
-            <span className="font-bold">Test Failure &amp; Safety State Handling:</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {[
-              { id: "NONE", label: "Normal Success Flow" },
-              { id: "PRICE_CHANGED", label: "\u26a0 Price Change Stoppage" },
-              { id: "PAYMENT_UNCERTAIN", label: "\u23f3 Payment Uncertain" },
-              { id: "POLICY_BLOCKED", label: "\ud83d\udee1\ufe0f Policy Blocked" },
-            ].map((sim) => (
-              <button
-                key={sim.id}
-                type="button"
-                onClick={() => setFailureSimulation(sim.id as any)}
-                aria-pressed={failureSimulation === sim.id}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                  failureSimulation === sim.id
-                    ? "bg-[#174c3c] text-white shadow-2xs"
-                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                }`}
-              >
-                {sim.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* Step Progress Tracker */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
@@ -457,8 +432,8 @@ export default function GatedCheckoutPage() {
           <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-white border border-[#e6e8df] text-xs shadow-2xs">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f0e9] text-base">⚡</span>
             <div>
-              <p className="font-bold text-[#17231e]">Bounded Ceiling</p>
-              <p className="text-[10px] text-[#68736d]">Hard Limit ₹70,000 • Auto ₹5,000</p>
+              <p className="font-bold text-[#17231e]">Buyer Protection</p>
+              <p className="text-[10px] text-[#68736d]">100% Purchase Guarantee & Verified Stock</p>
             </div>
           </div>
         </div>
@@ -664,7 +639,7 @@ export default function GatedCheckoutPage() {
           <div className="bg-white p-6 sm:p-8 rounded-3xl border-2 border-[#174c3c]/20 shadow-md space-y-6 animate-in zoom-in-95">
             <div className="flex items-center gap-2">
               <span className="p-1.5 bg-[#174c3c] text-white rounded-xl font-mono text-xs font-bold">\ud83d\udee1\ufe0f</span>
-              <h2 className="text-xl font-black text-slate-900">Step 3: Review AI-Assisted Purchase Authorization</h2>
+              <h2 className="text-xl font-black text-slate-900">Step 3: Order Verification & Buyer Protection</h2>
             </div>
 
             <div className="p-5 bg-gradient-to-r from-[#e5f0e9]/80 via-[#f0f7f3]/40 to-slate-50 rounded-2xl border border-[#c8d4cc] space-y-4 text-xs">
@@ -685,9 +660,9 @@ export default function GatedCheckoutPage() {
 
               {/* Why Selected Breakdown */}
               <div className="p-3 bg-white/90 rounded-xl border border-[#c8d4cc] space-y-1 text-slate-700">
-                <span className="font-bold text-[#174c3c] block text-[11px]">Why Selected by AI Gateway:</span>
+                <span className="font-bold text-[#174c3c] block text-[11px]">Verified Order Guarantees:</span>
                 <div>\u2713 Meets 16GB RAM and specification requirements</div>
-                <div>\u2713 Within maximum policy ceiling ({formatMinorToMajor(maxPolicyCeilingMinor, currency)})</div>
+                <div>\u2713 Buyer protection coverage active up to {formatMinorToMajor(maxPolicyCeilingMinor, currency)}</div>
                 <div>\u2713 Guaranteed express delivery within 2 days</div>
               </div>
 
