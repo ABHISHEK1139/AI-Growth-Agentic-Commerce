@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
 import { formatMinorToMajor } from "@/lib/money";
+import { categoryTitleForSlug } from "@/catalog/present";
 
 export function CartDrawer() {
   const router = useRouter();
@@ -170,8 +171,11 @@ export function CartDrawer() {
                       </button>
                     </div>
 
-                    <div className="text-[11px] font-mono text-slate-500 mt-0.5">
-                      {item.product.brand} &middot; {item.product.category || "Tech"}
+                    <div className="text-[11px] font-medium text-slate-500 mt-0.5">
+                      <span className="font-bold text-[#174c3c] uppercase tracking-wider">{item.product.brand}</span>
+                      {item.product.category && item.product.category.toLowerCase() !== item.product.brand.toLowerCase() && (
+                        <span> &middot; {categoryTitleForSlug(item.product.category)}</span>
+                      )}
                     </div>
 
                     <div className="mt-2.5 flex items-center justify-between">

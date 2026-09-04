@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { ALL_PRODUCTS, ProductItem } from "@/data/products";
+import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
+
+const COMBINED_PRODUCTS: ProductItem[] = [
+  ...ALL_PRODUCTS,
+  ...SEED_CATALOG_PRODUCTS.filter((sp) => !ALL_PRODUCTS.some((ap) => ap.id === sp.id)),
+];
 
 function envelope<T>(data: T, extra?: { warnings?: any[]; evidence?: any[]; next_actions?: any[] }) {
   return NextResponse.json({
@@ -32,7 +38,7 @@ function errorEnvelope(code: string, message: string, status = 400, details = {}
 function findProduct(idOrOffer: string) {
   const clean = (idOrOffer || "").trim();
   if (!clean) return undefined;
-  return ALL_PRODUCTS.find(
+  return COMBINED_PRODUCTS.find(
     (p) =>
       p.id === clean ||
       p.offerId === clean ||
@@ -183,7 +189,7 @@ function searchAndRankProducts(query: string, requestedCategory: string, maxPric
     .split(/[\s,+-]+/)
     .filter((w) => w.length > 1 && !STOPWORDS.has(w));
 
-  const scored = ALL_PRODUCTS.map((p) => {
+  const scored = COMBINED_PRODUCTS.map((p) => {
     let score = 0;
     const titleLower = p.title.toLowerCase();
     const brandLower = p.brand.toLowerCase();
@@ -1545,6 +1551,50 @@ Buyer Question / Research Inquiry: "${question}"`,
   // POST /api/v1/connectors/register
   if (pathStr === "v1/connectors/register") {
     return envelope({ registered: true, connector_id: `conn_${Date.now().toString(36)}` });
+  }
+
+  // POST /api/v1/recommendations/cross-sell (Upsell & cross-sell agent)
+  if (pathStr === "v1/recommendations/cross-sell" || pathStr === "recommendations/cross-sell") {
+    const targetId = body.target_product_id || "";
+    const targetProd = findProduct(targetId);
+    const cat = (targetProd?.category || "").toLowerCase();
+
+    let companion: any = null;
+    if (targetProd?.crossSell && targetProd.crossSell.title) {
+      companion = {
+        id: targetProd.crossSell.id || `acc_${Date.now().toString(36)}`,
+        title: targetProd.crossSell.title,
+        price_minor: targetProd.crossSell.priceMinor,
+        image_url: targetProd.crossSell.imageUrl,
+        category: "accessory",
+        compatibility_reason: cat.includes("laptop")
+          ? "Tailored fit: Shockproof padding protecting ports and chassis on the move."
+          : cat.includes("phone")
+          ? "Certified GaN: High-efficiency rapid charging without overheating battery cells."
+          : cat.includes("monitor")
+          ? "Full bandwidth: 48Gbps braided cord driving 4K 120Hz / 8K without screen flicker."
+          : cat.includes("audio")
+          ? "Ergonomic preservation: Soft silicone cradle preventing headband deformation."
+          : "Verified companion: Engineered to complement your hardware setup.",
+        savings_minor: targetProd.crossSell.alternativeSavingsMinor || 30000,
+      };
+    } else {
+      companion = {
+        id: "acc_clean_kit_01",
+        title: "Water-Resistant Shockproof Accessory Sleeve",
+        price_minor: 99900,
+        image_url: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+        category: "accessory",
+        compatibility_reason: "Engineered to complement and protect your hardware investment.",
+        savings_minor: 25000,
+      };
+    }
+
+    return envelope({
+      recommendations: [companion],
+      target_product_id: targetId,
+      strategy: "HIGH_CONVERSION_COMPLEMENTARY_ACCESSORY",
+    });
   }
 
   // POST /api/create-order or /api/v1/payments/razorpay/create-order (Razorpay standard modal)

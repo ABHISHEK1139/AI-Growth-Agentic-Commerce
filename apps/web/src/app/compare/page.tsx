@@ -15,6 +15,12 @@ import {
   lookupOfferInCatalog,
 } from "@/catalog/client";
 import { ALL_PRODUCTS } from "@/data/products";
+import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
+
+const COMBINED_PRODUCTS = [
+  ...ALL_PRODUCTS,
+  ...SEED_CATALOG_PRODUCTS.filter((sp) => !ALL_PRODUCTS.some((ap) => ap.id === sp.id)),
+];
 import { exploreOfferToProductItem, productItemToExploreOffer, toOfferView } from "@/catalog/adapt";
 import {
   catalogSourceDetail,
@@ -25,6 +31,7 @@ import {
   readableInstant,
   specRows,
   stockLabel,
+  resolveBrand,
 } from "@/catalog/present";
 import type { CatalogSourceName, ExploreOffer } from "@/catalog/types";
 
@@ -170,7 +177,7 @@ function CompareContent() {
             outsidePage: false,
           });
         } else {
-          const fallback = ALL_PRODUCTS.find(
+          const fallback = COMBINED_PRODUCTS.find(
             (p) => p.id === id || p.offerId === id || p.slug === id
           );
           if (fallback) {
@@ -426,8 +433,8 @@ function CompareContent() {
                           </button>
                         </div>
                         <div>
-                          <span className="text-[10px] font-bold text-[#174c3c] uppercase">
-                            {offer.category || "Uncategorised"}
+                          <span className="text-[10px] font-bold text-[#174c3c] uppercase tracking-wider">
+                            {resolveBrand(offer.specs, offer.title, offer.category)}
                           </span>
                           <Link href={`/product/${encodeURIComponent(offer.product_id)}`}>
                             <h4 className="font-bold text-slate-900 text-xs leading-snug line-clamp-2 hover:text-[#174c3c]">

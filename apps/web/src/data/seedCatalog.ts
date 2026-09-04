@@ -21,7 +21,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Everyday programming laptop with 16GB of soldered LPDDR5 memory. Runs a full container too",
     "whyFitsYou": {
       "summary": "Everyday programming laptop with 16GB of soldered LPDDR5 memory. Runs a full container toolchain without swapping.",
@@ -93,10 +93,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_01",
     "offerVersion": 1,
@@ -124,7 +124,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Mid-range development laptop with a six-core mobile CPU. Dual-channel 16GB configuration, ",
     "whyFitsYou": {
       "summary": "Mid-range development laptop with a six-core mobile CPU. Dual-channel 16GB configuration, one slot user-upgradable.",
@@ -196,10 +196,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_02",
     "offerVersion": 1,
@@ -223,12 +223,11 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "stock": 5,
     "deliveryDays": 2,
     "returnDays": 30,
-    "imageUrl": "https://images.unsplash.com/photo-1593642632823-8f785ba67e45?auto=format&fit=crop&w=900&q=80",
+    "imageUrl": "https://images.unsplash.com/photo-1589561084283-930aa7b1ce50?auto=format&fit=crop&w=900&q=80",
     "gallery": [
-      "https://images.unsplash.com/photo-1593642632823-8f785ba67e45?auto=format&fit=crop&w=900&q=80",
-      "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=900&q=80"
+      "https://images.unsplash.com/photo-1589561084283-930aa7b1ce50?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Eight-core ultraportable with a terabyte of NVMe storage. Suited to local builds and multi",
     "whyFitsYou": {
       "summary": "Eight-core ultraportable with a terabyte of NVMe storage. Suited to local builds and multiple language runtimes.",
@@ -300,10 +299,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_03",
     "offerVersion": 1,
@@ -331,7 +330,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1541807084-5c52b6b3adef?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Entry configuration with 8GB of memory. Present so a stated 16GB requirement visibly exclu",
     "whyFitsYou": {
       "summary": "Entry configuration with 8GB of memory. Present so a stated 16GB requirement visibly excludes something.",
@@ -403,10 +402,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_04",
     "offerVersion": 1,
@@ -434,7 +433,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1593642632823-8f785ba67e45?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Higher-tier configuration priced above a seventy-thousand rupee ceiling. Present so a stat",
     "whyFitsYou": {
       "summary": "Higher-tier configuration priced above a seventy-thousand rupee ceiling. Present so a stated budget visibly excludes something.",
@@ -508,10 +507,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_05",
     "offerVersion": 1,
@@ -539,7 +538,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1603302576837-37561b2e2302?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Stocked but slow to ship from a regional warehouse. Present so a stated delivery deadline ",
     "whyFitsYou": {
       "summary": "Stocked but slow to ship from a regional warehouse. Present so a stated delivery deadline visibly excludes something.",
@@ -611,10 +610,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_06",
     "offerVersion": 1,
@@ -638,11 +637,11 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "stock": 0,
     "deliveryDays": 2,
     "returnDays": 7,
-    "imageUrl": "https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?auto=format&fit=crop&w=900&q=80",
+    "imageUrl": "https://images.unsplash.com/photo-1541807084-5c52b6b3adef?auto=format&fit=crop&w=900&q=80",
     "gallery": [
-      "https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?auto=format&fit=crop&w=900&q=80"
+      "https://images.unsplash.com/photo-1541807084-5c52b6b3adef?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Clearance unit with no remaining stock. Present so an out-of-stock offer can be proved abs",
     "whyFitsYou": {
       "summary": "Clearance unit with no remaining stock. Present so an out-of-stock offer can be proved absent from results.",
@@ -714,10 +713,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_07",
     "offerVersion": 1,
@@ -745,7 +744,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1531297484001-80022131f5a1?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Lapsed promotional offer, past its validity window. Present so an expired offer can be pro",
     "whyFitsYou": {
       "summary": "Lapsed promotional offer, past its validity window. Present so an expired offer can be proved absent from results.",
@@ -819,10 +818,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_08",
     "offerVersion": 1,
@@ -850,7 +849,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1484788984921-03950022c9ef?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Listing whose memory specification was never captured by the importer. Present so a stated",
     "whyFitsYou": {
       "summary": "Listing whose memory specification was never captured by the importer. Present so a stated memory requirement cannot be satisfied by an unknown.",
@@ -921,10 +920,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_09",
     "offerVersion": 1,
@@ -952,7 +951,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Sixteen gigabytes of memory but a smaller boot volume. Present so a stated storage floor v",
     "whyFitsYou": {
       "summary": "Sixteen gigabytes of memory but a smaller boot volume. Present so a stated storage floor visibly excludes something.",
@@ -1026,10 +1025,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_10",
     "offerVersion": 1,
@@ -1057,7 +1056,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://upload.wikimedia.org/wikipedia/commons/9/9e/Nothing_Phone.jpg"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Mid-range handset with a 120Hz AMOLED panel.",
     "whyFitsYou": {
       "summary": "Mid-range handset with a 120Hz AMOLED panel.",
@@ -1129,10 +1128,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_phone_charger_01",
+      "title": "45W Dual USB-C GaN Super Fast Wall Charger with 5A Cable",
+      "priceMinor": 149900,
+      "imageUrl": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_phn_01",
     "offerVersion": 1,
@@ -1160,7 +1159,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1695048133142-1a20484d2569?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Compact handset with seven years of platform updates.",
     "whyFitsYou": {
       "summary": "Compact handset with seven years of platform updates.",
@@ -1232,10 +1231,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_phone_charger_01",
+      "title": "45W Dual USB-C GaN Super Fast Wall Charger with 5A Cable",
+      "priceMinor": 149900,
+      "imageUrl": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_phn_02",
     "offerVersion": 1,
@@ -1263,7 +1262,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Four-thousand-pixel-wide panel for a two-window editor layout.",
     "whyFitsYou": {
       "summary": "Four-thousand-pixel-wide panel for a two-window editor layout.",
@@ -1333,10 +1332,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_hdmi_cable_01",
+      "title": "Ultra High Speed 48Gbps 8K HDMI 2.1 Braided Cable 2M",
+      "priceMinor": 79900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_mon_01",
     "offerVersion": 1,
@@ -1364,7 +1363,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Lightweight over-ear set with active noise cancellation.",
     "whyFitsYou": {
       "summary": "Lightweight over-ear set with active noise cancellation.",
@@ -1434,10 +1433,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_headphone_stand_01",
+      "title": "Matte Aluminum Desktop Headphone Stand with Cable Organizer",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_aud_01",
     "offerVersion": 1,
@@ -1465,7 +1464,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Compact mechanical keyboard with open firmware.",
     "whyFitsYou": {
       "summary": "Compact mechanical keyboard with open firmware.",
@@ -1535,10 +1534,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_wrist_rest_01",
+      "title": "Solid Ergonomic Walnut Wood Keyboard Wrist Rest",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_acc_01",
     "offerVersion": 1,
@@ -1566,7 +1565,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Precision pointer with cross-machine clipboard support.",
     "whyFitsYou": {
       "summary": "Precision pointer with cross-machine clipboard support.",
@@ -1636,10 +1635,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_wrist_rest_01",
+      "title": "Solid Ergonomic Walnut Wood Keyboard Wrist Rest",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_acc_02",
     "offerVersion": 1,
@@ -1667,7 +1666,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1547082299-de196ea013d6?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Vibrant 4K UHD IPS panel with single-cable USB-C connectivity and 60W power delivery. Ergo",
     "whyFitsYou": {
       "summary": "Vibrant 4K UHD IPS panel with single-cable USB-C connectivity and 60W power delivery. Ergonomic stand with height, tilt and pivot adjustments.",
@@ -1737,10 +1736,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_hdmi_cable_01",
+      "title": "Ultra High Speed 48Gbps 8K HDMI 2.1 Braided Cable 2M",
+      "priceMinor": 79900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_mon_02",
     "offerVersion": 1,
@@ -1768,7 +1767,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1551645120-d70bfe84c826?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Factory pre-calibrated Calman Verified display designed for creative professionals. Featur",
     "whyFitsYou": {
       "summary": "Factory pre-calibrated Calman Verified display designed for creative professionals. Features Daisy-chaining DisplayPort and 65W USB-C connectivity.",
@@ -1838,10 +1837,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_hdmi_cable_01",
+      "title": "Ultra High Speed 48Gbps 8K HDMI 2.1 Braided Cable 2M",
+      "priceMinor": 79900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_mon_03",
     "offerVersion": 1,
@@ -1869,7 +1868,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1593642702821-c8da6771f0c6?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Deep 1000R curved gaming monitor with 240Hz refresh rate and 1ms response time. Quantum Do",
     "whyFitsYou": {
       "summary": "Deep 1000R curved gaming monitor with 240Hz refresh rate and 1ms response time. Quantum Dot QLED technology delivers 125% sRGB color coverage.",
@@ -1939,10 +1938,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_hdmi_cable_01",
+      "title": "Ultra High Speed 48Gbps 8K HDMI 2.1 Braided Cable 2M",
+      "priceMinor": 79900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_mon_04",
     "offerVersion": 1,
@@ -1970,7 +1969,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1545665277-5937489579f2?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "31.5-inch 4K display with AQCOLOR technology, M-Book mode and dual-window partition. Inclu",
     "whyFitsYou": {
       "summary": "31.5-inch 4K display with AQCOLOR technology, M-Book mode and dual-window partition. Includes Hotkey Puck G2 for instant input and color preset switching.",
@@ -2040,10 +2039,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_hdmi_cable_01",
+      "title": "Ultra High Speed 48Gbps 8K HDMI 2.1 Braided Cable 2M",
+      "priceMinor": 79900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_mon_05",
     "offerVersion": 1,
@@ -2071,7 +2070,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Flagship smartphone with titanium frame, integrated S-Pen, and Galaxy AI photo intelligenc",
     "whyFitsYou": {
       "summary": "Flagship smartphone with titanium frame, integrated S-Pen, and Galaxy AI photo intelligence. Features a flat 6.8-inch Dynamic AMOLED 2X display with 2600 nits peak brightness.",
@@ -2143,10 +2142,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_phone_charger_01",
+      "title": "45W Dual USB-C GaN Super Fast Wall Charger with 5A Cable",
+      "priceMinor": 149900,
+      "imageUrl": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_phn_03",
     "offerVersion": 1,
@@ -2174,7 +2173,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "First iPhone with aerospace-grade titanium design, A17 Pro 3nm gaming chip and Action Butt",
     "whyFitsYou": {
       "summary": "First iPhone with aerospace-grade titanium design, A17 Pro 3nm gaming chip and Action Button. Next-generation portraits with focus and depth control.",
@@ -2246,10 +2245,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_phone_charger_01",
+      "title": "45W Dual USB-C GaN Super Fast Wall Charger with 5A Cable",
+      "priceMinor": 149900,
+      "imageUrl": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_phn_04",
     "offerVersion": 1,
@@ -2277,7 +2276,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1580910051074-3eb694886505?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Performance flagship with 4th Gen Hasselblad Camera System and 2K 120Hz ProXDR display. 54",
     "whyFitsYou": {
       "summary": "Performance flagship with 4th Gen Hasselblad Camera System and 2K 120Hz ProXDR display. 5400mAh battery with 100W wired and 50W wireless AIRVOOC charging.",
@@ -2349,10 +2348,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_phone_charger_01",
+      "title": "45W Dual USB-C GaN Super Fast Wall Charger with 5A Cable",
+      "priceMinor": 149900,
+      "imageUrl": "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_phn_05",
     "offerVersion": 1,
@@ -2380,7 +2379,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Two processors and eight microphones for unprecedented noise cancellation and crystal-clea",
     "whyFitsYou": {
       "summary": "Two processors and eight microphones for unprecedented noise cancellation and crystal-clear calls. Ultra-comfortable, lightweight design with soft fit leather.",
@@ -2450,10 +2449,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_headphone_stand_01",
+      "title": "Matte Aluminum Desktop Headphone Stand with Cable Organizer",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_aud_02",
     "offerVersion": 1,
@@ -2481,7 +2480,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Up to 2x more Active Noise Cancellation with Transparency mode and Personalized Spatial Au",
     "whyFitsYou": {
       "summary": "Up to 2x more Active Noise Cancellation with Transparency mode and Personalized Spatial Audio. Precision Finding for MagSafe Charging Case with built-in speaker and lanyard loop.",
@@ -2551,10 +2550,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_headphone_stand_01",
+      "title": "Matte Aluminum Desktop Headphone Stand with Cable Organizer",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_aud_03",
     "offerVersion": 1,
@@ -2582,7 +2581,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "World-class noise cancellation quieter than ever before with Bose Immersive Audio. CustomT",
     "whyFitsYou": {
       "summary": "World-class noise cancellation quieter than ever before with Bose Immersive Audio. CustomTune technology personalizes the sound performance to your ears shape.",
@@ -2652,10 +2651,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_headphone_stand_01",
+      "title": "Matte Aluminum Desktop Headphone Stand with Cable Organizer",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_aud_04",
     "offerVersion": 1,
@@ -2683,7 +2682,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Audiophile-inspired 42mm transducer system delivering Sennheiser signature sound. Incredib",
     "whyFitsYou": {
       "summary": "Audiophile-inspired 42mm transducer system delivering Sennheiser signature sound. Incredible 60-hour battery life with fast charging capability.",
@@ -2753,10 +2752,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_headphone_stand_01",
+      "title": "Matte Aluminum Desktop Headphone Stand with Cable Organizer",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_aud_05",
     "offerVersion": 1,
@@ -2784,7 +2783,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Ultra-thin 75% compact wireless mechanical keyboard supporting 1000Hz polling rate. Hot-sw",
     "whyFitsYou": {
       "summary": "Ultra-thin 75% compact wireless mechanical keyboard supporting 1000Hz polling rate. Hot-swappable switches with coast PBT keycaps and custom RGB sidelights.",
@@ -2854,10 +2853,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_wrist_rest_01",
+      "title": "Solid Ergonomic Walnut Wood Keyboard Wrist Rest",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_acc_03",
     "offerVersion": 1,
@@ -2885,7 +2884,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Wireless and rechargeable trackpad with full range of Multi-Touch gestures and Force Touch",
     "whyFitsYou": {
       "summary": "Wireless and rechargeable trackpad with full range of Multi-Touch gestures and Force Touch technology. Edge-to-edge glass surface area for comfortable scrolling and swiping.",
@@ -2955,10 +2954,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_wrist_rest_01",
+      "title": "Solid Ergonomic Walnut Wood Keyboard Wrist Rest",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_acc_04",
     "offerVersion": 1,
@@ -2986,7 +2985,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Breakthrough Ultra Retina XDR display with state-of-the-art Tandem OLED technology and M4 ",
     "whyFitsYou": {
       "summary": "Breakthrough Ultra Retina XDR display with state-of-the-art Tandem OLED technology and M4 silicon. Precision accessory for digital illustration, CAD drafting, and desktop second display.",
@@ -3058,10 +3057,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_wrist_rest_01",
+      "title": "Solid Ergonomic Walnut Wood Keyboard Wrist Rest",
+      "priceMinor": 129900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_acc_05",
     "offerVersion": 1,
@@ -3089,7 +3088,7 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "gallery": [
       "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=900&q=80"
     ],
-    "aiBadge": "✦ Verified Hardware Spec",
+    "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Pro laptop powered by 11-core CPU and 14-core GPU Apple Silicon with hardware ray tracing.",
     "whyFitsYou": {
       "summary": "Pro laptop powered by 11-core CPU and 14-core GPU Apple Silicon with hardware ray tracing. Liquid Retina XDR display with 1000 nits sustained and 1600 nits peak brightness.",
@@ -3161,10 +3160,10 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
       "rating": 4.9
     },
     "crossSell": {
-      "id": "acc_generic_01",
-      "title": "Premium Universal Electronics Cleaning Kit",
-      "priceMinor": 49900,
-      "imageUrl": "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=400&q=80"
+      "id": "acc_laptop_sleeve_01",
+      "title": "Water-Resistant Shockproof Laptop Sleeve 14-15.6\"",
+      "priceMinor": 99900,
+      "imageUrl": "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80"
     },
     "offerId": "off_seed_lap_11",
     "offerVersion": 1,
