@@ -34,7 +34,9 @@ data/raw/*
 !data/raw/README.md
 data/out/*
 !data/out/.gitkeep
-datasets/
+datasets/*
+!datasets/meta_Appliances.jsonl.gz
+!datasets/README.md
 !data/seed/
 !data/seed/**
 
