@@ -129,6 +129,33 @@ export default function ProductDetailPage() {
       const prod = productResult.ok ? productResult.data.product : (fallback ? productItemToCatalogProduct(fallback) : null);
       let foundOffer = offerLookup.ok ? offerLookup.data.found : null;
 
+      // Check if the product record directly carries an authoritative offer from SQLite
+      if (!foundOffer && prod && (prod as any).offer) {
+        const o = (prod as any).offer;
+        foundOffer = {
+          offer_id: o.offer_id || `off_${prod.product_id}`,
+          product_id: prod.product_id,
+          merchant_id: "merchant_demo",
+          title: prod.title,
+          category: prod.category_id,
+          unit_price_minor: o.unit_price_minor || 299900,
+          currency: o.currency || "INR",
+          available_stock: o.available_quantity || 15,
+          delivery_days: o.delivery_days || 2,
+          return_period_days: o.return_period_days || 14,
+          expires_at: new Date(Date.now() + 86400000 * 365).toISOString(),
+          offer_version: 1,
+          pricing_source: "merchant_configured",
+          rating: prod.average_rating || 4.5,
+          reviews_count: prod.rating_number || 120,
+          image_url: prod.images?.[0]?.source_url || fallback?.imageUrl || "",
+          specs: {
+            brand: (prod.specifications as any)?.brand || fallback?.brand || "Brand",
+            ...prod.specifications,
+          },
+        };
+      }
+
       // Fallback synthesis so no product is ever stranded with "Offer Unavailable"
       if (!foundOffer && fallback) {
         foundOffer = productItemToExploreOffer(fallback);
@@ -136,12 +163,12 @@ export default function ProductDetailPage() {
         foundOffer = {
           offer_id: `off_${prod.product_id}`,
           product_id: prod.product_id,
-          merchant_id: "mer_certified_retail",
+          merchant_id: "merchant_demo",
           title: prod.title,
           category: prod.category_id,
-          unit_price_minor: fallback?.priceMinor || 4999900,
+          unit_price_minor: fallback?.priceMinor || 299900,
           currency: "INR",
-          available_stock: fallback?.stock || 12,
+          available_stock: fallback?.stock || 15,
           delivery_days: fallback?.deliveryDays || 2,
           return_period_days: fallback?.returnDays || 14,
           expires_at: new Date(Date.now() + 86400000 * 365).toISOString(),

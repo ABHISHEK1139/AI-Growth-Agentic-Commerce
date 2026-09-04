@@ -37,6 +37,7 @@ export default function GatedCheckoutPage() {
   // authorization through the gateway before payment; the payment endpoint
   // refuses to create an order without one (403 FORBIDDEN otherwise).
   const [serverAuthorizationId, setServerAuthorizationId] = useState<string | null>(null);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
 
   // Publishable key from configuration with safe test fallback
   const razorpayKeyId = (
@@ -172,6 +173,20 @@ export default function GatedCheckoutPage() {
     }
     setError(`The purchase was not permitted by policy (status: ${status}).`);
     return false;
+  };
+
+  const handleStep3Proceed = async () => {
+    if (failureSimulation === "POLICY_BLOCKED" || totalMinor > maxPolicyCeilingMinor) {
+      setError("Policy Gate Tripped: Total amount exceeds the hard autonomous spending ceiling. Explicit supervisor sign-off or cart adjustment required.");
+      return;
+    }
+    setIsAuthorizing(true);
+    setError(null);
+    const authorized = await grantServerAuthorization();
+    setIsAuthorizing(false);
+    if (authorized) {
+      setStep(4);
+    }
   };
 
   const handleLaunchRazorpayModal = async () => {
@@ -441,11 +456,85 @@ export default function GatedCheckoutPage() {
           </div>
         </div>
 
+        {/* Interactive Safety & Gating Demonstration Panel */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-[#174c3c] text-white rounded-lg text-xs font-bold">🛡️</span>
+              <div>
+                <h4 className="font-black text-slate-900 text-xs uppercase tracking-wider">
+                  Track 01: Safety Gating &amp; Failure Simulator
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Every money action explainable, bounded and gated with graceful recovery.
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-slate-100 text-slate-700 self-start sm:self-auto">
+              Mode: {failureSimulation}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setFailureSimulation("NONE")}
+              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
+                failureSimulation === "NONE"
+                  ? "bg-[#174c3c] text-white border-[#174c3c] shadow-xs"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+            >
+              <div>✓ Normal Flow</div>
+              <div className="text-[10px] font-normal opacity-80 mt-0.5">Standard Payment</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFailureSimulation("PRICE_CHANGED")}
+              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
+                failureSimulation === "PRICE_CHANGED"
+                  ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                  : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200"
+              }`}
+            >
+              <div>⚠️ Price Changed</div>
+              <div className="text-[10px] font-normal opacity-80 mt-0.5">Stoppage before pay</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFailureSimulation("POLICY_BLOCKED")}
+              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
+                failureSimulation === "POLICY_BLOCKED"
+                  ? "bg-rose-700 text-white border-rose-700 shadow-xs"
+                  : "bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-200"
+              }`}
+            >
+              <div>🛑 Policy Blocked</div>
+              <div className="text-[10px] font-normal opacity-80 mt-0.5">Ceiling tripped &amp; gated</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFailureSimulation("PAYMENT_UNCERTAIN")}
+              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
+                failureSimulation === "PAYMENT_UNCERTAIN"
+                  ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                  : "bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200"
+              }`}
+            >
+              <div>⏳ Uncertain Pay</div>
+              <div className="text-[10px] font-normal opacity-80 mt-0.5">Idempotent reconcile</div>
+            </button>
+          </div>
+        </div>
+
         {/* PRICE CHANGED STOPPAGE STATE (Requirement 13: Stoppage before payment) */}
         {failureSimulation === "PRICE_CHANGED" && (
           <div className="p-6 bg-amber-50 border-2 border-amber-500 rounded-3xl space-y-3 text-xs text-amber-950 animate-in zoom-in-95">
             <div className="font-black text-sm flex items-center gap-2">
-              <span>\u26a0 PRICE CHANGED BEFORE PAYMENT</span>
+              <span>⚠️ PRICE CHANGED BEFORE PAYMENT</span>
             </div>
             <p className="leading-relaxed">
               The merchant offer price changed while checking out. Under AgentPay deterministic security guarantees, <strong>no payment was attempted</strong>.
@@ -471,11 +560,47 @@ export default function GatedCheckoutPage() {
           </div>
         )}
 
+        {/* POLICY BLOCKED STATE (Track 01 Core: Explainable, bounded, gated failure handled gracefully) */}
+        {failureSimulation === "POLICY_BLOCKED" && (
+          <div className="p-6 bg-rose-50 border-2 border-rose-500 rounded-3xl space-y-3 text-xs text-rose-950 animate-in zoom-in-95">
+            <div className="font-black text-sm flex items-center gap-2">
+              <span>🛑 POLICY GATE TRIPPED: BOUNDED SPENDING CEILING EXCEEDED</span>
+            </div>
+            <p className="leading-relaxed">
+              Under merchant safety rules, autonomous transactions exceeding <strong>₹70,000.00</strong> cannot be executed without supervisor sign-off.
+              <strong> No payment rail was contacted.</strong>
+            </p>
+            <div className="p-3 bg-white rounded-xl border border-rose-200 font-mono space-y-1 text-[11px]">
+              <div>Attempted Order Total: <strong className="text-rose-600">{formatMinorToMajor(totalMinor, currency)}</strong></div>
+              <div>Autonomous Ceiling Limit: <strong className="text-slate-700">₹70,000.00</strong></div>
+              <div>Audit Reason Code: <strong className="text-slate-800">AUTONOMOUS_PURCHASE_CEILING_TRIPPED</strong></div>
+              <div>Cryptographic Digest: <code className="text-[10px] text-slate-500">{serverPriceHash || "0x7a3f8c...sha256"}</code></div>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                onClick={async () => {
+                  await apiPost("/api/v1/audit/resolve-failure", { amount_minor: totalMinor });
+                  setFailureSimulation("NONE");
+                }}
+                className="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+              >
+                <span>1-Click Supervisor Cryptographic Mandate (Override)</span>
+              </button>
+              <button
+                onClick={() => router.push("/search")}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition-all"
+              >
+                Select Alternative Within Limit
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* PAYMENT UNCERTAIN RECOVERY STATE (Requirement 48) */}
         {failureSimulation === "PAYMENT_UNCERTAIN" && (
           <div className="p-6 bg-blue-50 border-2 border-blue-500 rounded-3xl space-y-3 text-xs text-blue-950 animate-in zoom-in-95">
             <div className="font-black text-sm flex items-center gap-2">
-              <span>\u23f3 PAYMENT STATUS VERIFYING</span>
+              <span>⏳ PAYMENT STATUS VERIFYING</span>
             </div>
             <p className="leading-relaxed">
               We are currently querying the Razorpay provider to verify transaction status. <strong>We will not create another duplicate charge.</strong>
@@ -485,7 +610,7 @@ export default function GatedCheckoutPage() {
                 onClick={() => setFailureSimulation("NONE")}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all"
               >
-                Refresh Payment Status \u2713
+                Refresh Payment Status ✓
               </button>
             </div>
           </div>
@@ -669,19 +794,45 @@ export default function GatedCheckoutPage() {
                 <div>\u2713 Guaranteed express delivery within 2 days</div>
               </div>
 
-              {requiresManualApproval ? (
+              {failureSimulation === "POLICY_BLOCKED" || totalMinor > maxPolicyCeilingMinor ? (
+                <div className="p-4 bg-rose-50 rounded-2xl border-2 border-rose-400 text-rose-950 space-y-2">
+                  <div className="font-black text-xs flex items-center gap-1.5 text-rose-800">
+                    <span>🛑 Bounded Safety Gate: Hard Spending Ceiling Tripped</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Transaction of <strong>{formatMinorToMajor(totalMinor, currency)}</strong> exceeds the autonomous policy ceiling of {formatMinorToMajor(maxPolicyCeilingMinor, currency)}. Under AgentPay bounding rules, this money action cannot proceed unattended.
+                  </p>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await apiPost("/api/v1/audit/resolve-failure", { amount_minor: totalMinor });
+                        setFailureSimulation("NONE");
+                        await grantServerAuthorization();
+                        setStep(4);
+                      }}
+                      className="px-3.5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl transition-all shadow-xs"
+                    >
+                      1-Click Supervisor Override Mandate &rarr;
+                    </button>
+                  </div>
+                </div>
+              ) : requiresManualApproval ? (
                 <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 space-y-1">
                   <div className="font-bold flex items-center gap-1.5">
-                    <span>\u26a0</span>
-                    <span>Explicit Human Authorization Required</span>
+                    <span>⚠️</span>
+                    <span>Explicit Human / Supervisor Authorization Required</span>
                   </div>
                   <p className="text-[11px] text-amber-800">
                     Order amount exceeds your configured automatic threshold of {formatMinorToMajor(autoApprovalLimitMinor, currency)}.
                   </p>
                 </div>
               ) : (
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-800 font-bold">
-                  \u2713 Within Auto-Approval Limit (Pre-Authorized)
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-800 font-bold flex items-center justify-between">
+                  <span>✓ Within Auto-Approval Limit (Pre-Authorized)</span>
+                  <span className="text-[10px] font-mono bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
+                    POL_V2_BOUNDED
+                  </span>
                 </div>
               )}
             </div>
@@ -697,11 +848,27 @@ export default function GatedCheckoutPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setStep(4)}
-                aria-label="Approve purchase and proceed to payment"
-                className="px-6 py-3 bg-[#174c3c] hover:bg-[#103c2f] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 hover:shadow-md"
+                disabled={isAuthorizing}
+                onClick={handleStep3Proceed}
+                aria-label="Authorize and proceed to payment"
+                className="px-6 py-3 bg-[#174c3c] hover:bg-[#103c2f] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 hover:shadow-md"
               >
-                <span>Approve {formatMinorToMajor(totalMinor, currency)} &rarr;</span>
+                {isAuthorizing ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    <span>Evaluating Policy Gate...</span>
+                  </>
+                ) : requiresManualApproval ? (
+                  <>
+                    <span>🛡️</span>
+                    <span>Authorize as Supervisor ({formatMinorToMajor(totalMinor, currency)}) &rarr;</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✓</span>
+                    <span>Proceed to Payment ({formatMinorToMajor(totalMinor, currency)}) &rarr;</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
