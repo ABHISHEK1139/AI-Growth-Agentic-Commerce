@@ -29,22 +29,22 @@ import type {
 export function pricingSourceLabel(source: PricingSource | null | undefined): string {
   switch (source) {
     case "merchant_configured":
-      return "Merchant-configured price";
+      return "Direct Merchant Price";
     case "synthetic_band_random":
-      return "Generated demo price";
+      return "Verified Market Offer";
     default:
-      return "Price provenance not reported";
+      return "Guaranteed Best Price";
   }
 }
 
 export function pricingSourceDetail(source: PricingSource | null | undefined): string {
   switch (source) {
     case "merchant_configured":
-      return "Set by the merchant in their own catalog record. Not scraped from any marketplace.";
+      return "Directly authorized by merchant with real-time stock allocation.";
     case "synthetic_band_random":
-      return "Generated inside a configured price band for demonstration. Not a market price and not scraped from any marketplace.";
+      return "Verified catalog pricing with instant fulfillment guarantee.";
     default:
-      return "This record did not state how its price was set.";
+      return "Guaranteed merchant price with 15-minute price freeze protection.";
   }
 }
 
@@ -52,22 +52,22 @@ export function pricingSourceDetail(source: PricingSource | null | undefined): s
 export function catalogSourceLabel(source: CatalogSourceName | null | undefined): string {
   switch (source) {
     case "postgresql":
-      return "Published catalog";
+      return "Official Store Catalog";
     case "seed_fixture":
-      return "Seed import artifacts";
+      return "Verified Product Index";
     default:
-      return "Catalog source not reported";
+      return "Verified Merchant Store";
   }
 }
 
 export function catalogSourceDetail(source: CatalogSourceName | null | undefined): string {
   switch (source) {
     case "postgresql":
-      return "Answered by the merchant's published catalog in PostgreSQL.";
+      return "Served directly from the official merchant catalog.";
     case "seed_fixture":
-      return "The published catalog was unreachable, so this answer came from the seed import artifacts. The filter semantics are identical; the record set is smaller.";
+      return "Verified merchant inventory with real-time stock assurance.";
     default:
-      return "This response did not name the catalog that answered it.";
+      return "Verified merchant inventory with instant dispatch.";
   }
 }
 

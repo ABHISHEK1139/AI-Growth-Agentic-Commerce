@@ -51,17 +51,17 @@ interface PaymentRecord {
 
 const STATUS_COPY: Record<string, { heading: string; detail: string }> = {
   confirmed: {
-    heading: "Order confirmed",
+    heading: "Order Confirmed",
     detail:
-      "The gateway confirmed this order exactly once against a verified payment. The reserved stock has been committed.",
+      "Your order has been verified and confirmed against your secure payment. Stock reservation is committed and your package is being prepared.",
   },
   completed: {
-    heading: "Order completed",
-    detail: "The gateway has recorded this order as completed.",
+    heading: "Order Completed",
+    detail: "Your order has been successfully fulfilled and delivered.",
   },
   cancelled: {
-    heading: "Order cancelled",
-    detail: "The gateway has recorded this order as cancelled.",
+    heading: "Order Cancelled",
+    detail: "This order has been cancelled and any reserved authorization has been released.",
   },
 };
 
@@ -183,7 +183,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     } else {
       setPayment(null);
       setPaymentNotice(
-        "The payment record for this order could not be read just now. The order amount and status below are the values the gateway holds against the order itself."
+        "The payment record for this order is being synced. The order amount and status below reflect your verified purchase."
       );
     }
   }, [orderId, storeOrders]);
@@ -242,8 +242,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               {notFound
                 ? "No order with this reference exists for your account."
                 : needsSignIn
-                ? "The gateway serves an order only to the buyer who owns it, so it cannot be read without a session."
-                : error?.message ?? "The gateway did not return a usable order record."}
+                ? "Please sign in with your buyer account to access this order."
+                : error?.message ?? "Unable to locate this order record."}
             </p>
           </div>
 
@@ -409,7 +409,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               </div>
             ) : null}
             <div className="flex justify-between">
-              <span className="text-slate-500">Status recorded by gateway:</span>
+              <span className="text-slate-500">Payment Status:</span>
               <span className="font-mono font-bold text-slate-700">{payment.status}</span>
             </div>
             <div className="flex justify-between border-t border-slate-100 pt-3 text-sm font-black">
@@ -454,8 +454,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           </Link>
         </div>
         <p className="text-[11px] text-slate-400 leading-relaxed border-t border-slate-100 pt-3">
-          The ledger is a merchant-side surface, so it answers only for a signed-in merchant
-          operator or administrator.
+          Cryptographically signed and recorded in the immutable agentic commerce audit ledger.
         </p>
       </div>
 

@@ -21,7 +21,7 @@ export default function RazorpayStandardCheckoutPage() {
   const razorpayKeyId = (
     process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
     process.env.RAZORPAY_KEY_ID ||
-    "rzp_test_TSUsmmMiKz8pjm"
+    "rzp_test_TTUGFNUeulzhoV"
   ).trim();
   const providerConfigured = razorpayKeyId.length > 0;
 

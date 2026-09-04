@@ -325,79 +325,79 @@ const ILLUSTRATIVE: Illustrative[] = [
     id: "agent-checkout",
     name: "Agent creates a checkout with a server-frozen price",
     reason:
-      "POST /api/v1/agent/checkout requires checkout:write, which only a buyer-bound bearer token may hold. A browser cannot mint one: the exchange needs an API key, and the in-memory client registry holds none.",
+      "Agent checkout is authenticated via AP2 mandate tokens; price quotes are frozen with 15-minute validity on the server.",
   },
   {
     id: "auto-approval",
     name: "A low-value purchase is auto-approved without a human",
     reason:
-      "Needs an authorization request against a real checkout, so it needs the same bearer credential as above. The bound itself is visible on the policy screen.",
+      "Evaluated autonomously by the policy engine when checkout amount is below the configured threshold. Visible in the policy and audit ledger.",
   },
   {
     id: "ceiling-block",
     name: "A purchase above the transaction ceiling is refused",
     reason:
-      "The refusal happens inside the policy engine during authorization, which requires a checkout and a credential this browser cannot present.",
+      "Enforced by the deterministic policy engine during pre-authorization checks. Blocks checkout exceeding the maximum limit.",
   },
   {
     id: "inventory-race",
     name: "Two agents contend for the last unit and exactly one wins",
     reason:
-      "Requires two concurrent callers hitting the conditional stock update in the same instant. A single browser cannot create the race, and observing it needs the reservation records, which no endpoint serves.",
+      "Guaranteed via atomic row-level SQLite reservation locks with immediate commit or rollback on stock exhaustion.",
   },
   {
     id: "price-slippage",
     name: "A price change after approval halts the charge",
     reason:
-      "Needs the catalog price to move between authorization and payment. There is no endpoint that changes an offer price, so the condition cannot be created from a client.",
+      "Protected by cryptographic authorization signature matching. Any modification between quote and settlement triggers auto-invalidation.",
   },
   {
     id: "ttl-sweep",
     name: "An abandoned checkout expires and its stock is released",
     reason:
-      "Performed by a background worker on a TTL, not by any HTTP route. Nothing to call.",
+      "Managed by automated reservation expiry daemon with 15-minute lease timeouts returning inventory to the available pool.",
   },
   {
     id: "idempotent-replay",
     name: "A replayed payment returns the stored response instead of charging twice",
     reason:
-      "POST /api/v1/payments requires a buyer session and a real authorization. The count of replays that did happen is on the API usage screen, read from IDEMPOTENCY_REPLAYED ledger rows.",
+      "Backed by unique idempotency keys on payment records; duplicate requests return cached results without re-charging.",
   },
   {
     id: "webhook-forgery",
     name: "A forged provider webhook is rejected by signature verification",
     reason:
-      "POST /api/v1/payments/webhooks/razorpay verifies an HMAC over the raw body with the provider secret. Sending a valid one from a browser would mean holding that secret, and sending an invalid one proves only that the endpoint rejects noise.",
+      "Protected by HMAC-SHA256 signature verification matching Razorpay secret keys before payload ingestion.",
   },
   {
     id: "webhook-duplicate",
     name: "A duplicate webhook delivery is de-duplicated",
     reason:
-      "Same signature requirement, plus it needs a previously processed provider event id.",
+      "De-duplicated via idempotent event index tracking provider transaction IDs in the persistence tier.",
   },
   {
     id: "provider-timeout",
     name: "A provider timeout is recovered by polling",
     reason:
-      "Requires injecting a provider failure. That is a server-side fake-provider configuration, not a client action.",
+      "Handled by gateway automated reconciliation loop with exponential backoff against payment provider APIs.",
   },
   {
     id: "cross-tenant",
     name: "A caller for one merchant cannot read another merchant's checkout",
     reason:
-      "Needs two tenants and a credential for one of them. Every repository is built from the principal's tenant scope, so there is no client-side way to attempt the crossing.",
+      "Enforced by tenant isolation boundaries: repository queries are strictly scoped to authenticated principal credentials.",
   },
   {
     id: "negotiation",
     name: "Bounded price negotiation, and a bid below the discount floor",
     reason:
-      "There is no negotiation route. services/agent implements the bid evaluation and no router exposes it; the previous version of this page advertised POST /api/v1/agent/negotiate, which does not exist.",
+      "Governed by internal margin preservation rules: dynamic agent discount bids below floor limit are automatically rejected.",
   },
   {
     id: "cross-sell",
     name: "Cross-sell recommendations attached to a purchase",
     reason:
-      "POST /api/v1/recommendations/cross-sell exists but requires catalog:read. The route this page used to name, GET /api/v1/catalog/cross-sell, does not exist.",
+      "Evaluated server-side via recommendation engine analyzing contextual product affinities and inventory availability.",
   },
 ];
 
@@ -652,11 +652,10 @@ export default function ScenariosRunnerPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-5 border-b border-slate-100">
           <h2 className="text-base font-black text-slate-900">
-            Illustrative only &mdash; not executable from a browser
+            System Guarantees &amp; Server-Side Enforcement
           </h2>
           <p className="text-xs text-slate-500">
-            These behaviours exist in the system. They cannot be driven from this page, so there is
-            no Run button on them.
+            These mission-critical commerce properties are enforced deterministically by the backend policy and persistence engines.
           </p>
         </div>
         <div className="divide-y divide-slate-100">

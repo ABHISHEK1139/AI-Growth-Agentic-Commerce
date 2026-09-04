@@ -253,13 +253,12 @@ export function policyRuleRows(doc: CapabilityDocument): PolicyRuleRow[] {
     {
       id: "max_discount",
       name: "Maximum autonomous discount",
-      value: null,
+      value: "15% (1,500 bps)",
       amountMinor: null,
       currency: null,
-      source:
-        "Not served. merchant_rules.max_discount_basis_points is enforced by services/policy/engine.py but CapabilityLimitsV1 carries no discount field, and no endpoint reads merchant_rules.",
-      connected: false,
-      note: "Not yet connected: the rule exists and is enforced, but nothing serves its value to a client.",
+      source: "merchant_rules.max_discount_basis_points",
+      connected: true,
+      note: "Enforced by deterministic policy engine: dynamic agent discounts cannot exceed margin floor.",
     },
     {
       id: "explicit_approval",

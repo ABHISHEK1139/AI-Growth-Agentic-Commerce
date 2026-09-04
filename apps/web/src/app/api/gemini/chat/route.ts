@@ -2,15 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 
-// Server-side initialization of Gemini SDK as required by system guidelines
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
+function getAiClient(): GoogleGenAI | null {
+  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build",
+      },
     },
-  },
-});
+  });
+}
 
 export type GeminiRole = "concierge" | "hardware_specialist" | "merchant_auditor" | "custom";
 export type ModelTier = "auto" | "gemini-3.5-flash" | "gemini-3.1-flash-lite" | "gemini-3.1-pro-preview";
@@ -114,6 +117,79 @@ function detectTaskModel(
   };
 }
 
+function generateCatalogFallback(
+  query: string,
+  role: GeminiRole,
+  activeProduct?: ProductItem
+): {
+  answer: string;
+  matchedProducts: ProductItem[];
+  followUps: string[];
+} {
+  const qLower = query.toLowerCase();
+
+  // Find products matching keywords
+  const matched = ALL_PRODUCTS.filter((p) => {
+    const title = p.title.toLowerCase();
+    const brand = p.brand.toLowerCase();
+    const cat = p.category.toLowerCase();
+    const specs = (p.shortSpecs || "").toLowerCase();
+    return (
+      qLower.includes(brand) ||
+      qLower.includes(cat) ||
+      (qLower.includes("laptop") && cat.includes("laptop")) ||
+      (qLower.includes("phone") && cat.includes("phone")) ||
+      (qLower.includes("headphone") && cat.includes("audio")) ||
+      (qLower.includes("earbuds") && cat.includes("audio")) ||
+      (qLower.includes("monitor") && cat.includes("monitor")) ||
+      (qLower.includes("keyboard") && (cat.includes("keyboard") || cat.includes("accessory"))) ||
+      (qLower.includes("oled") && (title.includes("oled") || specs.includes("oled"))) ||
+      (qLower.includes("4k") && (title.includes("4k") || specs.includes("4k"))) ||
+      (qLower.includes("gaming") && (title.includes("rtx") || specs.includes("gaming"))) ||
+      title.split(" ").some((w) => w.length > 3 && qLower.includes(w))
+    );
+  });
+
+  const selectedProducts = matched.length > 0 ? matched.slice(0, 3) : ALL_PRODUCTS.slice(0, 3);
+  const top = selectedProducts[0];
+
+  let answer = "";
+  if (activeProduct) {
+    answer = `Here is what you should know about the **${activeProduct.title}**:\n\n` +
+      `• **Current Price:** ₹${(activeProduct.priceMinor / 100).toLocaleString("en-IN")}\n` +
+      `• **Rating:** ★ ${activeProduct.rating} / 5 (${activeProduct.reviewCount} customer reviews)\n` +
+      `• **Hardware Overview:** ${activeProduct.shortSpecs || activeProduct.whyFitsYou?.summary || "Engineered for high performance and durability."}\n` +
+      `• **Delivery & Returns:** ${activeProduct.deliveryDays}-day delivery guaranteed with ${activeProduct.returnDays}-day hassle-free return window.\n\n` +
+      `Would you like to compare this with similar models or add it to your bag?`;
+  } else if (qLower.includes("under") || qLower.includes("budget") || qLower.includes("cheap")) {
+    const sortedByPrice = [...selectedProducts].sort((a, b) => a.priceMinor - b.priceMinor);
+    const bestBudget = sortedByPrice[0];
+    answer = `Based on your budget criteria, here are verified options from our catalog:\n\n` +
+      `• **Top Value Match:** **${bestBudget.title}** at **₹${(bestBudget.priceMinor / 100).toLocaleString("en-IN")}**\n` +
+      `  - Key features: ${bestBudget.shortSpecs}\n` +
+      `  - Customer rating: ★ ${bestBudget.rating} (${bestBudget.reviewCount} reviews)\n` +
+      `  - Stock: ${bestBudget.stock} units ready for express dispatch\n\n` +
+      `Would you like to compare this with higher-tier models or proceed to secure checkout?`;
+  } else {
+    answer = `I checked our verified store catalog for **"${query}"**. Here are the top matching products:\n\n` +
+      selectedProducts.map((p, idx) =>
+        `**${idx + 1}. ${p.title}**\n` +
+        `• Price: **₹${(p.priceMinor / 100).toLocaleString("en-IN")}** | Rating: ★ ${p.rating}/5 (${p.reviewCount} reviews)\n` +
+        `• Key specs: ${p.shortSpecs || p.brand}\n` +
+        `• Delivery: Within ${p.deliveryDays} days with verified merchant guarantee`
+      ).join("\n\n") +
+      `\n\nYou can click any product card below to view full specifications, compare side-by-side, or add to your shopping bag.`;
+  }
+
+  const followUps = [
+    `Compare ${top.brand} with alternatives`,
+    `Check ports and battery life for ${top.title.slice(0, 24)}...`,
+    `Add ${top.title.slice(0, 20)}... to bag`,
+  ];
+
+  return { answer, matchedProducts: selectedProducts, followUps };
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   try {
@@ -143,62 +219,49 @@ export async function POST(req: NextRequest) {
     const catalogContext = `\n\n--- CURRENT VERIFIED STORE CATALOG ---\n${buildCatalogSummary()}\n---------------------------------------\nIf the shopper asks for recommendations or specific items, prioritize matching these verified catalog products. Mention their exact titles and current prices in ₹.`;
 
     let activeProductContext = "";
-    if (activeProductId) {
-      const activeProd = ALL_PRODUCTS.find((p) => p.id === activeProductId);
-      if (activeProd) {
-        activeProductContext = `\n\n--- CURRENTLY VIEWED PRODUCT ---\nTitle: ${activeProd.title}\nBrand: ${activeProd.brand}\nPrice: ₹${(activeProd.priceMinor / 100).toLocaleString("en-IN")}\nCategory: ${activeProd.category}\nRating: ${activeProd.rating} / 5 (${activeProd.reviewCount} reviews)\nSummary: ${activeProd.whyFitsYou?.summary || activeProd.shortSpecs}\nSpecs: ${JSON.stringify(activeProd.specsGrouped || activeProd.shortSpecs)}\nStock: ${activeProd.stock} units available\n---------------------------------`;
-      }
+    const activeProd = activeProductId ? ALL_PRODUCTS.find((p) => p.id === activeProductId) : undefined;
+    if (activeProd) {
+      activeProductContext = `\n\n--- CURRENTLY VIEWED PRODUCT ---\nTitle: ${activeProd.title}\nBrand: ${activeProd.brand}\nPrice: ₹${(activeProd.priceMinor / 100).toLocaleString("en-IN")}\nCategory: ${activeProd.category}\nRating: ${activeProd.rating} / 5 (${activeProd.reviewCount} reviews)\nSummary: ${activeProd.whyFitsYou?.summary || activeProd.shortSpecs}\nSpecs: ${JSON.stringify(activeProd.specsGrouped || activeProd.shortSpecs)}\nStock: ${activeProd.stock} units available\n---------------------------------`;
     }
 
     const fullSystemInstruction = `${baseInstruction}${activeProductContext}${catalogContext}`;
-
     const { model: targetModel, reasoning } = detectTaskModel(message, history, modelPreference);
 
-    // Format history for multi-turn chat
-    const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
-
-    // Add up to previous 10 messages from history to maintain tight context
-    const recentHistory = (history as ChatHistoryItem[]).slice(-10);
-    for (const item of recentHistory) {
-      if (item.text && item.text.trim()) {
-        contents.push({
-          role: item.role === "user" ? "user" : "model",
-          parts: [{ text: item.text.trim() }],
-        });
-      }
-    }
-
-    // Append current user message
-    contents.push({
-      role: "user",
-      parts: [{ text: message.trim() }],
-    });
-
-    let activeModelUsed = targetModel;
+    const aiClient = getAiClient();
+    let activeModelUsed: string = targetModel;
     let fallbackNotice: string | null = null;
     let responseText = "";
+    let matchedProducts: ProductItem[] = [];
+    let followUps: string[] = [];
 
-    try {
-      const response = await ai.models.generateContent({
-        model: targetModel,
-        contents,
-        config: {
-          systemInstruction: fullSystemInstruction,
-          temperature: 0.7,
-        },
+    if (!aiClient) {
+      // Offline / Keyless Catalog Intelligence Fallback
+      const fb = generateCatalogFallback(message, typedRole, activeProd);
+      responseText = fb.answer;
+      matchedProducts = fb.matchedProducts;
+      followUps = fb.followUps;
+      activeModelUsed = "catalog-intelligence-engine";
+      fallbackNotice = "Responded via verified store catalog engine.";
+    } else {
+      // Format history for multi-turn chat
+      const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+      const recentHistory = (history as ChatHistoryItem[]).slice(-10);
+      for (const item of recentHistory) {
+        if (item.text && item.text.trim()) {
+          contents.push({
+            role: item.role === "user" ? "user" : "model",
+            parts: [{ text: item.text.trim() }],
+          });
+        }
+      }
+      contents.push({
+        role: "user",
+        parts: [{ text: message.trim() }],
       });
 
-      responseText = response.text || "I processed your request, but received an empty response. How else may I assist you?";
-    } catch (modelErr: any) {
-      const errMsg = String(modelErr?.message || modelErr);
-      // Handle paid model quota gracefully (e.g. if gemini-3.1-pro-preview returns 429 quota on free key)
-      if (targetModel === "gemini-3.1-pro-preview" && (errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED"))) {
-        console.warn("gemini-3.1-pro-preview quota reached, gracefully falling back to gemini-3.5-flash");
-        activeModelUsed = "gemini-3.5-flash";
-        fallbackNotice = "Responded via Gemini 3.5 Flash (Gemini 3.1 Pro Preview requires billing tier in Settings > Secrets).";
-
-        const fallbackResponse = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+      try {
+        const response = await aiClient.models.generateContent({
+          model: targetModel,
           contents,
           config: {
             systemInstruction: fullSystemInstruction,
@@ -206,29 +269,67 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        responseText = fallbackResponse.text || "I am here to assist you with our catalog.";
-      } else {
-        throw modelErr;
+        responseText = response.text || "";
+        if (!responseText.trim()) {
+          const fb = generateCatalogFallback(message, typedRole, activeProd);
+          responseText = fb.answer;
+          matchedProducts = fb.matchedProducts;
+          followUps = fb.followUps;
+        }
+      } catch (modelErr: any) {
+        const errMsg = String(modelErr?.message || modelErr);
+        if (targetModel === "gemini-3.1-pro-preview" && (errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED"))) {
+          try {
+            activeModelUsed = "gemini-3.5-flash";
+            fallbackNotice = "Responded via Gemini 3.5 Flash (Pro Preview quota limit reached).";
+            const fallbackResponse = await aiClient.models.generateContent({
+              model: "gemini-3.5-flash",
+              contents,
+              config: {
+                systemInstruction: fullSystemInstruction,
+                temperature: 0.7,
+              },
+            });
+            responseText = fallbackResponse.text || "";
+          } catch {
+            const fb = generateCatalogFallback(message, typedRole, activeProd);
+            responseText = fb.answer;
+            matchedProducts = fb.matchedProducts;
+            followUps = fb.followUps;
+            activeModelUsed = "catalog-intelligence-engine";
+            fallbackNotice = "Responded via verified store catalog engine.";
+          }
+        } else {
+          console.warn("Gemini API call failed, gracefully using catalog intelligence:", errMsg);
+          const fb = generateCatalogFallback(message, typedRole, activeProd);
+          responseText = fb.answer;
+          matchedProducts = fb.matchedProducts;
+          followUps = fb.followUps;
+          activeModelUsed = "catalog-intelligence-engine";
+          fallbackNotice = "Responded via verified store catalog engine.";
+        }
       }
     }
 
-    // Match any referenced products from catalog to display interactive quick cards
-    const qAndAnswerLower = `${message} ${responseText}`.toLowerCase();
-    const matchedProducts: ProductItem[] = ALL_PRODUCTS.filter((p) => {
-      const titleSnippet = p.title.toLowerCase().slice(0, 18);
-      return qAndAnswerLower.includes(titleSnippet) || (qAndAnswerLower.includes(p.brand.toLowerCase()) && qAndAnswerLower.includes(p.category.toLowerCase()));
-    }).slice(0, 3);
+    // Match any referenced products if not already populated
+    if (matchedProducts.length === 0) {
+      const qAndAnswerLower = `${message} ${responseText}`.toLowerCase();
+      matchedProducts = ALL_PRODUCTS.filter((p) => {
+        const titleSnippet = p.title.toLowerCase().slice(0, 18);
+        return qAndAnswerLower.includes(titleSnippet) || (qAndAnswerLower.includes(p.brand.toLowerCase()) && qAndAnswerLower.includes(p.category.toLowerCase()));
+      }).slice(0, 3);
+    }
 
-    // Generate 3 contextual follow-up prompt chips
-    const followUps: string[] = [];
-    if (matchedProducts.length > 0) {
-      followUps.push(`Compare specs of ${matchedProducts[0].brand} with alternatives`);
-      followUps.push(`Check real-world battery and thermal performance`);
-      followUps.push(`Add ${matchedProducts[0].title.slice(0, 24)}... to bag`);
-    } else {
-      followUps.push("Show me top-rated laptops for programming");
-      followUps.push("4K color-accurate monitors under ₹40,000");
-      followUps.push("What accessories do you recommend?");
+    if (followUps.length === 0) {
+      if (matchedProducts.length > 0) {
+        followUps.push(`Compare specs of ${matchedProducts[0].brand} with alternatives`);
+        followUps.push(`Check real-world battery and thermal performance`);
+        followUps.push(`Add ${matchedProducts[0].title.slice(0, 24)}... to bag`);
+      } else {
+        followUps.push("Show me top-rated laptops for programming");
+        followUps.push("4K color-accurate monitors under ₹40,000");
+        followUps.push("What accessories do you recommend?");
+      }
     }
 
     const durationMs = Date.now() - startTime;

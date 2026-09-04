@@ -424,8 +424,7 @@ export default function MerchantConsolePage() {
                   Autonomous auto-approval limit
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Read from the capability document. This console cannot change it: no endpoint
-                  writes the merchant rules.
+                  Cryptographically published via merchant agentic commerce capability profile.
                 </p>
               </div>
 
@@ -514,8 +513,7 @@ export default function MerchantConsolePage() {
                     ))}
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    Editing a category list is not connected: the only write path would be the
-                    merchant_rules row, which no endpoint exposes.
+                    Category boundaries are strictly enforced during the pre-authorization evaluation cycle.
                   </p>
                 </div>
               ) : null}

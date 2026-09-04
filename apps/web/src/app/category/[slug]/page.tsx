@@ -7,7 +7,7 @@ import { ArrowRight, Loader2, Sparkles } from "lucide-react";
 import { OfferCard } from "@/components/OfferCard";
 import { useStore } from "@/context/StoreContext";
 import type { ApiError } from "@/lib/api";
-import { CREDENTIAL_GAP_NOTE, RANKING_DESCRIPTION } from "@/catalog/client";
+import { RANKING_DESCRIPTION } from "@/catalog/client";
 import {
   deterministicPathRefused,
   runCatalogSearch,

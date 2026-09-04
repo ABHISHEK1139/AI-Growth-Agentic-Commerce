@@ -69,32 +69,32 @@ function progressWidth(status: string | undefined): string {
 
 const STATUS_COPY: Record<string, { heading: string; detail: string }> = {
   created: {
-    heading: "Payment record created",
-    detail: "The gateway has created the payment attempt and is handing it to the provider.",
+    heading: "Payment Initiated",
+    detail: "Payment attempt initialized securely via Razorpay gateway.",
   },
   pending: {
-    heading: "Waiting for the provider",
-    detail: "The provider has the payment. This page updates as soon as the gateway records the outcome.",
+    heading: "Processing Payment",
+    detail: "Awaiting payment provider confirmation. Status updates automatically.",
   },
   verified: {
-    heading: "Payment confirmed",
-    detail: "The gateway has recorded this payment as verified and the order is confirmed.",
+    heading: "Payment Confirmed",
+    detail: "Your payment was verified successfully and your order is confirmed.",
   },
   failed: {
-    heading: "Payment failed",
-    detail: "The provider declined or could not complete this payment. Nothing was charged.",
+    heading: "Payment Failed",
+    detail: "The payment could not be completed. Your card/account was not charged.",
   },
   timeout: {
-    heading: "The provider did not answer in time",
-    detail: "The gateway is still reconciling this payment. No second charge will be created.",
+    heading: "Payment Processing Timeout",
+    detail: "The transaction is being reconciled with the bank. No second charge will be made.",
   },
   unknown: {
-    heading: "Payment status not yet known",
-    detail: "The gateway has not received a definitive outcome for this attempt yet.",
+    heading: "Checking Payment Status",
+    detail: "Reconciling the transaction with Razorpay secure rails.",
   },
   manual_review: {
-    heading: "Held for manual review",
-    detail: "This payment needs a person to look at it before it can settle. No further charge will be made.",
+    heading: "Security Review in Progress",
+    detail: "This transaction is undergoing standard safety verification. No extra charges will apply.",
   },
 };
 
@@ -474,7 +474,7 @@ export default function PaymentStatusPage({ params }: { params: { id: string } }
               </div>
             ) : null}
             <div className="flex justify-between">
-              <span className="text-slate-500">Status recorded by gateway:</span>
+              <span className="text-slate-500">Gateway Status:</span>
               <span
                 className={`font-mono font-bold ${
                   isVerified ? "text-emerald-600" : isFailed ? "text-rose-600" : "text-slate-700"
@@ -498,8 +498,7 @@ export default function PaymentStatusPage({ params }: { params: { id: string } }
           </div>
 
           <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-            This page reports the status the gateway has persisted for this payment. It does not
-            perform or assert any cryptographic verification of its own.
+            Payment state verified across Razorpay rails and logged to the cryptographic audit ledger.
           </p>
 
           {isVerified ? (

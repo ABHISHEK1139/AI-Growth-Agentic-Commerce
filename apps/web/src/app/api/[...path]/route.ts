@@ -716,7 +716,7 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     const checkoutId = url.searchParams.get("checkout_id") || `chk_${Date.now().toString(36)}`;
     const returnUrl = url.searchParams.get("return_url") || "";
     const receipt = url.searchParams.get("receipt") || `rcpt_${Date.now()}`;
-    const keyId = (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "rzp_test_TSUsmmMiKz8pjm").trim();
+    const keyId = (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "rzp_test_TTUGFNUeulzhoV").trim();
 
     const orderId = await createRazorpayOrderRemote(amount, currency, receipt);
     const mockPaymentId = `pay_sim_${Date.now().toString(36)}`;
