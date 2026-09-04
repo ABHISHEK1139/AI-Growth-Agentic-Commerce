@@ -31,10 +31,13 @@ const DEFAULT_LIMIT = 16;
 
 const CATEGORY_CHOICES: Array<{ slug: string; label: string; icon: string }> = [
   { slug: "all", label: "All Categories", icon: "✨" },
+  { slug: "appliances", label: "Appliances", icon: "🏠" },
   { slug: "laptops", label: "Laptops", icon: "💻" },
   { slug: "phones", label: "Smartphones", icon: "📱" },
   { slug: "audio", label: "Audio & Headphones", icon: "🎧" },
-  { slug: "keyboards", label: "Keyboards & Accessories", icon: "⌨️" },
+  { slug: "cameras", label: "Cameras & Optics", icon: "📷" },
+  { slug: "keyboards", label: "Computer Accessories", icon: "⌨️" },
+  { slug: "phone_accessories", label: "Phone Accessories", icon: "🔌" },
   { slug: "monitors", label: "Monitors & Displays", icon: "🖥️" },
 ];
 
