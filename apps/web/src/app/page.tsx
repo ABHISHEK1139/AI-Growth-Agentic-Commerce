@@ -18,7 +18,7 @@ import {
 import { FormEvent, useEffect, useState } from "react";
 import { ProductCard } from "@/components/ProductCard";
 import { useStore } from "@/context/StoreContext";
-import type { ProductItem } from "@/data/products";
+import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { TestimonialCarousel } from "@/components/TestimonialCarousel";
 import { BrandMarquee } from "@/components/BrandMarquee";
@@ -71,9 +71,11 @@ export default function ConsumerHomePage() {
   const router = useRouter();
   const { openAiDrawer } = useStore();
   const [prompt, setPrompt] = useState("");
-  const [picks, setPicks] = useState<ProductItem[]>([]);
-  const [deals, setDeals] = useState<ProductItem[]>([]);
-  const [allItems, setAllItems] = useState<ProductItem[]>([]);
+  const [picks, setPicks] = useState<ProductItem[]>(ALL_PRODUCTS.slice(0, 8));
+  const [deals, setDeals] = useState<ProductItem[]>(
+    ALL_PRODUCTS.filter((p) => p.originalPriceMinor > p.priceMinor).slice(0, 4)
+  );
+  const [allItems, setAllItems] = useState<ProductItem[]>(ALL_PRODUCTS);
   const [selectedCategory, setSelectedCategory] = useState("all");
 
   useEffect(() => {

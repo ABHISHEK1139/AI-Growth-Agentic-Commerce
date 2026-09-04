@@ -1,0 +1,8 @@
+{
+  "name": "AI-Growth Agentic Commerce",
+  "description": "Merchant-side AI commerce gateway and storefront for agentic commerce, featuring autonomous purchasing, dynamic catalog, and merchant console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

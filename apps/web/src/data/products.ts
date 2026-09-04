@@ -1,3 +1,5 @@
+import { SEED_CATALOG_PRODUCTS } from "./seedCatalog";
+
 export interface CustomerReview {
   id: string;
   author: string;
@@ -99,6 +101,7 @@ export interface ProductItem {
   catalogSource?: "postgresql" | "seed_fixture";
   /** `OfferV1.expires_at`. An offer is not valid past this instant. */
   offerExpiresAt?: string;
+  expiresAt?: string;
   /** True when this record was read from the API rather than from the list below. */
   fromCatalog?: boolean;
   /** False when the catalog holds no image for the product. */
@@ -107,7 +110,7 @@ export interface ProductItem {
   catalogSpecs?: Record<string, unknown>;
 }
 
-export const ALL_PRODUCTS: ProductItem[] = [
+export const CORE_PRODUCTS: ProductItem[] = [
   {
     id: "prd_dell_xps_15",
     slug: "dell-xps-15-oled",
@@ -865,3 +868,6 @@ export const ALL_PRODUCTS: ProductItem[] = [
     },
   },
 ];
+
+export const ALL_PRODUCTS: ProductItem[] = [...CORE_PRODUCTS, ...SEED_CATALOG_PRODUCTS];
+

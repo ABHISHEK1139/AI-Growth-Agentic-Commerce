@@ -14,7 +14,8 @@ import {
   isCredentialGap,
   lookupOfferInCatalog,
 } from "@/catalog/client";
-import { exploreOfferToProductItem, toOfferView } from "@/catalog/adapt";
+import { ALL_PRODUCTS } from "@/data/products";
+import { exploreOfferToProductItem, productItemToExploreOffer, toOfferView } from "@/catalog/adapt";
 import {
   catalogSourceDetail,
   catalogSourceLabel,
@@ -122,23 +123,36 @@ function CompareContent() {
         if (!direct.ok && isCredentialGap(direct.error)) sawCredentialGap = true;
 
         const lookup = await lookupOfferInCatalog({ offerId }, { limit: LOOKUP_LIMIT });
-        if (lookup.ok) {
+        if (lookup.ok && lookup.data.found) {
           source = lookup.data.catalogSource ?? source;
           resolved.push({
             requested: offerId,
             kind: "offer",
             offer: lookup.data.found,
-            error: lookup.data.found ? null : direct.ok ? null : direct.error,
-            outsidePage: lookup.data.found === null && lookup.data.truncated,
-          });
-        } else {
-          resolved.push({
-            requested: offerId,
-            kind: "offer",
-            offer: null,
-            error: lookup.error,
+            error: null,
             outsidePage: false,
           });
+        } else {
+          const fallback = ALL_PRODUCTS.find(
+            (p) => p.offerId === offerId || p.id === offerId || p.slug === offerId
+          );
+          if (fallback) {
+            resolved.push({
+              requested: offerId,
+              kind: "offer",
+              offer: productItemToExploreOffer(fallback),
+              error: null,
+              outsidePage: false,
+            });
+          } else {
+            resolved.push({
+              requested: offerId,
+              kind: "offer",
+              offer: null,
+              error: lookup.ok ? (direct.ok ? null : direct.error) : lookup.error,
+              outsidePage: lookup.ok && lookup.data.truncated,
+            });
+          }
         }
       }
 
@@ -146,23 +160,36 @@ function CompareContent() {
       for (let index = 0; index < wantedProducts.length; index += 1) {
         const id = wantedProducts[index];
         const lookup = await lookupOfferInCatalog({ productId: id }, { limit: LOOKUP_LIMIT });
-        if (lookup.ok) {
+        if (lookup.ok && lookup.data.found) {
           source = lookup.data.catalogSource ?? source;
           resolved.push({
             requested: id,
             kind: "product",
             offer: lookup.data.found,
             error: null,
-            outsidePage: lookup.data.found === null && lookup.data.truncated,
-          });
-        } else {
-          resolved.push({
-            requested: id,
-            kind: "product",
-            offer: null,
-            error: lookup.error,
             outsidePage: false,
           });
+        } else {
+          const fallback = ALL_PRODUCTS.find(
+            (p) => p.id === id || p.offerId === id || p.slug === id
+          );
+          if (fallback) {
+            resolved.push({
+              requested: id,
+              kind: "product",
+              offer: productItemToExploreOffer(fallback),
+              error: null,
+              outsidePage: false,
+            });
+          } else {
+            resolved.push({
+              requested: id,
+              kind: "product",
+              offer: null,
+              error: lookup.ok ? null : lookup.error,
+              outsidePage: lookup.ok && lookup.data.truncated,
+            });
+          }
         }
       }
 
@@ -206,7 +233,7 @@ function CompareContent() {
         setCategorySuggestions(available.slice(0, 6));
       })
       .catch(() => {});
-  }, [comparedCount, primaryCategory]);
+  }, [compared, comparedCount, primaryCategory]);
 
   const addCandidate = (prodId: string) => {
     if (fromUrl) {

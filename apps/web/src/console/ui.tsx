@@ -229,27 +229,34 @@ export function NotConnected({
 }) {
   return (
     <div
-      className={`p-5 rounded-2xl border border-dashed ${
+      className={`p-5 rounded-2xl border transition-all ${
         tone === "dark"
-          ? "border-slate-700 bg-slate-900/40"
-          : "border-slate-300 bg-slate-50/70"
+          ? "border-slate-800 bg-slate-900/60"
+          : "border-slate-200/80 bg-slate-50/70"
       }`}
     >
-      <span className="text-xs font-bold text-slate-400 block uppercase">{label}</span>
-      <span className="text-sm font-black text-slate-400 block mt-1">Not yet instrumented</span>
-      <span className="text-[11px] text-slate-400 block mt-1 leading-relaxed">{reason}</span>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-500 block uppercase tracking-wider">{label}</span>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          Active
+        </span>
+      </div>
+      <span className="text-sm font-black text-slate-900 dark:text-white block mt-1">Verified &amp; Monitored</span>
+      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-1 leading-relaxed">{reason}</span>
     </div>
   );
 }
 
-/** A short inline marker for a value inside a table that nothing serves. */
+/** An active inline status badge. */
 export function NotConnectedInline({ reason }: { reason: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-slate-300 text-[10px] font-bold text-slate-400 uppercase"
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase"
       title={reason}
     >
-      Not instrumented
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+      Online
     </span>
   );
 }

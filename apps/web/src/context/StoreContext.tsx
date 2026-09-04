@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { ProductItem } from "@/data/products";
+import { ALL_PRODUCTS, ProductItem } from "@/data/products";
 import { bootstrapSession } from "@/lib/api";
 
 export interface CartItem {
@@ -394,7 +394,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const fromOrder = order.items.find((item) => item.product.id === id || item.product.slug === id)?.product;
       if (fromOrder) return fromOrder;
     }
-    return undefined;
+    return ALL_PRODUCTS.find((p) => p.id === id || p.slug === id || p.offerId === id);
   };
 
   return (

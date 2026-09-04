@@ -113,11 +113,18 @@ export const CATEGORY_SLUG_TO_ID: Record<string, string> = {
 /** Display wording for a route slug. Falls back to the slug itself. */
 export const CATEGORY_SLUG_TITLE: Record<string, string> = {
   laptops: "Laptops",
+  laptop: "Laptops",
   phones: "Smartphones",
+  smartphones: "Smartphones",
+  smartphone: "Smartphones",
   monitors: "Monitors & Displays",
+  monitor: "Monitors & Displays",
   audio: "Audio & Headphones",
+  headphones: "Audio & Headphones",
   keyboards: "Keyboards & Accessories",
+  keyboard: "Keyboards & Accessories",
   accessories: "Computer Accessories",
+  computer_accessory: "Keyboards & Accessories",
   cameras: "Cameras & Optics",
   camera: "Cameras & Optics",
   appliances: "Appliances & Smart Home",
@@ -188,7 +195,7 @@ export function specRows(specs: Record<string, unknown> | null | undefined): Spe
   Object.keys(specs).forEach((key) => {
     const raw = specs[key];
     if (raw === null || raw === undefined || raw === "") return;
-    let value: string;
+    let value = "";
     if (key === "dimensions_mm" && typeof raw === "object" && raw !== null) {
       const dim = raw as Record<string, number>;
       const l = dim.length_mm;

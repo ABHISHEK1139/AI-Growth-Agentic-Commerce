@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet, type ApiError } from "@/lib/api";
+import { useStore } from "@/context/StoreContext";
 
 /**
  * The buyer's own orders.
@@ -68,6 +69,7 @@ function formatConfirmedAt(raw: string): string {
 type Phase = "loading" | "loaded" | "failed";
 
 export default function OrdersListPage() {
+  const { orders: storeOrders } = useStore();
   const [page, setPage] = useState<OrderPage | null>(null);
   const [offset, setOffset] = useState(0);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -79,22 +81,55 @@ export default function OrdersListPage() {
 
     const result = await apiGet<OrderPage>(`/api/v1/orders?limit=${PAGE_SIZE}&offset=${offset}`);
 
+    const mappedLocalOrders: OrderRecord[] = (storeOrders || []).map((o) => ({
+      schema_version: "1.0",
+      order_id: o.orderId,
+      checkout_id: o.orderId.replace("ord_", "chk_"),
+      payment_id: o.paymentId,
+      buyer_id: "byr_active_session",
+      merchant_id: "mrc_demo_electronics",
+      amount_minor: o.totalMinor,
+      currency: o.currency || "INR",
+      status: (o.status as any) || "confirmed",
+      confirmed_at: o.createdAt || new Date().toISOString(),
+    }));
+
     if (!result.ok) {
+      if (mappedLocalOrders.length > 0) {
+        setPage({
+          orders: mappedLocalOrders,
+          count: mappedLocalOrders.length,
+          total: mappedLocalOrders.length,
+          limit: PAGE_SIZE,
+          offset: 0,
+        });
+        setPhase("loaded");
+        return;
+      }
       setError(result.error);
       setPhase("failed");
       return;
     }
 
     const data = result.data;
+    const remoteOrders = Array.isArray(data?.orders) ? data.orders : [];
+    // Combine remote and local orders avoiding duplicates by order_id
+    const combinedOrders = [...remoteOrders];
+    for (const localOrd of mappedLocalOrders) {
+      if (!combinedOrders.some((o) => o.order_id === localOrd.order_id)) {
+        combinedOrders.push(localOrd);
+      }
+    }
+
     setPage({
-      orders: Array.isArray(data?.orders) ? data.orders : [],
-      count: typeof data?.count === "number" ? data.count : 0,
-      total: typeof data?.total === "number" ? data.total : 0,
+      orders: combinedOrders,
+      count: combinedOrders.length,
+      total: Math.max(combinedOrders.length, typeof data?.total === "number" ? data.total : 0),
       limit: typeof data?.limit === "number" ? data.limit : PAGE_SIZE,
       offset: typeof data?.offset === "number" ? data.offset : offset,
     });
     setPhase("loaded");
-  }, [offset]);
+  }, [offset, storeOrders]);
 
   useEffect(() => {
     void load();

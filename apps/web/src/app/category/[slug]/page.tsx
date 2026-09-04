@@ -159,7 +159,7 @@ export default function CategoryLandingPage() {
 
       <section className="overflow-hidden rounded-[28px] bg-[#e5f0e9] p-7 sm:p-10">
         <p className="text-xs font-bold uppercase tracking-[.15em] text-[#174c3c]">
-          {categoryId ? `Catalog category: ${categoryId}` : "Not a catalog category"}
+          {categoryId ? `Official Collection` : "Electronics Store"}
         </p>
         <div className="mt-3 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
           <div>
@@ -234,23 +234,21 @@ export default function CategoryLandingPage() {
             aria-live="polite"
           >
             <Loader2 className="mx-auto h-7 w-7 animate-spin text-[#174c3c]" />
-            <p className="mt-3 text-sm font-bold text-[#17231e]">Reading the catalog&hellip;</p>
+            <p className="mt-3 text-sm font-bold text-[#17231e]">Loading items&hellip;</p>
             <p className="mt-1 text-xs text-[#68736d]">
-              This request has a bound and will report an outcome either way.
+              Fetching the latest verified electronics from our catalog.
             </p>
           </div>
         ) : null}
 
         {phase === "unmapped" ? (
           <div className="rounded-2xl border border-dashed border-[#cbd8cf] bg-white p-12 text-center">
-            <p className="font-bold">No catalog category matches &ldquo;{slug}&rdquo;</p>
+            <p className="font-bold text-slate-900">Collection &ldquo;{slug}&rdquo; is not listed</p>
             <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-[#68736d]">
-              The catalog stores its own category identifiers, and this address does not name one of
-              them. Rather than run a query that cannot match and present the empty result as a
-              collection, nothing was requested.
+              We couldn&apos;t find a dedicated category under this name. Explore our full catalog or use search to find what you&apos;re looking for.
             </p>
-            <Link href="/search" className="mt-3 inline-block text-sm font-bold text-[#174c3c]">
-              Search the whole catalog &rarr;
+            <Link href="/search" className="mt-3 inline-block text-sm font-bold text-[#174c3c] hover:underline">
+              Search the full catalog &rarr;
             </Link>
           </div>
         ) : null}
@@ -304,15 +302,12 @@ export default function CategoryLandingPage() {
             </>
           ) : (
             <div className="rounded-2xl border border-dashed border-[#cbd8cf] bg-white p-12 text-center">
-              <p className="font-bold">No active offer in this category right now</p>
+              <p className="font-bold text-slate-900">No active items in this category right now</p>
               <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-[#68736d]">
-                The only constraint applied was{" "}
-                <span className="font-mono font-bold">category = {categoryId}</span>. The catalog
-                answered with zero offers, which means it holds no active, in-stock, unexpired offer
-                here rather than that anything went wrong.
+                We currently don&apos;t have available stock listed in this collection. Browse our full catalog or check back shortly.
               </p>
-              <Link href="/search" className="mt-3 inline-block text-sm font-bold text-[#174c3c]">
-                Search without the category filter &rarr;
+              <Link href="/search" className="mt-3 inline-block text-sm font-bold text-[#174c3c] hover:underline">
+                Explore all products &rarr;
               </Link>
             </div>
           )

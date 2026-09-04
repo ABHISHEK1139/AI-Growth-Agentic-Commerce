@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/context/StoreContext";
-import type { ProductItem } from "@/data/products";
+import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { ProductCard } from "@/components/ProductCard";
 import { apiGet } from "@/lib/api";
 import { Loader2 } from "lucide-react";
@@ -31,8 +31,8 @@ export default function WishlistPage() {
         await Promise.all(
           wishlist.map(async (productId) => {
             const res = await apiGet<any>(`/api/v1/catalog/products/${productId}`);
-            if (res.ok && res.data) {
-              const p = res.data;
+            const p = res.ok ? (res.data?.product || res.data) : null;
+            if (p && p.product_id) {
               const offerView = toOfferView(
                 {
                   schema_version: "1.0",
@@ -60,11 +60,20 @@ export default function WishlistPage() {
                 p
               );
               loaded.push(exploreOfferToProductItem(offerView, "postgresql"));
-            } else {
-              const lookup = await lookupOfferInCatalog({ productId });
-              if (lookup.ok && lookup.data?.found) {
-                loaded.push(exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource));
-              }
+              return;
+            }
+
+            const lookup = await lookupOfferInCatalog({ productId });
+            if (lookup.ok && lookup.data?.found) {
+              loaded.push(exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource));
+              return;
+            }
+
+            const fallback = ALL_PRODUCTS.find(
+              (item) => item.id === productId || item.slug === productId || item.offerId === productId
+            );
+            if (fallback) {
+              loaded.push(fallback);
             }
           })
         );
