@@ -248,6 +248,8 @@ export function AIAssistantDrawer() {
     }
 
     // 2. GEMINI MULTI-TURN CHATBOT (Server-Side @google/genai with Model Tiering & Role System Instructions)
+    let geminiFailed = false;
+    let geminiErrorMessage = "";
     try {
       const historyPayload: ChatHistoryItem[] = messages.slice(-10).map((m) => ({
         role: m.sender === "user" ? "user" : "model",
@@ -264,7 +266,7 @@ export function AIAssistantDrawer() {
         activeProductId: activeProd?.id,
       });
 
-      if (geminiRes.ok && geminiRes.answer) {
+      if (geminiRes.ok && geminiRes.answer && geminiRes.answer.trim()) {
         if (geminiRes.matchedProducts && geminiRes.matchedProducts.length > 0) {
           setActiveProductsInView(geminiRes.matchedProducts);
         }
@@ -285,9 +287,14 @@ export function AIAssistantDrawer() {
         ]);
         setLoading(false);
         return;
+      } else {
+        geminiFailed = true;
+        geminiErrorMessage = geminiRes.error || "Unable to receive response from AI model.";
       }
-    } catch (gErr) {
+    } catch (gErr: any) {
       console.warn("Gemini Chat note, attempting catalog fallback:", gErr);
+      geminiFailed = true;
+      geminiErrorMessage = gErr?.message || "Network error while connecting to assistant.";
     }
 
     // 3. PRODUCT SPEC Q&A & RESEARCH FALLBACK: Route to POST /api/v1/research/ask
@@ -458,6 +465,23 @@ export function AIAssistantDrawer() {
       }
 
       if (matchedItems.length === 0) {
+        if (geminiFailed) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `agt_${Date.now()}`,
+              sender: "agent",
+              text: geminiErrorMessage || `We encountered an issue communicating with the assistant. You can retry your request or explore our verified catalog.`,
+              isError: true,
+              errorHeading: "Assistant Temporarily Unavailable",
+              queryAttempted: query,
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            },
+          ]);
+          setLoading(false);
+          return;
+        }
+
         setMessages((prev) => [
           ...prev,
           {
@@ -665,12 +689,12 @@ export function AIAssistantDrawer() {
                   className={`max-w-[88%] p-3.5 rounded-2xl space-y-2.5 ${
                     msg.sender === "user"
                       ? "bg-indigo-600 text-white rounded-br-xs shadow-xs"
-                      : msg.isError
+                      : msg.isError || (msg.sender === "agent" && !msg.text?.trim() && !msg.matchedProducts?.length && !msg.highlightedProduct)
                       ? "bg-amber-50/95 text-slate-800 rounded-bl-xs border border-amber-200 shadow-xs"
                       : "bg-slate-100/90 text-slate-800 rounded-bl-xs border border-slate-200/60"
                   }`}
                 >
-                  {msg.isError ? (
+                  {msg.isError || (msg.sender === "agent" && !msg.text?.trim() && !msg.matchedProducts?.length && !msg.highlightedProduct) ? (
                     <div className="space-y-3">
                       <div className="flex items-start gap-2.5">
                         <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800 border border-amber-200">

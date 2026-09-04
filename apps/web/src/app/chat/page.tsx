@@ -458,12 +458,12 @@ export default function GeminiChatPage() {
                       className={`p-4 rounded-2xl text-sm leading-relaxed ${
                         isUser
                           ? "bg-[#174c3c] text-white rounded-tr-none shadow-xs font-medium"
-                          : msg.isError
+                          : msg.isError || (!msg.text?.trim() && !msg.matchedProducts?.length)
                           ? "bg-amber-50/95 text-slate-800 rounded-tl-none border border-amber-200 shadow-xs"
                           : "bg-slate-50 text-slate-800 rounded-tl-none border border-slate-200/80 shadow-xs"
                       }`}
                     >
-                      {msg.isError ? (
+                      {msg.isError || (!msg.text?.trim() && !msg.matchedProducts?.length) ? (
                         <div className="space-y-3">
                           <div className="flex items-start gap-3">
                             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800 border border-amber-200">
