@@ -39,9 +39,13 @@ from services.offers.constraints import (
 #: because the application's datastore is not available.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+_OUT_CATALOG_DIR = _REPO_ROOT / "data" / "out" / "catalog"
+_OUT_PRODUCTS_PATH = _OUT_CATALOG_DIR / "products.jsonl"
+_OUT_OFFERS_PATH = _OUT_CATALOG_DIR / "offers.jsonl"
+
 SEED_CATALOG_DIR = _REPO_ROOT / "data" / "seed" / "catalog"
-SEED_PRODUCTS_PATH = SEED_CATALOG_DIR / "products.jsonl"
-SEED_OFFERS_PATH = SEED_CATALOG_DIR / "offers.jsonl"
+SEED_PRODUCTS_PATH = _OUT_PRODUCTS_PATH if _OUT_PRODUCTS_PATH.exists() else SEED_CATALOG_DIR / "products.jsonl"
+SEED_OFFERS_PATH = _OUT_OFFERS_PATH if _OUT_OFFERS_PATH.exists() else SEED_CATALOG_DIR / "offers.jsonl"
 
 #: Default when an offer record omits stock, matching the importer's own default
 #: so the two readers agree on a record that leaves it out.
@@ -80,7 +84,7 @@ def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
 def _primary_image_url(product: dict[str, Any]) -> str | None:
     images = product.get("images") or []
     for image in images:
-        url = image.get("source_url")
+        url = image.get("url") or image.get("source_url") or image.get("large") or image.get("thumb")
         if url:
             return str(url)
     return None

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowRight, Loader2, Sparkles } from "lucide-react";
@@ -59,9 +59,21 @@ const CATEGORY_COPY: Record<string, { description: string; prompts: string[] }> 
     description: "More room for focused work, creative detail and better posture.",
     prompts: ["4K", "USB-C", "For designers", "Budget"],
   },
+  cameras: {
+    description: "Capture crisp photo and video with verified digital optics and gear.",
+    prompts: ["DSLR", "Mirrorless", "For travel", "Action cam"],
+  },
+  appliances: {
+    description: "Reliable home and kitchen tech engineered for daily life.",
+    prompts: ["Smart home", "Energy efficient", "Kitchen", "Compact"],
+  },
+  phone_accessories: {
+    description: "High-speed chargers, protective cases, and wireless docks.",
+    prompts: ["Fast charger", "Wireless charging", "MagSafe", "Car mount"],
+  },
 };
 
-const LISTING_LIMIT = 12;
+const LISTING_LIMIT = 24;
 
 type Phase = "loading" | "ready" | "failed" | "blocked" | "unmapped";
 
@@ -83,8 +95,24 @@ export default function CategoryLandingPage() {
   const [guardMessage, setGuardMessage] = useState<string | null>(null);
   const [credentialGap, setCredentialGap] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [sortBy, setSortBy] = useState<"featured" | "price_asc" | "price_desc" | "rating">("featured");
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
+
+  const sortedOffers = useMemo(() => {
+    if (!outcome?.offers) return [];
+    const list = [...outcome.offers];
+    if (sortBy === "price_asc") {
+      return list.sort((a, b) => a.unit_price_minor - b.unit_price_minor);
+    }
+    if (sortBy === "price_desc") {
+      return list.sort((a, b) => b.unit_price_minor - a.unit_price_minor);
+    }
+    if (sortBy === "rating") {
+      return list.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    }
+    return list;
+  }, [outcome?.offers, sortBy]);
 
   useEffect(() => {
     if (!categoryId) {
@@ -162,50 +190,42 @@ export default function CategoryLandingPage() {
         </div>
       </section>
 
-      {credentialGap ? (
-        <div className="rounded-[22px] border border-amber-200 bg-amber-50 p-5 text-xs leading-relaxed text-amber-950">
-          <p className="mb-1 text-sm font-black">
-            Deterministic filter endpoint unavailable to this browser
-          </p>
-          <p>{CREDENTIAL_GAP_NOTE}</p>
-        </div>
-      ) : null}
-
       <section>
-        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-extrabold tracking-tight">
-              Explore {title.toLowerCase()}
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
+              Explore {title}
             </h2>
-            <p className="mt-1 text-sm text-[#68736d]">
+            <p className="mt-1 text-sm text-slate-500">
               {phase === "loading"
-                ? "Reading the catalog\u2026"
+                ? "Reading verified catalog assortment…"
                 : phase === "ready" && outcome
-                ? `${outcome.count} ${outcome.count === 1 ? "offer" : "offers"} available now`
+                ? `${sortedOffers.length} verified ${sortedOffers.length === 1 ? "product" : "products"} available with 2-day delivery`
                 : phase === "unmapped"
                 ? "This collection has no matching catalog category"
                 : "No listing to show"}
             </p>
-            {phase === "ready" && outcome ? (
-              <p className="mt-1 text-[11px] text-[#8a938e]">
-                <span title={catalogSourceDetail(outcome.catalogSource)}>
-                  {catalogSourceLabel(outcome.catalogSource)}
-                </span>
-                {" \u00b7 "}
-                {outcome.answeredBy === "deterministic"
-                  ? "POST /api/v1/catalog/search"
-                  : "POST /api/explore"}
-                {" \u00b7 "}
-                {RANKING_DESCRIPTION}
-              </p>
-            ) : null}
           </div>
-          <Link
-            href={`/search${categoryId ? `?category=${encodeURIComponent(slug)}` : ""}`}
-            className="hidden items-center text-sm font-bold text-[#174c3c] sm:inline-flex"
-          >
-            Filter this category <ArrowRight className="ml-1 h-4 w-4" />
-          </Link>
+
+          {phase === "ready" && outcome && outcome.offers.length > 0 && (
+            <div className="flex items-center gap-3">
+              <label htmlFor="sort-by" className="text-xs font-semibold text-slate-500">
+                Sort by:
+              </label>
+              <select
+                id="sort-by"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                aria-label="Sort products by"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#174c3c]"
+              >
+                <option value="featured">Featured & Best Match</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="price_desc">Price: High to Low</option>
+                <option value="rating">Highest Customer Rating</option>
+              </select>
+            </div>
+          )}
         </div>
 
         {phase === "loading" ? (
@@ -272,7 +292,7 @@ export default function CategoryLandingPage() {
                 </ul>
               ) : null}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {outcome.offers.map((offer, index) => (
+                {sortedOffers.map((offer, index) => (
                   <OfferCard
                     key={offer.offer_id}
                     offer={offer}

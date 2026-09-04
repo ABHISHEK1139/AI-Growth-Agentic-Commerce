@@ -184,7 +184,11 @@ class CatalogService:
                     for idx, img in enumerate(images):
                         img_id = new_id("img")
                         src_url = (
-                            img.get("source_url") or img.get("large") or img.get("thumb") or ""
+                            img.get("url")
+                            or img.get("source_url")
+                            or img.get("large")
+                            or img.get("thumb")
+                            or ""
                         )
                         storage_key = img.get("storage_key") or f"img_{product_id}_{idx}"
                         resolution = img.get("resolution", "large")
