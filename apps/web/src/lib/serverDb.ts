@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import { resolveBrand } from "@/catalog/present";
+import { defaultImageForCategory } from "@/catalog/adapt";
 
 let _db: DatabaseSync | null = null;
 
@@ -117,7 +118,14 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
     LEFT JOIN inventory inv ON o.offer_id = inv.offer_id
     LEFT JOIN product_image pi ON p.product_id = pi.product_id AND pi.position = 0
     WHERE ${whereClause}
-    ORDER BY p.average_rating DESC, o.unit_price_minor ASC
+    ORDER BY 
+      CASE 
+        WHEN p.category_id IN ('laptop', 'laptops', 'smartphone', 'smartphones', 'audio', 'monitor', 'monitors', 'keyboards') THEN 0
+        ELSE 1
+      END ASC,
+      (p.rating_number * p.average_rating) DESC,
+      p.average_rating DESC,
+      o.unit_price_minor DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as any[];
 
@@ -130,7 +138,7 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
     }
 
     const brand = resolveBrand(specs, r.title, r.category_id);
-    const imageUrl = r.image_url || "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80";
+    const imageUrl = r.image_url || defaultImageForCategory(r.category_id, r.title, brand);
 
     return {
       schema_version: "1.0",
@@ -167,7 +175,7 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
     }
 
     const brand = resolveBrand(specs, r.title, r.category_id);
-    const imageUrl = r.image_url || "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80";
+    const imageUrl = r.image_url || defaultImageForCategory(r.category_id, r.title, brand);
 
     return {
       offer_id: r.offer_id,
