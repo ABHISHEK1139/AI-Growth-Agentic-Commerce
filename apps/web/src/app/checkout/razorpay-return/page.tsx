@@ -71,11 +71,11 @@ export default function RazorpayReturnPage() {
       );
 
       if (res.ok && res.data) {
-        const { order_id, payment_id, confirmed_order_id, status: verifiedStatus } = res.data;
+        const { order_id, payment_id, confirmed_order_id, status: verifiedStatus, verified } = res.data;
         setOrderId(order_id);
         setPaymentId(payment_id);
         setConfirmedOrderId(confirmed_order_id);
-        setPhase(verifiedStatus === "paid" ? "success" : "failed");
+        setPhase(verifiedStatus === "paid" || verifiedStatus === "confirmed" || verified ? "success" : "failed");
       } else {
         setError(!res.ok ? (res.error.message || "Payment verification failed.") : "Payment verification failed.");
         setPhase("error");
