@@ -71,13 +71,14 @@ def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
     no ``min_*`` constraint above zero but *would* satisfy one at zero, and more
     importantly it would claim a fact the catalog does not hold.
     """
+    dim = raw.get("dimensions_mm") if isinstance(raw.get("dimensions_mm"), dict) else {}
     return ProductSpecificationsV1(
         memory_gb=raw.get("memory_gb"),
         storage_gb=raw.get("storage_gb"),
         weight_grams=raw.get("weight_grams"),
-        length_mm=raw.get("length_mm"),
-        width_mm=raw.get("width_mm"),
-        height_mm=raw.get("height_mm"),
+        length_mm=raw.get("length_mm") or (int(dim.get("length_mm")) if dim.get("length_mm") is not None else None),
+        width_mm=raw.get("width_mm") or (int(dim.get("width_mm")) if dim.get("width_mm") is not None else None),
+        height_mm=raw.get("height_mm") or (int(dim.get("height_mm")) if dim.get("height_mm") is not None else None),
     )
 
 

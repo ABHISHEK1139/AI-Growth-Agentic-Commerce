@@ -109,10 +109,7 @@ export function exploreOfferToProductItem(
     category: offer.category ?? "",
     categoryLabel: offer.category ?? "Uncategorised",
 
-    // The catalog holds no brand field. The title carries the manufacturer name;
-    // splitting it apart here would be a guess, so the brand slot is left empty
-    // and the screens show the category instead.
-    brand: "",
+    brand: (typeof specs.brand === "string" ? specs.brand.trim() : "") || (offer.category ?? ""),
 
     // Money, straight off the offer record as integer minor units.
     priceMinor: offer.unit_price_minor,
@@ -142,12 +139,22 @@ export function exploreOfferToProductItem(
     hasCatalogImage: image.length > 0,
     catalogSpecs: specs,
 
-    // ---- Declared by the store shape, not provided by the catalog ----------
-    // Left empty on purpose. A screen that renders one of these for a catalog
-    // record would be presenting something no endpoint said.
     aiBadge: "",
     whyFitsYou: { summary: "", pros: [], warnings: [] },
-    specsGrouped: { performance: {}, connectivity: {} },
+    specsGrouped: {
+      performance: {
+        ...(specs.brand ? { Brand: String(specs.brand) } : {}),
+        ...(specs.model_number ? { Model: String(specs.model_number) } : {}),
+        ...(specs.memory_gb ? { Memory: `${specs.memory_gb} GB` } : {}),
+        ...(specs.storage_gb ? { Storage: `${specs.storage_gb} GB` } : {}),
+      },
+      display: {
+        ...(specs.color ? { Color: String(specs.color) } : {}),
+      },
+      connectivity: {
+        ...(specs.weight_grams ? { Weight: `${specs.weight_grams} g` } : {}),
+      },
+    },
     sentiment: {
       performancePct: 0,
       batteryPct: 0,
@@ -198,7 +205,7 @@ export function catalogOfferToProductItem(
     title: product.title || offer.product_id,
     category: product.category_id ?? "",
     categoryLabel: product.category_id ?? "Uncategorised",
-    brand: "",
+    brand: (typeof specs.brand === "string" ? specs.brand.trim() : "") || (product.category_id ?? ""),
     priceMinor: offer.unit_price_minor,
     originalPriceMinor: offer.unit_price_minor,
     currency: offer.currency,
@@ -220,7 +227,20 @@ export function catalogOfferToProductItem(
     catalogSpecs: specs,
     aiBadge: "",
     whyFitsYou: { summary: "", pros: [], warnings: [] },
-    specsGrouped: { performance: {}, connectivity: {} },
+    specsGrouped: {
+      performance: {
+        ...(specs.brand ? { Brand: String(specs.brand) } : {}),
+        ...(specs.model_number ? { Model: String(specs.model_number) } : {}),
+        ...(specs.memory_gb ? { Memory: `${specs.memory_gb} GB` } : {}),
+        ...(specs.storage_gb ? { Storage: `${specs.storage_gb} GB` } : {}),
+      },
+      display: {
+        ...(specs.color ? { Color: String(specs.color) } : {}),
+      },
+      connectivity: {
+        ...(specs.weight_grams ? { Weight: `${specs.weight_grams} g` } : {}),
+      },
+    },
     sentiment: {
       performancePct: 0,
       batteryPct: 0,

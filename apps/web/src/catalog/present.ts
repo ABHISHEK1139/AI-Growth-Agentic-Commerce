@@ -148,9 +148,13 @@ export interface SpecRow {
 }
 
 const SPEC_LABELS: Record<string, string> = {
+  brand: "Brand",
+  model_number: "Model",
+  color: "Color",
   memory_gb: "Memory",
   storage_gb: "Storage",
   weight_grams: "Weight",
+  dimensions_mm: "Dimensions",
   length_mm: "Length",
   width_mm: "Width",
   height_mm: "Height",
@@ -175,10 +179,8 @@ function titleCase(key: string): string {
 /**
  * Turn a raw specifications object into rows.
  *
- * A key the catalog does not hold is dropped rather than rendered as "N/A" or
- * zero: `services/offers/seed.py` is explicit that an absent specification stays
- * null because a zero would claim a fact. The unit comes from the key's own
- * suffix, so no unit is invented for a key that does not name one.
+ * Expands dimensions objects, flags, brands, and hardware specs into clean
+ * user-facing labels and values.
  */
 export function specRows(specs: Record<string, unknown> | null | undefined): SpecRow[] {
   if (!specs) return [];
@@ -187,7 +189,32 @@ export function specRows(specs: Record<string, unknown> | null | undefined): Spe
     const raw = specs[key];
     if (raw === null || raw === undefined || raw === "") return;
     let value: string;
-    if (typeof raw === "number") {
+    if (key === "dimensions_mm" && typeof raw === "object" && raw !== null) {
+      const dim = raw as Record<string, number>;
+      const l = dim.length_mm;
+      const w = dim.width_mm;
+      const h = dim.height_mm;
+      if (l != null && w != null && h != null) {
+        rows.push({
+          key: "dimensions_mm",
+          label: "Dimensions",
+          value: `${Math.round(l)} × ${Math.round(w)} × ${Math.round(h)} mm`,
+        });
+        return;
+      }
+    } else if (key === "flags" && typeof raw === "object" && raw !== null) {
+      const flags = raw as Record<string, boolean>;
+      Object.entries(flags).forEach(([fKey, fVal]) => {
+        if (typeof fVal === "boolean") {
+          rows.push({
+            key: `flag_${fKey}`,
+            label: titleCase(fKey),
+            value: fVal ? "Yes" : "No",
+          });
+        }
+      });
+      return;
+    } else if (typeof raw === "number") {
       const unit = SPEC_UNITS[key];
       value = unit ? `${new Intl.NumberFormat("en-IN").format(raw)} ${unit}` : String(raw);
     } else if (typeof raw === "boolean") {
@@ -197,7 +224,7 @@ export function specRows(specs: Record<string, unknown> | null | undefined): Spe
     } else if (Array.isArray(raw)) {
       value = raw.map((entry) => String(entry)).join(", ");
     } else {
-      return; // a nested object has no agreed rendering; omitted rather than guessed
+      return;
     }
     rows.push({ key, label: SPEC_LABELS[key] ?? titleCase(key), value });
   });
@@ -205,12 +232,17 @@ export function specRows(specs: Record<string, unknown> | null | undefined): Spe
 }
 
 /**
- * A one-line specification summary for a card, built only from the keys present.
- * Returns an empty string when the record holds none, which the card labels.
+ * A one-line specification summary for a card, built from the most descriptive keys.
  */
 export function specSummary(specs: Record<string, unknown> | null | undefined): string {
-  const rows = specRows(specs).filter((row) => row.key in SPEC_LABELS);
-  return rows.map((row) => `${row.label} ${row.value}`).join(" \u00b7 ");
+  const rows = specRows(specs);
+  const priorityKeys = ["brand", "memory_gb", "storage_gb", "color", "dimensions_mm", "weight_grams"];
+  const summaryRows = priorityKeys
+    .map((k) => rows.find((r) => r.key === k))
+    .filter((r): r is SpecRow => r != null);
+  
+  const chosen = summaryRows.length > 0 ? summaryRows.slice(0, 3) : rows.slice(0, 3);
+  return chosen.map((row) => `${row.label}: ${row.value}`).join(" · ");
 }
 
 // ---------------------------------------------------------------------------
