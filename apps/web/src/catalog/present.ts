@@ -100,16 +100,32 @@ export const CATEGORY_SLUG_TO_ID: Record<string, string> = {
   accessories: "computer_accessory",
   keyboards: "computer_accessory",
   computer_accessory: "computer_accessory",
+  cameras: "camera",
+  camera: "camera",
+  appliances: "appliance",
+  appliance: "appliance",
+  electronics: "home_electronics",
+  home_electronics: "home_electronics",
+  phone_accessory: "phone_accessory",
+  phone_accessories: "phone_accessory",
 };
 
 /** Display wording for a route slug. Falls back to the slug itself. */
 export const CATEGORY_SLUG_TITLE: Record<string, string> = {
   laptops: "Laptops",
-  phones: "Phones",
-  monitors: "Monitors",
-  audio: "Headphones & audio",
-  keyboards: "Keyboards & peripherals",
-  accessories: "Computer accessories",
+  phones: "Smartphones",
+  monitors: "Monitors & Displays",
+  audio: "Audio & Headphones",
+  keyboards: "Keyboards & Accessories",
+  accessories: "Computer Accessories",
+  cameras: "Cameras & Optics",
+  camera: "Cameras & Optics",
+  appliances: "Appliances & Smart Home",
+  appliance: "Appliances",
+  electronics: "Home Electronics",
+  home_electronics: "Home Electronics",
+  phone_accessory: "Phone Accessories",
+  phone_accessories: "Phone Accessories",
 };
 
 export function categoryIdForSlug(slug: string): string | null {
@@ -228,7 +244,7 @@ export function productImageUrls(product: CatalogProduct | null | undefined): st
   if (!product || !Array.isArray(product.images)) return [];
   const urls: string[] = [];
   product.images.forEach((image) => {
-    const url = image?.source_url;
+    const url = image?.source_url || (image as any)?.url;
     if (typeof url === "string" && url.trim()) urls.push(url.trim());
   });
   return urls;

@@ -10,8 +10,10 @@ const links = [
   ["Laptops", "/category/laptops"],
   ["Phones", "/category/phones"],
   ["Audio", "/category/audio"],
+  ["Cameras", "/category/cameras"],
   ["Monitors", "/category/monitors"],
   ["Keyboards", "/category/keyboards"],
+  ["Appliances", "/category/appliances"],
   ["Deals", "/search?deals=true"],
 ] as const;
 

@@ -117,12 +117,20 @@ class IntentValidator:
             category = str(category).lower().strip()
             if "laptop" in category or "ultrabook" in category or "notebook" in category:
                 category = "laptop"
+            elif "phone_accessory" in category:
+                category = "phone_accessory"
             elif "phone" in category or "smartphone" in category or "mobile" in category:
                 category = "smartphone"
             elif "monitor" in category or "display" in category or "screen" in category:
                 category = "monitor"
             elif "audio" in category or "headphone" in category or "earbuds" in category:
                 category = "audio"
+            elif "camera" in category or "dslr" in category or "lens" in category:
+                category = "camera"
+            elif "appliance" in category or "kitchen" in category:
+                category = "appliance"
+            elif "home_electronics" in category or "tv" in category:
+                category = "home_electronics"
             elif (
                 "accessory" in category
                 or "cable" in category
@@ -145,9 +153,15 @@ class IntentValidator:
                 w in p_lower for w in ("audio", "headphone", "earphone", "earbuds", "speaker")
             ):
                 category = "audio"
+            elif any(w in p_lower for w in ("camera", "dslr", "lens", "optics", "gopro")):
+                category = "camera"
+            elif any(w in p_lower for w in ("appliance", "kitchen", "cooker", "blender", "fridge", "purifier")):
+                category = "appliance"
+            elif any(w in p_lower for w in ("charger", "case", "cover", "magsafe", "power bank")):
+                category = "phone_accessory"
             elif any(
                 w in p_lower
-                for w in ("accessory", "charger", "cable", "mouse", "keyboard", "sleeve", "trackpad", "dock", "ipad")
+                for w in ("accessory", "cable", "mouse", "keyboard", "sleeve", "trackpad", "dock", "ipad")
             ):
                 category = "computer_accessory"
 

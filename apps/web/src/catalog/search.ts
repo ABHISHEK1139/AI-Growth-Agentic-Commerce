@@ -78,15 +78,18 @@ export async function runCatalogSearch(filters: CatalogFilters): Promise<Catalog
           if (!productResult.ok) return { view: toOfferView(offer, null), failed: true };
           const product = productResult.data?.product;
           const firstImage = (product?.images ?? []).find(
-            (image) => typeof image?.source_url === "string" && image.source_url.trim().length > 0
+            (image) =>
+              (typeof image?.source_url === "string" && image.source_url.trim().length > 0) ||
+              (typeof (image as any)?.url === "string" && (image as any).url.trim().length > 0)
           );
+          const resolvedUrl = firstImage?.source_url || (firstImage as any)?.url || null;
           return {
             view: toOfferView(offer, {
               title: product?.title,
               category_id: product?.category_id,
               average_rating: product?.average_rating,
               rating_number: product?.rating_number,
-              imageUrl: firstImage?.source_url ?? null,
+              imageUrl: resolvedUrl,
               specifications: product?.specifications ?? null,
             }),
             failed: false,
