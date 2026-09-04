@@ -710,3 +710,196 @@ export function approveAuthorization(authId: string): boolean {
   const res = db.prepare(`UPDATE authorization SET status = 'approved' WHERE authorization_id = ?`).run(authId);
   return res.changes > 0;
 }
+
+export function saveAuditEvent(event: {
+  event_id?: string;
+  merchant_id?: string;
+  request_id?: string;
+  trace_id?: string;
+  agent_run_id?: string;
+  actor_type?: string;
+  actor_id?: string;
+  event_type: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  input_hash?: string;
+  decision?: string;
+  reason_code?: string;
+  policy_version?: string;
+  model_version?: string;
+  amount_minor?: number;
+  metadata?: any;
+  created_at?: string;
+}): any {
+  const db = getServerDb();
+  const eventId = event.event_id || `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const merchantId = event.merchant_id || "merchant_demo";
+  const requestId = event.request_id || `req_${Date.now().toString(36)}`;
+  const traceId = event.trace_id || `trc_${Date.now().toString(36)}`;
+  const actorType = event.actor_type || "system";
+  const actorId = event.actor_id || "policy_engine";
+  const metadataStr = typeof event.metadata === "string" ? event.metadata : JSON.stringify(event.metadata || {});
+  const createdAt = event.created_at || new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO audit_event (
+      event_id, merchant_id, request_id, trace_id, agent_run_id,
+      actor_type, actor_id, event_type, aggregate_type, aggregate_id,
+      input_hash, decision, reason_code, policy_version, model_version,
+      amount_minor, metadata, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  stmt.run(
+    eventId,
+    merchantId,
+    requestId,
+    traceId,
+    event.agent_run_id || null,
+    actorType,
+    actorId,
+    event.event_type,
+    event.aggregate_type,
+    event.aggregate_id,
+    event.input_hash || null,
+    event.decision || null,
+    event.reason_code || null,
+    event.policy_version || "pol_v2_agentic_commerce",
+    event.model_version || null,
+    event.amount_minor || null,
+    metadataStr,
+    createdAt
+  );
+
+  return {
+    event_id: eventId,
+    merchant_id: merchantId,
+    request_id: requestId,
+    trace_id: traceId,
+    agent_run_id: event.agent_run_id || null,
+    actor_type: actorType,
+    actor_id: actorId,
+    event_type: event.event_type,
+    aggregate_type: event.aggregate_type,
+    aggregate_id: event.aggregate_id,
+    input_hash: event.input_hash || null,
+    decision: event.decision || null,
+    reason_code: event.reason_code || null,
+    policy_version: event.policy_version || "pol_v2_agentic_commerce",
+    model_version: event.model_version || null,
+    amount_minor: event.amount_minor || null,
+    metadata: event.metadata || {},
+    created_at: createdAt,
+  };
+}
+
+export function getAuditEventsByAggregate(aggregateType: string, aggregateId: string): any[] {
+  const db = getServerDb();
+  const rows = db.prepare(`
+    SELECT * FROM audit_event
+    WHERE (aggregate_type = ? AND (aggregate_id = ? OR aggregate_id LIKE ?))
+       OR aggregate_id = ?
+    ORDER BY created_at ASC, event_id ASC
+  `).all(aggregateType, aggregateId, `%${aggregateId}%`, aggregateId) as any[];
+
+  return rows.map((r) => {
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata = typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {});
+    } catch {
+      metadata = {};
+    }
+    return {
+      event_id: r.event_id,
+      request_id: r.request_id,
+      trace_id: r.trace_id,
+      agent_run_id: r.agent_run_id,
+      actor_type: r.actor_type,
+      actor_id: r.actor_id,
+      event_type: r.event_type,
+      aggregate_type: r.aggregate_type,
+      aggregate_id: r.aggregate_id,
+      input_hash: r.input_hash,
+      decision: r.decision,
+      reason_code: r.reason_code,
+      policy_version: r.policy_version,
+      model_version: r.model_version,
+      amount_minor: r.amount_minor,
+      metadata,
+      created_at: r.created_at,
+    };
+  });
+}
+
+export function listAuditEvents(filters?: {
+  eventType?: string;
+  aggregateType?: string;
+  aggregateId?: string;
+  startAt?: string;
+  endAt?: string;
+  limit?: number;
+}): any[] {
+  const db = getServerDb();
+  const where: string[] = [];
+  const params: any[] = [];
+
+  if (filters?.eventType) {
+    where.push("event_type = ?");
+    params.push(filters.eventType);
+  }
+  if (filters?.aggregateType) {
+    where.push("aggregate_type = ?");
+    params.push(filters.aggregateType);
+  }
+  if (filters?.aggregateId) {
+    where.push("(aggregate_id = ? OR aggregate_id LIKE ?)");
+    params.push(filters.aggregateId, `%${filters.aggregateId}%`);
+  }
+  if (filters?.startAt) {
+    where.push("created_at >= ?");
+    params.push(filters.startAt);
+  }
+  if (filters?.endAt) {
+    where.push("created_at <= ?");
+    params.push(filters.endAt);
+  }
+
+  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const limit = Math.min(filters?.limit || 50, 200);
+
+  const rows = db.prepare(`
+    SELECT * FROM audit_event
+    ${whereClause}
+    ORDER BY created_at DESC, event_id DESC
+    LIMIT ?
+  `).all(...params, limit) as any[];
+
+  return rows.map((r) => {
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata = typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {});
+    } catch {
+      metadata = {};
+    }
+    return {
+      event_id: r.event_id,
+      request_id: r.request_id,
+      trace_id: r.trace_id,
+      agent_run_id: r.agent_run_id,
+      actor_type: r.actor_type,
+      actor_id: r.actor_id,
+      event_type: r.event_type,
+      aggregate_type: r.aggregate_type,
+      aggregate_id: r.aggregate_id,
+      input_hash: r.input_hash,
+      decision: r.decision,
+      reason_code: r.reason_code,
+      policy_version: r.policy_version,
+      model_version: r.model_version,
+      amount_minor: r.amount_minor,
+      metadata,
+      created_at: r.created_at,
+    };
+  });
+}
+
