@@ -27,8 +27,35 @@ export function getServerDb(): DatabaseSync {
   if (!_db) {
     const dbPath = resolveDatabasePath();
     _db = new DatabaseSync(dbPath);
-    // Disable strict foreign keys on the session to allow resilient order/payment insertion
     _db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      _db.exec(`
+        UPDATE product
+        SET category_id = 'computer_accessory'
+        WHERE category_id = 'laptop'
+        AND product_id NOT LIKE 'prd_seed_%'
+        AND (
+          title LIKE '%sticker%' OR title LIKE '%decal%' OR title LIKE '%battery%' OR title LIKE '%charger%'
+          OR title LIKE '%backpack%' OR title LIKE '%bag%' OR title LIKE '%tote%' OR title LIKE '%clutch%'
+          OR title LIKE '%fan%' OR title LIKE '%cable%' OR title LIKE '%cord%' OR title LIKE '%adapter%'
+          OR title LIKE '%screen%' OR title LIKE '%drive%' OR title LIKE '%pad%' AND title NOT LIKE '%ideapad%' AND title NOT LIKE '%thinkpad%'
+        );
+
+        UPDATE product
+        SET category_id = 'phone_accessory'
+        WHERE category_id = 'smartphone'
+        AND product_id NOT LIKE 'prd_seed_%'
+        AND (
+          title LIKE '%case%' OR title LIKE '%cover%' OR title LIKE '%wallet%' OR title LIKE '%protector%'
+          OR title LIKE '%glass%' OR title LIKE '%film%' OR title LIKE '%popsocket%' OR title LIKE '%armband%'
+          OR title LIKE '%holster%' OR title LIKE '%mount%' OR title LIKE '%holder%' OR title LIKE '%charger%'
+          OR title LIKE '%cable%' OR title LIKE '%adapter%' OR title LIKE '%fan%' OR title LIKE '%radio%'
+          OR title LIKE '%watch%' OR title LIKE '%protection plan%' OR title LIKE '%card%' OR title LIKE '%gps%'
+        );
+      `);
+    } catch {
+      // Ignore if database schema not yet loaded
+    }
   }
   return _db;
 }
@@ -119,6 +146,7 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
     LEFT JOIN product_image pi ON p.product_id = pi.product_id AND pi.position = 0
     WHERE ${whereClause}
     ORDER BY 
+      CASE WHEN p.product_id LIKE 'prd_seed_%' THEN 0 ELSE 1 END ASC,
       CASE 
         WHEN p.category_id IN ('laptop', 'laptops', 'smartphone', 'smartphones', 'audio', 'monitor', 'monitors', 'keyboards') THEN 0
         ELSE 1

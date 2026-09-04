@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Heart, ImageOff, Scale, ShoppingBag, Star, Tag, Truck } from "lucide-react";
 import { formatMinorToMajor } from "@/lib/money";
 import { useStore } from "@/context/StoreContext";
-import { exploreOfferToProductItem } from "@/catalog/adapt";
+import { exploreOfferToProductItem, defaultImageForCategory } from "@/catalog/adapt";
 import { pricingSourceLabel, pricingSourceDetail, stockLabel, categoryTitleForSlug, resolveBrand } from "@/catalog/present";
 import type { CatalogSourceName, ExploreOffer } from "@/catalog/types";
 
@@ -41,6 +41,13 @@ export function OfferCard({
   highlightReason?: string;
 }) {
   const { addToCart, wishlist, toggleWishlist, compareList, toggleCompare } = useStore();
+  const brand = resolveBrand(offer.specs, offer.title, offer.category);
+  const fallbackUrl = defaultImageForCategory(offer.category, offer.title, brand);
+  const initialUrl = (typeof offer.image_url === "string" && offer.image_url.trim().length > 0 && !offer.image_url.endsWith(".gif") && !offer.image_url.includes("placeholder") && !offer.image_url.includes("01RmK"))
+    ? offer.image_url.trim()
+    : fallbackUrl;
+
+  const [currentImg, setCurrentImg] = useState(initialUrl);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageBroken, setImageBroken] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
@@ -48,8 +55,14 @@ export function OfferCard({
   const saved = wishlist.includes(offer.product_id);
   const compared = compareList.includes(offer.product_id);
   const outOfStock = offer.available_stock <= 0;
-  const imageUrl = typeof offer.image_url === "string" ? offer.image_url.trim() : "";
-  const showImage = imageUrl.length > 0 && !imageBroken;
+
+  const handleImgError = () => {
+    if (currentImg !== fallbackUrl) {
+      setCurrentImg(fallbackUrl);
+    } else {
+      setImageBroken(true);
+    }
+  };
 
   const handleAddToCart = () => {
     addToCart(exploreOfferToProductItem(offer, catalogSource), 1);
@@ -67,31 +80,31 @@ export function OfferCard({
       data-offer-id={offer.offer_id}
       data-product-id={offer.product_id}
     >
-      {/* Image, or a stated absence */}
+      {/* Image */}
       <div className="relative aspect-[1.1] overflow-hidden bg-[#eef1eb]">
-        {showImage ? (
+        {!imageBroken ? (
           <>
             {!imageLoaded && <div className="absolute inset-0 skeleton-pulse" />}
             <Link href={`/product/${encodeURIComponent(offer.product_id)}`} className="block h-full">
               <img
-                src={imageUrl}
+                src={currentImg}
                 alt={offer.title}
                 className={`h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-110 ${
                   imageLoaded ? "opacity-100" : "opacity-0"
                 }`}
                 onLoad={() => setImageLoaded(true)}
-                onError={() => setImageBroken(true)}
+                onError={handleImgError}
               />
             </Link>
           </>
         ) : (
           <Link
             href={`/product/${encodeURIComponent(offer.product_id)}`}
-            className="flex h-full w-full flex-col items-center justify-center gap-2 text-center text-[#68736d]"
+            className="flex h-full w-full flex-col items-center justify-center gap-2 text-center text-[#68736d] p-4 bg-slate-100"
           >
-            <ImageOff className="h-6 w-6" />
-            <span className="px-4 text-[11px] font-semibold leading-4">
-              {imageUrl ? "Catalog image failed to load" : "No image in the catalog record"}
+            <ImageOff className="h-6 w-6 text-slate-400" />
+            <span className="text-[11px] font-semibold text-slate-500 line-clamp-2">
+              {offer.title}
             </span>
           </Link>
         )}

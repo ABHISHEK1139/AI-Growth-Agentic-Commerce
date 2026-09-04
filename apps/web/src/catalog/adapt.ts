@@ -102,8 +102,42 @@ export function defaultImageForCategory(
   const t = (title || "").toLowerCase();
   const b = (brand || "").toLowerCase();
 
-  // Laptop brand matching
-  if (c.includes("laptop") || t.includes("laptop")) {
+  // 1. Accessory item keyword matching (so cables, chargers, sleeves never show a laptop/phone)
+  if (t.includes("cable") || t.includes("cord") || t.includes("hdmi") || t.includes("usb-c") || t.includes("auxiliary")) {
+    return "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80";
+  }
+  if (t.includes("charger") || t.includes("battery") || t.includes("power bank") || t.includes("charging") || t.includes("power adapter")) {
+    return "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=600&q=80";
+  }
+  if (t.includes("backpack") || t.includes("bag") || t.includes("tote") || t.includes("sleeve") || t.includes("clutch") || t.includes("luggage")) {
+    return "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=600&q=80";
+  }
+  if (t.includes("mouse") || t.includes("trackpad")) {
+    return "https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?auto=format&fit=crop&w=600&q=80";
+  }
+  if (t.includes("keyboard") || t.includes("keypad") || t.includes("mechanical")) {
+    return "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=600&q=80";
+  }
+  if (t.includes("sticker") || t.includes("decal")) {
+    return "https://images.unsplash.com/photo-1572375992501-4b0892d50c69?auto=format&fit=crop&w=600&q=80";
+  }
+
+  // 2. Audio & Headphones
+  if (c.includes("audio") || c.includes("headphone") || c.includes("earphone") || t.includes("headphone") || t.includes("earbud") || t.includes("speaker") || t.includes("sound bar")) {
+    if (b.includes("sony") || t.includes("sony") || t.includes("wh-1000xm")) {
+      return "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=600&q=80";
+    }
+    if (b.includes("bose") || t.includes("bose")) {
+      return "https://images.unsplash.com/photo-1583394838336-acd977736f90?auto=format&fit=crop&w=600&q=80";
+    }
+    if (b.includes("apple") || t.includes("airpods")) {
+      return "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?auto=format&fit=crop&w=600&q=80";
+    }
+    return "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80";
+  }
+
+  // 3. Laptop brand matching
+  if (c.includes("laptop") || t.includes("laptop") || t.includes("notebook") || t.includes("macbook") || t.includes("chromebook")) {
     if (b.includes("dell") || t.includes("dell")) {
       return "https://images.unsplash.com/photo-1593642632823-8f785ba67e45?auto=format&fit=crop&w=600&q=80";
     }
@@ -122,11 +156,14 @@ export function defaultImageForCategory(
     if (b.includes("acer") || t.includes("aspire") || t.includes("predator")) {
       return "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=600&q=80";
     }
+    if (b.includes("samsung") || t.includes("galaxy book")) {
+      return "https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?auto=format&fit=crop&w=600&q=80";
+    }
     return "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=600&q=80";
   }
 
-  // Smartphone brand matching
-  if (c.includes("phone") || c.includes("smart") || t.includes("phone") || t.includes("galaxy") || t.includes("iphone")) {
+  // 4. Smartphone brand matching
+  if (c.includes("phone") || c.includes("smart") || t.includes("phone") || t.includes("galaxy") || t.includes("iphone") || t.includes("pixel")) {
     if (b.includes("samsung") || t.includes("samsung") || t.includes("galaxy")) {
       return "https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?auto=format&fit=crop&w=600&q=80";
     }
@@ -136,32 +173,30 @@ export function defaultImageForCategory(
     if (b.includes("google") || t.includes("pixel")) {
       return "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&w=600&q=80";
     }
+    if (b.includes("nothing") || t.includes("nothing")) {
+      return "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&w=600&q=80";
+    }
     return "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=600&q=80";
   }
 
-  // Audio brand matching
-  if (c.includes("audio") || c.includes("headphone") || c.includes("earphone") || t.includes("headphone") || t.includes("earbud")) {
-    if (b.includes("sony") || t.includes("sony") || t.includes("wh-1000xm")) {
-      return "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=600&q=80";
-    }
-    return "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80";
-  }
-
-  // Monitor brand matching
+  // 5. Monitor brand matching
   if (c.includes("monitor") || c.includes("display") || t.includes("monitor")) {
     if (b.includes("lg") || t.includes("lg")) {
       return "https://images.unsplash.com/photo-1547082299-de196ea013d6?auto=format&fit=crop&w=600&q=80";
     }
+    if (b.includes("dell") || t.includes("dell")) {
+      return "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=600&q=80";
+    }
     return "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=600&q=80";
   }
 
-  // Keyboards & Peripherals
-  if (c.includes("keyboard") || t.includes("keyboard") || c.includes("computer_accessory")) {
+  // 6. Keyboards & Peripherals
+  if (c.includes("keyboard") || t.includes("keyboard") || c.includes("computer_accessory") || c.includes("accessory")) {
     if (b.includes("keychron") || t.includes("keychron")) {
       return "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=600&q=80";
     }
-    if (t.includes("mouse")) {
-      return "https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?auto=format&fit=crop&w=600&q=80";
+    if (b.includes("nuphy") || t.includes("nuphy")) {
+      return "https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=600&q=80";
     }
     return "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=600&q=80";
   }

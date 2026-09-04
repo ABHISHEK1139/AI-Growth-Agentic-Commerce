@@ -1052,9 +1052,9 @@ export const SEED_CATALOG_PRODUCTS: ProductItem[] = [
     "stock": 15,
     "deliveryDays": 2,
     "returnDays": 7,
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9e/Nothing_Phone.jpg",
+    "imageUrl": "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&w=900&q=80",
     "gallery": [
-      "https://upload.wikimedia.org/wikipedia/commons/9/9e/Nothing_Phone.jpg"
+      "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&w=900&q=80"
     ],
     "aiBadge": "\u2726 Verified Hardware Spec",
     "shortSpecs": "Mid-range handset with a 120Hz AMOLED panel.",
