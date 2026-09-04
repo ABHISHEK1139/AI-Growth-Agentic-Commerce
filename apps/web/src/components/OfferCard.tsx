@@ -6,7 +6,7 @@ import { Heart, ImageOff, Scale, ShoppingBag, Star, Tag, Truck } from "lucide-re
 import { formatMinorToMajor } from "@/lib/money";
 import { useStore } from "@/context/StoreContext";
 import { exploreOfferToProductItem } from "@/catalog/adapt";
-import { pricingSourceLabel, pricingSourceDetail, stockLabel, categoryTitleForSlug } from "@/catalog/present";
+import { pricingSourceLabel, pricingSourceDetail, stockLabel, categoryTitleForSlug, resolveBrand } from "@/catalog/present";
 import type { CatalogSourceName, ExploreOffer } from "@/catalog/types";
 
 /**
@@ -132,8 +132,8 @@ export function OfferCard({
       {/* Content */}
       <div className="flex flex-1 flex-col p-4 sm:p-5">
         <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-semibold">
-          <span className="font-bold tracking-wide text-[#174c3c]">
-            {categoryTitleForSlug(offer.category || "") || "Electronics"}
+          <span className="font-bold uppercase tracking-[.12em] text-[#174c3c]">
+            {resolveBrand(offer.specs, offer.title, offer.category)}
           </span>
           <span className="inline-flex items-center gap-1 text-[#526058]">
             {offer.reviews_count > 0 ? (

@@ -24,7 +24,7 @@
 
 import type { ProductItem } from "@/data/products";
 import type { CatalogOffer, CatalogSourceName, ExploreOffer, CatalogProduct } from "./types";
-import { specSummary } from "./present";
+import { specSummary, resolveBrand } from "./present";
 
 /** True when this record came from the API rather than the static demo list. */
 export function isCatalogRecord(product: ProductItem): boolean {
@@ -109,7 +109,7 @@ export function exploreOfferToProductItem(
     category: offer.category ?? "",
     categoryLabel: offer.category ?? "Uncategorised",
 
-    brand: (typeof specs.brand === "string" ? specs.brand.trim() : "") || (offer.category ?? ""),
+    brand: resolveBrand(specs, offer.title, offer.category),
 
     // Money, straight off the offer record as integer minor units.
     priceMinor: offer.unit_price_minor,
@@ -205,7 +205,7 @@ export function catalogOfferToProductItem(
     title: product.title || offer.product_id,
     category: product.category_id ?? "",
     categoryLabel: product.category_id ?? "Uncategorised",
-    brand: (typeof specs.brand === "string" ? specs.brand.trim() : "") || (product.category_id ?? ""),
+    brand: resolveBrand(specs, product.title || offer.product_id, product.category_id),
     priceMinor: offer.unit_price_minor,
     originalPriceMinor: offer.unit_price_minor,
     currency: offer.currency,

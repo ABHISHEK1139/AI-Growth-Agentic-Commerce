@@ -43,6 +43,8 @@ import {
   readableInstant,
   specRows,
   stockLabel,
+  resolveBrand,
+  categoryTitleForSlug,
 } from "@/catalog/present";
 import type {
   CatalogProduct,
@@ -193,6 +195,7 @@ export default function ProductDetailPage() {
 
   const title = product?.title || offer?.title || productId;
   const categoryId = product?.category_id || offer?.category || "";
+  const brand = resolveBrand(product?.specifications ?? offer?.specs, title, categoryId);
   const rating = product?.average_rating ?? offer?.rating ?? null;
   const ratingCount = product?.rating_number ?? offer?.reviews_count ?? null;
   const paragraphs = descriptionParagraphs(product?.description);
@@ -474,7 +477,7 @@ export default function ProductDetailPage() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-[#174c3c] uppercase tracking-wider bg-emerald-50 px-2.5 py-1 rounded-md">
-                {categoryId || "Verified Tech"}
+                {brand} {categoryId && categoryId.toLowerCase() !== brand.toLowerCase() ? `· ${categoryTitleForSlug(categoryId)}` : ""}
               </span>
               <span className="font-semibold text-slate-500 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#174c3c]" /> Genuine Product

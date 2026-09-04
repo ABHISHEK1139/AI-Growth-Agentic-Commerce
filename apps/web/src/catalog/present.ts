@@ -143,6 +143,75 @@ export function categoryTitleForSlug(slug: string): string {
   return CATEGORY_SLUG_TITLE[slug.toLowerCase()] ?? slug;
 }
 
+const KNOWN_BRANDS = [
+  "Apple", "Dell", "Lenovo", "HP", "ASUS", "Acer", "MSI", "Samsung", "Sony",
+  "Keychron", "Logitech", "Google", "Nothing", "OnePlus", "Xiaomi", "Redmi",
+  "LG", "BenQ", "Bose", "Sennheiser", "NuPhy", "Chuwi", "Infinix", "boAt",
+  "Noise", "Realme", "Motorola", "Whirlpool", "Bosch", "Philips", "Panasonic",
+  "Corsair", "Razer", "SteelSeries", "HyperX", "Anker", "Belkin", "TP-Link",
+  "SanDisk", "Crucial", "Western Digital", "Seagate", "Kingston", "Intel", "AMD", "NVIDIA"
+];
+
+const EXCLUDED_BRAND_TOKENS = new Set([
+  "the", "a", "an", "new", "pro", "ultra", "mini", "pack", "set", "lot",
+  "wireless", "wired", "portable", "premium", "smart", "super", "digital",
+  "usb", "hdmi", "cable", "adapter", "case", "cover", "sleeve", "bag",
+  "laptop", "laptops", "phone", "phones", "smartphone", "smartphones",
+  "monitor", "monitors", "audio", "headphones", "accessory", "accessories",
+  "computer_accessory", "appliance", "appliances", "electronics", "home_electronics"
+]);
+
+/**
+ * Resolves an accurate, human-readable brand/company name.
+ * 1. Checks specs for non-generic brand/manufacturer.
+ * 2. If missing or generic, extracts known brand from title.
+ * 3. Never returns raw DB category slugs like "laptop" or "computer_accessory".
+ */
+export function resolveBrand(
+  specs?: Record<string, unknown> | null,
+  title?: string | null,
+  category?: string | null
+): string {
+  if (specs && typeof specs === "object") {
+    const rawBrand = specs.brand || specs.Brand || specs.manufacturer || specs.Manufacturer;
+    if (typeof rawBrand === "string" && rawBrand.trim().length > 0) {
+      const trimmed = rawBrand.trim();
+      const lower = trimmed.toLowerCase();
+      if (lower !== "generic" && !lower.includes("unknown") && !EXCLUDED_BRAND_TOKENS.has(lower)) {
+        return trimmed;
+      }
+    }
+  }
+
+  if (title && typeof title === "string") {
+    const cleanTitle = title.trim();
+
+    for (const b of KNOWN_BRANDS) {
+      const regex = new RegExp(`(^|[\\s(—–-])${b}([\\s)™®—–-]|$)`, "i");
+      if (regex.test(cleanTitle)) {
+        return b;
+      }
+    }
+
+    const firstWordMatch = cleanTitle.match(/^([A-Za-z0-9&'+.-]{2,15})\b/);
+    if (firstWordMatch) {
+      const candidate = firstWordMatch[1];
+      if (!EXCLUDED_BRAND_TOKENS.has(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+  }
+
+  if (category && typeof category === "string") {
+    const titleFromSlug = categoryTitleForSlug(category);
+    if (titleFromSlug && !EXCLUDED_BRAND_TOKENS.has(titleFromSlug.toLowerCase())) {
+      return titleFromSlug;
+    }
+  }
+
+  return "Verified Brand";
+}
+
 // ---------------------------------------------------------------------------
 // Specifications
 // ---------------------------------------------------------------------------
