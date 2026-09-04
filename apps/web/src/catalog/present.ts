@@ -172,6 +172,19 @@ export function resolveBrand(
   title?: string | null,
   category?: string | null
 ): string {
+  const cleanTitle = (title || "").trim();
+
+  // 1. High-confidence: If title starts with a reputable known brand (e.g. "Dell XPS...", "Apple MacBook...", "Sony WH...")
+  if (cleanTitle) {
+    for (const b of KNOWN_BRANDS) {
+      const startRegex = new RegExp(`^${b}\\b`, "i");
+      if (startRegex.test(cleanTitle)) {
+        return b;
+      }
+    }
+  }
+
+  // 2. Authoritative specification brand (if not generic/unknown/excluded)
   if (specs && typeof specs === "object") {
     const rawBrand = specs.brand || specs.Brand || specs.manufacturer || specs.Manufacturer;
     if (typeof rawBrand === "string" && rawBrand.trim().length > 0) {
@@ -183,13 +196,21 @@ export function resolveBrand(
     }
   }
 
-  if (title && typeof title === "string") {
-    const cleanTitle = title.trim();
+  // 3. Check for "by [Brand]" in title
+  if (cleanTitle) {
+    const byMatch = cleanTitle.match(/\bby\s+([A-Za-z0-9&'+.-]{2,20})\b/i);
+    if (byMatch && !EXCLUDED_BRAND_TOKENS.has(byMatch[1].toLowerCase())) {
+      return byMatch[1];
+    }
 
+    // 4. Known brand in title ONLY if not an accessory "for" or "compatible with"
     for (const b of KNOWN_BRANDS) {
-      const regex = new RegExp(`(^|[\\s(—–-])${b}([\\s)™®—–-]|$)`, "i");
-      if (regex.test(cleanTitle)) {
-        return b;
+      const isTargetDevice = new RegExp(`(?:for|compatible with|fits?|suitable for)\\s+[^,;]*\\b${b}\\b`, "i").test(cleanTitle);
+      if (!isTargetDevice) {
+        const regex = new RegExp(`(^|[\\s(—–-])${b}([\\s)™®—–-]|$)`, "i");
+        if (regex.test(cleanTitle)) {
+          return b;
+        }
       }
     }
 

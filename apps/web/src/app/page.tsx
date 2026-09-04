@@ -90,12 +90,16 @@ export default function ConsumerHomePage() {
           );
 
           if (liveItems.length > 0) {
-            setAllItems(liveItems);
-            setPicks(liveItems.slice(0, 8));
-            const liveDeals = liveItems.filter(
+            const merged = [
+              ...ALL_PRODUCTS,
+              ...liveItems.filter((li) => !ALL_PRODUCTS.some((ap) => ap.id === li.id)),
+            ];
+            setAllItems(merged);
+            setPicks(merged.slice(0, 8));
+            const liveDeals = merged.filter(
               (p) => p.originalPriceMinor > p.priceMinor
             );
-            setDeals(liveDeals.length > 0 ? liveDeals.slice(0, 4) : liveItems.slice(8, 12));
+            setDeals(liveDeals.length > 0 ? liveDeals.slice(0, 4) : merged.slice(4, 8));
           }
         }
       } catch (err) {

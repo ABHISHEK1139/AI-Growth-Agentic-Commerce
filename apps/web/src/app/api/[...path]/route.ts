@@ -852,8 +852,15 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     });
   }
 
-  // GET /api/v1/agent-catalog
-  if (pathStr === "v1/agent-catalog" || pathStr === "agent-catalog") {
+  // GET /api/v1/agent-catalog or /api/v1/agent/catalog or /.well-known/agent-catalog.json
+  if (
+    pathStr === "v1/agent-catalog" ||
+    pathStr === "agent-catalog" ||
+    pathStr === "v1/agent/catalog" ||
+    pathStr === ".well-known/agent-catalog.json" ||
+    pathStr === ".well-known/agentic-catalog.json" ||
+    pathStr === "agent-catalog.json"
+  ) {
     const qParam = url.searchParams.get("q") || undefined;
     const catParam = url.searchParams.get("category") || undefined;
     const limitParam = Math.min(Number(url.searchParams.get("limit") || "100"), 500);
@@ -2212,42 +2219,125 @@ Buyer Question / Research Inquiry: "${question}"`,
   // POST /api/v1/recommendations/cross-sell (Upsell & cross-sell agent)
   if (pathStr === "v1/recommendations/cross-sell" || pathStr === "recommendations/cross-sell") {
     const targetId = body.target_product_id || "";
-    const targetProd = findProduct(targetId);
-    const cat = (targetProd?.category || "").toLowerCase();
+    const targetProd: any = findProduct(targetId) || getDbProductById(targetId);
+    const cat = (targetProd?.category || targetProd?.category_id || "").toLowerCase();
+    const title = (targetProd?.title || "").toLowerCase();
 
-    let companion: any = null;
-    if (targetProd?.crossSell && targetProd.crossSell.title) {
-      companion = {
-        id: targetProd.crossSell.id || `acc_${Date.now().toString(36)}`,
-        title: targetProd.crossSell.title,
-        price_minor: targetProd.crossSell.priceMinor,
-        image_url: targetProd.crossSell.imageUrl,
-        category: "accessory",
-        compatibility_reason: cat.includes("laptop")
-          ? "Tailored fit: Shockproof padding protecting ports and chassis on the move."
-          : cat.includes("phone")
-          ? "Certified GaN: High-efficiency rapid charging without overheating battery cells."
-          : cat.includes("monitor")
-          ? "Full bandwidth: 48Gbps braided cord driving 4K 120Hz / 8K without screen flicker."
-          : cat.includes("audio")
-          ? "Ergonomic preservation: Soft silicone cradle preventing headband deformation."
-          : "Verified companion: Engineered to complement your hardware setup.",
-        savings_minor: targetProd.crossSell.alternativeSavingsMinor || 30000,
-      };
+    let recommendations: any[] = [];
+
+    if (cat.includes("phone") || cat.includes("mobile") || title.includes("phone") || title.includes("galaxy") || title.includes("iphone")) {
+      recommendations = [
+        {
+          id: "acc_gan_charger_45w",
+          product_id: "acc_gan_charger_45w",
+          title: "Anker 45W USB-C GaN Super Fast Charger with Braided Cable",
+          price_minor: 149900,
+          original_price_minor: 199900,
+          savings_minor: 50000,
+          image_url: "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80",
+          category: "accessory",
+          compatibility_reason: "Certified GaN III: High-efficiency rapid charging from 0 to 65% in 25 mins without overheating battery cells.",
+        },
+        {
+          id: "acc_magsafe_pad",
+          product_id: "acc_magsafe_pad",
+          title: "15W Magnetic Fast Wireless Charging Pad with LED Indicator",
+          price_minor: 179900,
+          original_price_minor: 229900,
+          savings_minor: 50000,
+          image_url: "https://images.unsplash.com/photo-1622445262464-84b14e364531?auto=format&fit=crop&w=400&q=80",
+          category: "accessory",
+          compatibility_reason: "Drop-and-go convenience: Weighted non-slip base with foreign object detection.",
+        },
+      ];
+    } else if (cat.includes("audio") || cat.includes("headphone") || title.includes("headphone") || title.includes("earbud") || title.includes("sony wh") || title.includes("airpods")) {
+      recommendations = [
+        {
+          id: "acc_headphone_stand",
+          product_id: "acc_headphone_stand",
+          title: "Solid Aluminum Dual Headphone Stand with Cable Organizer",
+          price_minor: 129900,
+          original_price_minor: 169900,
+          savings_minor: 40000,
+          image_url: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=400&q=80",
+          category: "accessory",
+          compatibility_reason: "Ergonomic preservation: Soft silicone cradle prevents headband indentation and extends leather cushion lifespan.",
+        },
+      ];
+    } else if (cat.includes("monitor") || title.includes("monitor") || title.includes("display") || title.includes("4k")) {
+      recommendations = [
+        {
+          id: "acc_hdmi_21_cable",
+          product_id: "acc_hdmi_21_cable",
+          title: "Braided 48Gbps Ultra High Speed HDMI 2.1 Cable (2 Meters)",
+          price_minor: 89900,
+          original_price_minor: 129900,
+          savings_minor: 40000,
+          image_url: "https://images.unsplash.com/photo-1550009158-9ebf69173e03?auto=format&fit=crop&w=400&q=80",
+          category: "accessory",
+          compatibility_reason: "Full bandwidth: Certified 48Gbps cord driving 4K 120Hz / 8K without flicker or color banding.",
+        },
+      ];
+    } else if (cat.includes("keyboard") || title.includes("keyboard") || title.includes("keychron")) {
+      recommendations = [
+        {
+          id: "acc_wrist_rest",
+          product_id: "acc_wrist_rest",
+          title: "Ergonomic Memory Foam Wrist Rest Pad (Tenkeyless)",
+          price_minor: 79900,
+          original_price_minor: 109900,
+          savings_minor: 30000,
+          image_url: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=400&q=80",
+          category: "accessory",
+          compatibility_reason: "Ergonomic comfort: Reduces carpal tunnel wrist strain during long coding sessions.",
+        },
+      ];
     } else {
-      companion = {
-        id: "acc_clean_kit_01",
-        title: "Water-Resistant Shockproof Accessory Sleeve",
-        price_minor: 99900,
-        image_url: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
-        category: "accessory",
-        compatibility_reason: "Engineered to complement and protect your hardware investment.",
-        savings_minor: 25000,
-      };
+      // Laptop or default electronics
+      if (targetProd?.crossSell?.title) {
+        recommendations = [
+          {
+            id: targetProd.crossSell.id || "acc_lap_sleeve_pro",
+            product_id: targetProd.crossSell.id || "acc_lap_sleeve_pro",
+            title: targetProd.crossSell.title,
+            price_minor: targetProd.crossSell.priceMinor,
+            original_price_minor: (targetProd.crossSell.priceMinor || 129900) + (targetProd.crossSell.alternativeSavingsMinor || 40000),
+            savings_minor: targetProd.crossSell.alternativeSavingsMinor || 40000,
+            image_url: targetProd.crossSell.imageUrl || "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+            category: "accessory",
+            compatibility_reason: "Tailored fit: Shockproof multi-layer padding protecting laptop chassis, display, and ports on the move.",
+          },
+        ];
+      } else {
+        recommendations = [
+          {
+            id: "acc_lap_sleeve_pro",
+            product_id: "acc_lap_sleeve_pro",
+            title: "Water-Resistant Shockproof Neoprene Laptop Sleeve (14-16\")",
+            price_minor: 129900,
+            original_price_minor: 169900,
+            savings_minor: 40000,
+            image_url: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+            category: "accessory",
+            compatibility_reason: "Tailored fit: Shockproof multi-layer padding protecting laptop chassis, display, and ports on the move.",
+          },
+          {
+            id: "acc_mouse_silent",
+            product_id: "acc_mouse_silent",
+            title: "Logitech Pebble M350 Wireless Silent Optical Mouse",
+            price_minor: 149500,
+            original_price_minor: 189500,
+            savings_minor: 40000,
+            image_url: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?auto=format&fit=crop&w=400&q=80",
+            category: "accessory",
+            compatibility_reason: "Ergonomic productivity: Ultra-quiet optical tracking with dual Bluetooth & 2.4GHz USB receiver.",
+          },
+        ];
+      }
     }
 
     return envelope({
-      recommendations: [companion],
+      recommendations,
       target_product_id: targetId,
       strategy: "HIGH_CONVERSION_COMPLEMENTARY_ACCESSORY",
     });

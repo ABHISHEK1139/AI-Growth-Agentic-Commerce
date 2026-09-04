@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,6 +22,7 @@ export function CartDrawer() {
   const router = useRouter();
   const {
     cart,
+    addToCart,
     isCartDrawerOpen,
     closeCartDrawer,
     updateCartQuantity,
@@ -30,6 +31,47 @@ export function CartDrawer() {
   } = useStore();
 
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [companion, setCompanion] = useState<any>(null);
+  const [companionLoading, setCompanionLoading] = useState(false);
+
+  // Fetch AI cross-sell companion recommendation for latest cart item
+  useEffect(() => {
+    if (!isCartDrawerOpen || cart.length === 0) {
+      setCompanion(null);
+      return;
+    }
+
+    const latest = cart[cart.length - 1]?.product;
+    if (!latest) return;
+
+    let cancelled = false;
+    setCompanionLoading(true);
+
+    fetch("/api/v1/recommendations/cross-sell", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_product_id: latest.id }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const recs = data?.data?.recommendations || [];
+        const candidate = recs.find(
+          (r: any) => !cart.some((ci) => ci.product.id === r.id || ci.product.id === r.product_id)
+        );
+        setCompanion(candidate || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanion(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCompanionLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCartDrawerOpen, cart]);
 
   // Close on Escape
   useEffect(() => {
@@ -71,6 +113,54 @@ export function CartDrawer() {
   const handleViewCart = () => {
     closeCartDrawer();
     router.push("/cart");
+  };
+
+  const handleAddCompanion = () => {
+    if (!companion) return;
+    const companionProduct: any = {
+      id: companion.id || companion.product_id,
+      slug: companion.id || companion.product_id,
+      title: companion.title,
+      priceMinor: companion.price_minor,
+      originalPriceMinor: companion.original_price_minor || companion.price_minor + (companion.savings_minor || 30000),
+      currency: "INR",
+      rating: 4.8,
+      reviewCount: 320,
+      stock: 15,
+      deliveryDays: 1,
+      returnDays: 14,
+      imageUrl: companion.image_url,
+      category: companion.category || "accessory",
+      categoryLabel: "Accessories",
+      brand: "Certified Companion",
+      aiBadge: "✦ AI Cross-Sell",
+      shortSpecs: companion.compatibility_reason || "Compatible accessory",
+      whyFitsYou: {
+        summary: companion.compatibility_reason || "Engineered to complement your setup.",
+        pros: ["100% verified compatibility", "Exclusive bundle discount applied"],
+        warnings: [],
+      },
+      specsGrouped: {
+        performance: { "Type": "Accessory", "Compatibility": "Certified" },
+      },
+      sentiment: {
+        performancePct: 96,
+        batteryPct: 92,
+        buildQualityPct: 95,
+        valuePct: 98,
+        customerLikes: ["High quality", "Great bundle price"],
+        customerConcerns: [],
+      },
+      reviews: [],
+      qa: [],
+      merchant: {
+        id: "mer_agentpay_flagship",
+        name: "AgentPay Verified",
+        verified: true,
+        rating: 4.9,
+      },
+    };
+    addToCart(companionProduct, 1, false);
   };
 
   return (
@@ -210,6 +300,60 @@ export function CartDrawer() {
               ))
             )}
           </div>
+
+          {/* AI Upsell & Cross-Sell Companion */}
+          {cart.length > 0 && companion && (
+            <div className="mx-5 mb-3 p-3.5 rounded-2xl bg-gradient-to-br from-emerald-50/80 via-[#f0f7f3] to-white border border-emerald-200/80 shadow-2xs">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5 text-emerald-900 font-bold text-[11px]">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                  <span className="uppercase tracking-wider">AI Cross-Sell Companion</span>
+                </div>
+                {companion.savings_minor > 0 && (
+                  <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
+                    Bundle Save {formatMinorToMajor(companion.savings_minor, currency)}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-xl bg-white border border-emerald-100 overflow-hidden shrink-0 shadow-2xs">
+                  <img
+                    src={companion.image_url}
+                    alt={companion.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-black text-slate-900 truncate leading-snug">
+                    {companion.title}
+                  </h4>
+                  <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-tight font-medium">
+                    {companion.compatibility_reason}
+                  </p>
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xs font-black text-slate-900">
+                        {formatMinorToMajor(companion.price_minor, currency)}
+                      </span>
+                      {companion.original_price_minor && (
+                        <span className="text-[10px] text-slate-400 line-through">
+                          {formatMinorToMajor(companion.original_price_minor, currency)}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleAddCompanion}
+                      className="px-3 py-1 bg-[#174c3c] hover:bg-[#103c2f] active:scale-95 text-white font-bold text-[11px] rounded-lg shadow-2xs transition-all flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add to Bag</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Footer & Checkout CTA */}
           {cart.length > 0 && (

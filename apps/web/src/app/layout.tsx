@@ -1,5 +1,6 @@
 import "./globals.css";
 import React from "react";
+import Script from "next/script";
 import { StoreProvider } from "@/context/StoreContext";
 import { Navbar } from "@/components/Navbar";
 import { AIAssistantDrawer } from "@/components/AIAssistantDrawer";
@@ -43,6 +44,7 @@ export default function RootLayout({
           <Footer />
           <MobileNav />
         </StoreProvider>
+        <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
       </body>
     </html>
   );
