@@ -6,6 +6,7 @@ import { formatMinorToMajor } from "@/lib/money";
 import { ProductItem } from "@/data/products";
 import { useStore } from "@/context/StoreContext";
 import { useState } from "react";
+import { defaultImageForCategory } from "@/catalog/adapt";
 
 export function ProductCard({ product, highlightReason, isBestMatch }: { product: ProductItem; highlightReason?: string; isBestMatch?: boolean }) {
   const { addToCart, wishlist, toggleWishlist, compareList, toggleCompare, openAiDrawer } = useStore();
@@ -14,6 +15,12 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
   const discount = product.originalPriceMinor > product.priceMinor ? Math.round((1 - product.priceMinor / product.originalPriceMinor) * 100) : 0;
   const [addedToCart, setAddedToCart] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
+
+  const fallbackImg = defaultImageForCategory(product.category, product.title, product.brand);
+  const initialImg = (product.imageUrl && !product.imageUrl.endsWith(".gif") && !product.imageUrl.includes("01RmK") && !product.imageUrl.includes("placeholder"))
+    ? product.imageUrl
+    : fallbackImg;
+  const [currentImg, setCurrentImg] = useState(initialImg);
 
   const handleAddToCart = () => {
     addToCart(product, 1);
@@ -30,10 +37,13 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
       )}
       <Link href={`/product/${product.id}`} className="block h-full">
         <img
-          src={product.imageUrl}
+          src={currentImg}
           alt={product.title}
           className={`h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-110 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
           onLoad={() => setImageLoaded(true)}
+          onError={() => {
+            if (currentImg !== fallbackImg) setCurrentImg(fallbackImg);
+          }}
         />
       </Link>
       {/* Gradient overlay on hover */}

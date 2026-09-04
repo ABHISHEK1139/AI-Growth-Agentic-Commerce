@@ -35,6 +35,7 @@ import {
   exploreOfferToProductItem,
   productItemToCatalogProduct,
   productItemToExploreOffer,
+  defaultImageForCategory,
 } from "@/catalog/adapt";
 import {
   descriptionParagraphs,
@@ -231,13 +232,17 @@ export default function ProductDetailPage() {
   const galleryUrls = productImageUrls(product);
   const usableGallery = galleryUrls.filter((url) => !brokenImages[url]);
 
+  const fallbackImage = defaultImageForCategory(categoryId, title, brand);
+
   useEffect(() => {
     if (usableGallery.length > 0 && (!shownImage || brokenImages[shownImage])) {
       setActiveImage(usableGallery[0]);
     } else if (usableGallery.length === 0 && offer?.image_url && !brokenImages[offer.image_url]) {
       setActiveImage(offer.image_url);
+    } else if (!shownImage || brokenImages[shownImage]) {
+      setActiveImage(fallbackImage);
     }
-  }, [usableGallery, shownImage, brokenImages, offer?.image_url]);
+  }, [usableGallery, shownImage, brokenImages, offer?.image_url, fallbackImage]);
 
   const isSaved = wishlist.includes(productId);
   const isCompared = compareList.includes(productId);
@@ -467,21 +472,16 @@ export default function ProductDetailPage() {
               shownImage ? "cursor-zoom-in" : ""
             }`}
           >
-            {shownImage ? (
-              <img
-                src={shownImage}
-                alt={title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                onError={() =>
-                  setBrokenImages((previous) => ({ ...previous, [shownImage as string]: true }))
+            <img
+              src={shownImage || fallbackImage}
+              alt={title}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              onError={() => {
+                if (shownImage !== fallbackImage) {
+                  setActiveImage(fallbackImage);
                 }
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-2 p-8 text-center text-slate-400">
-                <ImageOff className="h-10 w-10" />
-                <p className="text-sm font-bold text-slate-700">Image preview unavailable</p>
-              </div>
-            )}
+              }}
+            />
 
             <button
               type="button"

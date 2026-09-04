@@ -116,7 +116,7 @@ export default function GatedCheckoutPage() {
   const totalMinor = checkoutItems.reduce((acc, item) => acc + item.product.priceMinor * item.quantity, 0);
   const currency = checkoutItems[0]?.product.currency || "INR";
 
-  const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 50000000; // ₹5,000.00
+  const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 500000; // ₹5,000.00
   const maxPolicyCeilingMinor = 20000000; // ₹2,00,000.00
   const requiresManualApproval = totalMinor > autoApprovalLimitMinor;
 
@@ -456,79 +456,85 @@ export default function GatedCheckoutPage() {
           </div>
         </div>
 
-        {/* Interactive Safety & Gating Demonstration Panel */}
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-[#174c3c] text-white rounded-lg text-xs font-bold">🛡️</span>
+        {/* Collapsible Evaluator Sandbox & Safety Gating Controls */}
+        <details className="group bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-4 text-xs transition-all">
+          <summary className="cursor-pointer font-bold text-slate-600 hover:text-slate-900 flex items-center justify-between select-none">
+            <span className="flex items-center gap-2">
+              <span>🛠️</span>
+              <span>Developer Sandbox &amp; Failure Mode Testing</span>
+            </span>
+            <span className="text-[10px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+              Active Mode: {failureSimulation} (Click to toggle)
+            </span>
+          </summary>
+
+          <div className="mt-4 pt-3 border-t border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h4 className="font-black text-slate-900 text-xs uppercase tracking-wider">
-                  Track 01: Safety Gating &amp; Failure Simulator
+                <h4 className="font-bold text-slate-800 text-xs">
+                  Safety Gating &amp; Failure Mode Simulator
                 </h4>
                 <p className="text-[11px] text-slate-500">
                   Every money action explainable, bounded and gated with graceful recovery.
                 </p>
               </div>
             </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-slate-100 text-slate-700 self-start sm:self-auto">
-              Mode: {failureSimulation}
-            </span>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setFailureSimulation("NONE")}
+                className={`p-2.5 rounded-xl border text-center font-bold transition-all cursor-pointer ${
+                  failureSimulation === "NONE"
+                    ? "bg-[#174c3c] text-white border-[#174c3c] shadow-xs"
+                    : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
+                }`}
+              >
+                <div>✓ Normal Flow</div>
+                <div className="text-[10px] font-normal opacity-80 mt-0.5">Standard Payment</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFailureSimulation("PRICE_CHANGED")}
+                className={`p-2.5 rounded-xl border text-center font-bold transition-all cursor-pointer ${
+                  failureSimulation === "PRICE_CHANGED"
+                    ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                    : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200"
+                }`}
+              >
+                <div>⚠️ Price Changed</div>
+                <div className="text-[10px] font-normal opacity-80 mt-0.5">Stoppage before pay</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFailureSimulation("POLICY_BLOCKED")}
+                className={`p-2.5 rounded-xl border text-center font-bold transition-all cursor-pointer ${
+                  failureSimulation === "POLICY_BLOCKED"
+                    ? "bg-rose-700 text-white border-rose-700 shadow-xs"
+                    : "bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-200"
+                }`}
+              >
+                <div>🛑 Policy Blocked</div>
+                <div className="text-[10px] font-normal opacity-80 mt-0.5">Ceiling tripped &amp; gated</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFailureSimulation("PAYMENT_UNCERTAIN")}
+                className={`p-2.5 rounded-xl border text-center font-bold transition-all cursor-pointer ${
+                  failureSimulation === "PAYMENT_UNCERTAIN"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                    : "bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200"
+                }`}
+              >
+                <div>⏳ Uncertain Pay</div>
+                <div className="text-[10px] font-normal opacity-80 mt-0.5">Idempotent reconcile</div>
+              </button>
+            </div>
           </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setFailureSimulation("NONE")}
-              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
-                failureSimulation === "NONE"
-                  ? "bg-[#174c3c] text-white border-[#174c3c] shadow-xs"
-                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-              }`}
-            >
-              <div>✓ Normal Flow</div>
-              <div className="text-[10px] font-normal opacity-80 mt-0.5">Standard Payment</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFailureSimulation("PRICE_CHANGED")}
-              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
-                failureSimulation === "PRICE_CHANGED"
-                  ? "bg-amber-600 text-white border-amber-600 shadow-xs"
-                  : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200"
-              }`}
-            >
-              <div>⚠️ Price Changed</div>
-              <div className="text-[10px] font-normal opacity-80 mt-0.5">Stoppage before pay</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFailureSimulation("POLICY_BLOCKED")}
-              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
-                failureSimulation === "POLICY_BLOCKED"
-                  ? "bg-rose-700 text-white border-rose-700 shadow-xs"
-                  : "bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-200"
-              }`}
-            >
-              <div>🛑 Policy Blocked</div>
-              <div className="text-[10px] font-normal opacity-80 mt-0.5">Ceiling tripped &amp; gated</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFailureSimulation("PAYMENT_UNCERTAIN")}
-              className={`p-2.5 rounded-xl border text-center font-bold transition-all ${
-                failureSimulation === "PAYMENT_UNCERTAIN"
-                  ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                  : "bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200"
-              }`}
-            >
-              <div>⏳ Uncertain Pay</div>
-              <div className="text-[10px] font-normal opacity-80 mt-0.5">Idempotent reconcile</div>
-            </button>
-          </div>
-        </div>
+        </details>
 
         {/* PRICE CHANGED STOPPAGE STATE (Requirement 13: Stoppage before payment) */}
         {failureSimulation === "PRICE_CHANGED" && (

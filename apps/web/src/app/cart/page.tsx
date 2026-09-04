@@ -18,7 +18,7 @@ import { useStore } from "@/context/StoreContext";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet, apiPost } from "@/lib/api";
 import type { ProductItem } from "@/data/products";
-import { exploreOfferToProductItem, toOfferView } from "@/catalog/adapt";
+import { exploreOfferToProductItem, toOfferView, defaultImageForCategory } from "@/catalog/adapt";
 import { lookupOfferInCatalog } from "@/catalog/client";
 
 interface CrossSellRec {
@@ -226,6 +226,9 @@ export default function CartPage() {
                   src={item.product.imageUrl}
                   alt={item.product.title}
                   className="h-24 w-24 rounded-xl object-cover sm:h-28 sm:w-28"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = defaultImageForCategory(item.product.category, item.product.title, item.product.brand);
+                  }}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-[#174c3c]">
@@ -278,6 +281,9 @@ export default function CartPage() {
                 src={suggestion.imageUrl}
                 alt={suggestion.title}
                 className="h-16 w-16 rounded-xl object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = defaultImageForCategory("accessories", suggestion.title, suggestion.brand || "Certified Partner");
+                }}
               />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-[.12em] text-[#174c3c]">

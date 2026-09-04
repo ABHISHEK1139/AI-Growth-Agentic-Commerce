@@ -149,23 +149,36 @@ const KNOWN_BRANDS = [
   "LG", "BenQ", "Bose", "Sennheiser", "NuPhy", "Chuwi", "Infinix", "boAt",
   "Noise", "Realme", "Motorola", "Whirlpool", "Bosch", "Philips", "Panasonic",
   "Corsair", "Razer", "SteelSeries", "HyperX", "Anker", "Belkin", "TP-Link",
-  "SanDisk", "Crucial", "Western Digital", "Seagate", "Kingston", "Intel", "AMD", "NVIDIA"
+  "SanDisk", "Crucial", "Western Digital", "Seagate", "Kingston", "Intel", "AMD", "NVIDIA",
+  "Alienware", "Toshiba", "Skullcandy", "Spigen", "Orzly", "FreedomPop", "GPD",
+  "SANOXY", "CableCreation", "HOPVISION", "DecoLife", "Microsoft", "JBL", "Audio-Technica",
+  "Shure", "Jabra", "Marshall", "Beats", "Fitbit", "Garmin", "Amazfit", "Baseus",
+  "Ugreen", "OWC", "Neewer", "STM", "Lastolite", "Bluelounge", "Spigen"
 ];
 
 const EXCLUDED_BRAND_TOKENS = new Set([
-  "the", "a", "an", "new", "pro", "ultra", "mini", "pack", "set", "lot",
+  "the", "a", "an", "new", "pro", "ultra", "mini", "pack", "set", "lot", "pcs", "piece", "pieces",
   "wireless", "wired", "portable", "premium", "smart", "super", "digital",
-  "usb", "hdmi", "cable", "adapter", "case", "cover", "sleeve", "bag",
+  "usb", "hdmi", "cable", "adapter", "case", "cover", "sleeve", "bag", "bags", "tote", "clutch", "backpack",
   "laptop", "laptops", "phone", "phones", "smartphone", "smartphones",
-  "monitor", "monitors", "audio", "headphones", "accessory", "accessories",
-  "computer_accessory", "appliance", "appliances", "electronics", "home_electronics"
+  "monitor", "monitors", "audio", "headphones", "headset", "earphones", "earbuds", "accessory", "accessories",
+  "computer_accessory", "appliance", "appliances", "electronics", "home_electronics",
+  "cute", "video", "blue", "red", "black", "white", "clear", "transparent", "aesthetic", "outer", "space",
+  "baseball", "rocks", "fancy", "rechargeable", "external", "bluetooth", "stereo", "high", "speed",
+  "universal", "multi", "genuine", "original", "heavy", "vintage", "classic", "travel", "popular",
+  "stray", "retro", "funny", "waterproof", "compatible", "replace", "replacement", "brand new",
+  "official", "authentic", "for", "with", "by", "3d", "4k", "5g", "8k", "cord", "plug", "charger",
+  "battery", "screen", "display", "stand", "mount", "desk", "tray", "fan", "cooler", "sound", "speaker",
+  "repair", "tool", "tools", "kit", "wallet", "holster", "clip", "armbands", "popsocket", "stickers", "decal",
+  "monitors & displays", "audio & headphones", "keyboards & accessories", "phone accessories",
+  "appliances & smart home", "cameras & optics"
 ]);
 
 /**
  * Resolves an accurate, human-readable brand/company name.
  * 1. Checks specs for non-generic brand/manufacturer.
  * 2. If missing or generic, extracts known brand from title.
- * 3. Never returns raw DB category slugs like "laptop" or "computer_accessory".
+ * 3. Never returns raw numbers, generic adjectives, or DB category slugs.
  */
 export function resolveBrand(
   specs?: Record<string, unknown> | null,
@@ -190,7 +203,12 @@ export function resolveBrand(
     if (typeof rawBrand === "string" && rawBrand.trim().length > 0) {
       const trimmed = rawBrand.trim();
       const lower = trimmed.toLowerCase();
-      if (lower !== "generic" && !lower.includes("unknown") && !EXCLUDED_BRAND_TOKENS.has(lower)) {
+      if (
+        lower !== "generic" &&
+        !lower.includes("unknown") &&
+        !/^\d/.test(trimmed) &&
+        !EXCLUDED_BRAND_TOKENS.has(lower)
+      ) {
         return trimmed;
       }
     }
@@ -199,8 +217,11 @@ export function resolveBrand(
   // 3. Check for "by [Brand]" in title
   if (cleanTitle) {
     const byMatch = cleanTitle.match(/\bby\s+([A-Za-z0-9&'+.-]{2,20})\b/i);
-    if (byMatch && !EXCLUDED_BRAND_TOKENS.has(byMatch[1].toLowerCase())) {
-      return byMatch[1];
+    if (byMatch) {
+      const candidate = byMatch[1];
+      if (!/^\d/.test(candidate) && !EXCLUDED_BRAND_TOKENS.has(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
 
     // 4. Known brand in title ONLY if not an accessory "for" or "compatible with"
@@ -214,23 +235,18 @@ export function resolveBrand(
       }
     }
 
-    const firstWordMatch = cleanTitle.match(/^([A-Za-z0-9&'+.-]{2,15})\b/);
+    // 5. First word if reputable (letters only, not a number, not an excluded token, length >= 3)
+    const firstWordMatch = cleanTitle.match(/^([A-Za-z][A-Za-z0-9&'+.-]{2,15})\b/);
     if (firstWordMatch) {
       const candidate = firstWordMatch[1];
-      if (!EXCLUDED_BRAND_TOKENS.has(candidate.toLowerCase())) {
+      if (!EXCLUDED_BRAND_TOKENS.has(candidate.toLowerCase()) && !/^\d/.test(candidate)) {
         return candidate;
       }
     }
   }
 
-  if (category && typeof category === "string") {
-    const titleFromSlug = categoryTitleForSlug(category);
-    if (titleFromSlug && !EXCLUDED_BRAND_TOKENS.has(titleFromSlug.toLowerCase())) {
-      return titleFromSlug;
-    }
-  }
-
-  return "Verified Brand";
+  // Safe fallback to professional brand name, never category titles or raw slugs
+  return "AgentPay Certified";
 }
 
 // ---------------------------------------------------------------------------

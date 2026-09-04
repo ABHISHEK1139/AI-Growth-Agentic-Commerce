@@ -17,6 +17,7 @@ import {
 import { useStore } from "@/context/StoreContext";
 import { formatMinorToMajor } from "@/lib/money";
 import { categoryTitleForSlug } from "@/catalog/present";
+import { defaultImageForCategory } from "@/catalog/adapt";
 
 export function CartDrawer() {
   const router = useRouter();
@@ -241,6 +242,9 @@ export function CartDrawer() {
                       src={item.product.imageUrl}
                       alt={item.product.title}
                       className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = defaultImageForCategory(item.product.category, item.product.title, item.product.brand);
+                      }}
                     />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -322,6 +326,9 @@ export function CartDrawer() {
                     src={companion.image_url}
                     alt={companion.title}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = defaultImageForCategory("accessories", companion.title, "Certified Partner");
+                    }}
                   />
                 </div>
                 <div className="flex-1 min-w-0">
