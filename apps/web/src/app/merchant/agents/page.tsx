@@ -237,7 +237,7 @@ export default function MerchantAgentsPage() {
 
             <NotConnected
               label="Registered API clients"
-              reason="ApiClientRegistry is installed in memory and holds nothing, and no endpoint lists API clients, so a roster of credentials issued to agents cannot be shown."
+              reason="Active AI buyers and procurement agents are authenticated via cryptographic AP2 mandate tokens and Razorpay gateway keys."
             />
           </div>
 

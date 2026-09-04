@@ -5,9 +5,41 @@ import { usePathname } from "next/navigation";
 import { ShieldCheck, Sparkles, Truck, Undo2 } from "lucide-react";
 
 const columns = [
-  { title: "Shop", links: [["Laptops", "/category/laptops"], ["Phones", "/category/phones"], ["Audio", "/category/audio"], ["Workspace", "/category/monitors"], ["Best deals", "/search?deals=true"]] },
-  { title: "Your experience", links: [["Saved products", "/search?wishlist=true"], ["Compare products", "/compare"], ["Your bag", "/cart"], ["Checkout", "/checkout"]] },
-  { title: "For merchants", links: [["Merchant workspace", "/merchant"], ["Campaigns", "/merchant/campaigns"], ["Catalog", "/merchant/catalog"], ["Policy controls", "/merchant/policy"], ["Audit trail", "/merchant/audit"]] },
+  {
+    title: "Shop",
+    links: [
+      ["Laptops", "/category/laptops"],
+      ["Phones", "/category/phones"],
+      ["Audio", "/category/audio"],
+      ["Appliances", "/category/appliances"],
+      ["Cameras", "/category/cameras"],
+      ["Workspace", "/category/monitors"],
+      ["Best deals", "/search?deals=true"],
+    ],
+  },
+  {
+    title: "Your experience",
+    links: [
+      ["Your orders", "/orders"],
+      ["Saved products", "/wishlist"],
+      ["Compare products", "/compare"],
+      ["Your bag", "/cart"],
+      ["Checkout", "/checkout"],
+      ["Account settings", "/account"],
+      ["Returns & refunds", "/returns"],
+    ],
+  },
+  {
+    title: "For merchants",
+    links: [
+      ["Merchant workspace", "/merchant"],
+      ["Campaigns", "/merchant/campaigns"],
+      ["Catalog", "/merchant/catalog"],
+      ["Policy controls", "/merchant/policy"],
+      ["Audit trail", "/merchant/audit"],
+      ["Interactive scenarios", "/scenarios"],
+    ],
+  },
 ];
 
 export function Footer() {

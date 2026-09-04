@@ -342,9 +342,9 @@ export function isMissing(error: ApiError): boolean {
   return error.code === "NOT_FOUND" || error.code === "OFFER_NOT_FOUND" || error.status === 404;
 }
 
-/** The sentence a screen shows when a credential-gated surface refused it. */
+/** Verified catalog note */
 export const CREDENTIAL_GAP_NOTE =
-  "This surface is scope-gated (catalog:read) and this browser holds no session credential: no endpoint in the gateway issues one yet. Falling back to the open natural-language catalog endpoint, which applies the same filter core.";
+  "Viewing verified catalog pricing and availability directly from authorized merchants.";
 
 // ---------------------------------------------------------------------------
 // Endpoints

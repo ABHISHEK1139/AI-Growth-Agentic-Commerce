@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Heart, Menu, Search, ShoppingBag, Scale, X, TrendingUp, Package, Sparkles } from "lucide-react";
+import { Heart, Menu, Search, ShoppingBag, Scale, X, TrendingUp, Package, Sparkles, User } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useStore } from "@/context/StoreContext";
 
@@ -168,6 +168,15 @@ export function Navbar() {
           >
             <Package className="h-4 w-4" />
             <span>Orders</span>
+          </Link>
+
+          <Link
+            href="/account"
+            className="relative hidden items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-[#3d4942] transition-all duration-200 hover:bg-[#e5f0e9] hover:text-[#174c3c] sm:inline-flex"
+            aria-label="Account settings"
+          >
+            <User className="h-4 w-4" />
+            <span className="hidden lg:inline">Account</span>
           </Link>
 
           {compareList.length > 0 && (

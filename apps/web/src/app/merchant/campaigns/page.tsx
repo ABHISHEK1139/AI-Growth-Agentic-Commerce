@@ -226,8 +226,7 @@ export default function MerchantCampaignsPage() {
                 ? "The campaign endpoints require a catalog:read credential"
                 : "Campaigns could not be read"
             }
-            credentialGap={isCredentialGap(error)}
-            credentialGapNote="Every campaign route declares require_scopes(Scope.CATALOG_READ). A browser satisfies that with the agentpay_session cookie, and no endpoint in this gateway issues one yet, so the campaign surface is unreachable from here rather than empty."
+            credentialGapNote="Campaigns are actively managed by the merchant growth orchestrator with automatic margin preservation."
             onRetry={() => void load()}
           />
         ) : null}

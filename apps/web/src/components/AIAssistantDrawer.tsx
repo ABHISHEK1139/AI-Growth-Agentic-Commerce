@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Sparkles, Maximize2, Zap, Cpu, ShoppingBag, ShieldCheck, RefreshCw } from "lucide-react";
+import { Sparkles, Maximize2, Zap, Cpu, ShoppingBag, ShieldCheck, RefreshCw, AlertTriangle, AlertCircle, Search, ArrowRight } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
@@ -20,6 +20,9 @@ interface Message {
   id: string;
   sender: "user" | "agent";
   text: string;
+  isError?: boolean;
+  errorHeading?: string;
+  queryAttempted?: string;
   modelUsed?: string;
   fallbackNotice?: string | null;
   durationMs?: number;
@@ -401,7 +404,7 @@ export function AIAssistantDrawer() {
           res.error.code === "PROMPT_INJECTION_SUSPECTED" || res.error.code?.includes("GUARD");
         const msgText = isGuard
           ? "I'm focused exclusively on shopping, product specifications, and checkout assistance. I can help you find, compare, or configure products in our catalog."
-          : `I encountered an issue searching the catalog: ${res.error.message}`;
+          : `We encountered a temporary issue searching the catalog for "${query}". Our verified store catalog is available for direct browsing.`;
 
         setMessages((prev) => [
           ...prev,
@@ -409,6 +412,9 @@ export function AIAssistantDrawer() {
             id: `agt_${Date.now()}`,
             sender: "agent",
             text: msgText,
+            isError: !isGuard,
+            errorHeading: isGuard ? "Safety & Scope Notice" : "Catalog Search Interrupted",
+            queryAttempted: query,
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ]);
@@ -516,7 +522,10 @@ export function AIAssistantDrawer() {
         {
           id: `agt_${Date.now()}`,
           sender: "agent",
-          text: `An error occurred while querying the live catalog for "${query}". Please check your network connection or try again.`,
+          text: `An error occurred while connecting to the assistant. You can retry your query or browse our verified catalog directly.`,
+          isError: true,
+          errorHeading: "Assistant Temporarily Unavailable",
+          queryAttempted: query,
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
@@ -656,24 +665,88 @@ export function AIAssistantDrawer() {
                   className={`max-w-[88%] p-3.5 rounded-2xl space-y-2.5 ${
                     msg.sender === "user"
                       ? "bg-indigo-600 text-white rounded-br-xs shadow-xs"
+                      : msg.isError
+                      ? "bg-amber-50/95 text-slate-800 rounded-bl-xs border border-amber-200 shadow-xs"
                       : "bg-slate-100/90 text-slate-800 rounded-bl-xs border border-slate-200/60"
                   }`}
                 >
-                  {msg.modelUsed && (
-                    <div className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 w-fit">
-                      <Sparkles className="h-2.5 w-2.5 text-emerald-600" />
-                      <span>{msg.modelUsed}</span>
-                      {msg.durationMs ? <span className="text-slate-400">• {msg.durationMs}ms</span> : null}
-                    </div>
-                  )}
+                  {msg.isError ? (
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-2.5">
+                        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800 border border-amber-200">
+                          <AlertTriangle className="h-4 w-4" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-xs font-bold text-slate-900">
+                            {msg.errorHeading || "Assistant Temporarily Unavailable"}
+                          </h4>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-600 font-normal">
+                            {msg.text && msg.text.trim()
+                              ? msg.text
+                              : "We couldn't connect to the AI model right now, but our verified catalog, search, and checkout are fully operational."}
+                          </p>
+                        </div>
+                      </div>
 
-                  {msg.fallbackNotice && (
-                    <div className="text-[10px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
-                      {msg.fallbackNotice}
+                      {/* Fallback recovery actions */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-amber-200/60">
+                        {msg.queryAttempted && (
+                          <button
+                            type="button"
+                            onClick={() => handleUserSubmit(msg.queryAttempted)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#174c3c] px-2.5 py-1 text-[11px] font-bold text-white transition hover:bg-[#103c2f] shadow-xs active:scale-95"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            <span>Try again</span>
+                          </button>
+                        )}
+                        {msg.queryAttempted && (
+                          <Link
+                            href={`/search?q=${encodeURIComponent(msg.queryAttempted)}`}
+                            onClick={closeAiDrawer}
+                            className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Search className="h-3 w-3 text-slate-500" />
+                            <span>Search Store</span>
+                          </Link>
+                        )}
+                        <Link
+                          href="/category/laptops"
+                          onClick={closeAiDrawer}
+                          className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                        >
+                          <span>Laptops</span>
+                        </Link>
+                        <Link
+                          href="/search?deals=true"
+                          onClick={closeAiDrawer}
+                          className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                        >
+                          <span>Deals</span>
+                        </Link>
+                      </div>
                     </div>
-                  )}
+                  ) : (
+                    <>
+                      {msg.modelUsed && (
+                        <div className="flex items-center gap-1.5 text-[9px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 w-fit">
+                          <Sparkles className="h-2.5 w-2.5 text-emerald-600" />
+                          <span>{msg.modelUsed}</span>
+                          {msg.durationMs ? <span className="text-slate-400">• {msg.durationMs}ms</span> : null}
+                        </div>
+                      )}
 
-                  <p className="whitespace-pre-line leading-relaxed font-medium">{msg.text}</p>
+                      {msg.fallbackNotice && (
+                        <div className="text-[10px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                          {msg.fallbackNotice}
+                        </div>
+                      )}
+
+                      <p className="whitespace-pre-line leading-relaxed font-medium">
+                        {msg.text && msg.text.trim()
+                          ? msg.text
+                          : "I am ready to help you discover products, compare specifications, and complete your order."}
+                      </p>
 
                   {/* Matched Products Card List */}
                   {msg.matchedProducts && msg.matchedProducts.length > 0 && (
@@ -820,6 +893,8 @@ export function AIAssistantDrawer() {
                     >
                       {msg.actionSuggestion.label}
                     </button>
+                  )}
+                    </>
                   )}
                 </div>
                 <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>

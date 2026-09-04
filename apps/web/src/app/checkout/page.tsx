@@ -43,7 +43,7 @@ export default function GatedCheckoutPage() {
   const razorpayKeyId = (
     process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
     process.env.RAZORPAY_KEY_ID ||
-    "rzp_test_YOUR_KEY_ID"
+    "***REMOVED***"
   ).trim();
   const providerConfigured = razorpayKeyId.length > 0;
 
