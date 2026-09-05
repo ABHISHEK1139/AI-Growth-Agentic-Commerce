@@ -52,6 +52,10 @@ export function getServerDb(): DatabaseSync {
           OR title LIKE '%cable%' OR title LIKE '%adapter%' OR title LIKE '%fan%' OR title LIKE '%radio%'
           OR title LIKE '%watch%' OR title LIKE '%protection plan%' OR title LIKE '%card%' OR title LIKE '%gps%'
         );
+
+        UPDATE product_image
+        SET source_url = 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80'
+        WHERE source_url LIKE '%photo-1544816155-12df9643f363%';
       `);
     } catch {
       // Ignore if database schema not yet loaded
@@ -304,7 +308,7 @@ export function getProductById(productId: string): any | null {
       : null,
     images: images.length > 0
       ? images
-      : [{ source_url: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80", position: 0 }],
+      : [{ source_url: defaultImageForCategory(row.category_id, row.title, brand), position: 0 }],
   };
 }
 
@@ -334,7 +338,7 @@ export function getOfferById(offerId: string): any | null {
   }
 
   const brand = resolveBrand(specs, row.title, row.category_id);
-  const imageUrl = row.image_url || "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80";
+  const imageUrl = row.image_url || defaultImageForCategory(row.category_id, row.title, brand);
 
   return {
     schema_version: "1.0",

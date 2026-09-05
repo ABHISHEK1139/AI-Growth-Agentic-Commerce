@@ -104,7 +104,7 @@ export function defaultImageForCategory(
 
   // 1. Accessory item keyword matching (so cables, chargers, sleeves never show a laptop/phone)
   if (t.includes("cable") || t.includes("cord") || t.includes("hdmi") || t.includes("usb-c") || t.includes("auxiliary")) {
-    return "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80";
+    return "https://images.unsplash.com/photo-1588508065123-287b28e013da?auto=format&fit=crop&w=600&q=80";
   }
   if (t.includes("charger") || t.includes("battery") || t.includes("power bank") || t.includes("charging") || t.includes("power adapter")) {
     return "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=600&q=80";
