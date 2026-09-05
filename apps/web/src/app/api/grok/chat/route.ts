@@ -108,7 +108,37 @@ function resolveGrokEndpointAndKey(
     };
   }
 
-  // 4. Generic OpenAI compatible key
+  // 4. Local model (Ollama / LM Studio) configured in environment
+  const localProvider = (process.env.MODEL_PROVIDER || "").toLowerCase();
+  const ollamaBaseUrl =
+    process.env.OLLAMA_BASE_URL ||
+    (localProvider === "ollama" ? (process.env.MODEL_BASE_URL || "http://localhost:11434/v1") : "");
+  if (ollamaBaseUrl) {
+    const cleanBase = ollamaBaseUrl.trim().replace(/\/$/, "");
+    return {
+      endpoint: cleanBase.endsWith("/chat/completions") ? cleanBase : `${cleanBase}/chat/completions`,
+      key: process.env.MODEL_API_KEY || "ollama",
+      targetModel: process.env.MODEL_NAME || process.env.OLLAMA_MODEL || "llama3.2",
+      provider: "ollama",
+      isLoopback: true,
+    };
+  }
+
+  const lmstudioBaseUrl =
+    process.env.LMSTUDIO_BASE_URL ||
+    (localProvider === "lmstudio" || localProvider === "local" ? (process.env.MODEL_BASE_URL || "http://localhost:1234/v1") : "");
+  if (lmstudioBaseUrl) {
+    const cleanBase = lmstudioBaseUrl.trim().replace(/\/$/, "");
+    return {
+      endpoint: cleanBase.endsWith("/chat/completions") ? cleanBase : `${cleanBase}/chat/completions`,
+      key: process.env.MODEL_API_KEY || "lmstudio",
+      targetModel: process.env.MODEL_NAME || "local-model",
+      provider: "lmstudio",
+      isLoopback: true,
+    };
+  }
+
+  // 5. Generic OpenAI compatible key
   if (genericKey) {
     const baseUrl = (process.env.MODEL_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
     return {
