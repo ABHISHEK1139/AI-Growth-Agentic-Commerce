@@ -65,6 +65,7 @@ export function AIAssistantDrawer() {
   const {
     cart,
     placeOrder,
+    removeFromCart,
     userPreferences,
     isAiDrawerOpen,
     openAiDrawer,
@@ -186,6 +187,7 @@ export function AIAssistantDrawer() {
               currency: checkoutData.currency,
               policySummary: "Autonomous conversational in-app checkout authorized via Razorpay Test Mode",
             });
+            removeFromCart(checkoutData.product.id);
 
             // Post audit event
             try {
@@ -255,6 +257,7 @@ export function AIAssistantDrawer() {
           currency: checkoutData.currency,
           policySummary: "Simulated test-mode in-app payment verified",
         });
+        removeFromCart(checkoutData.product.id);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === msgId

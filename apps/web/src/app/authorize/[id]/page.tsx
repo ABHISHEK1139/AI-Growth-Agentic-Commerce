@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { formatMinorToMajor } from "@/lib/money";
 import { calculateRemainingSeconds, formatCountdown, hasExpired, serverOffsetMs } from "@/lib/time";
 import { apiGet, apiPost, type ApiError } from "@/lib/api";
@@ -96,9 +96,10 @@ const STATUS_LABEL: Record<string, string> = {
   expired: "Expired",
 };
 
-export default function AuthorizationScreen({ params }: { params: { id: string } }) {
+export default function AuthorizationScreen({ params }: { params?: { id: string } }) {
   const router = useRouter();
-  const authorizationId = params?.id ?? "";
+  const routeParams = useParams<{ id: string }>();
+  const authorizationId = routeParams?.id || params?.id || "";
 
   const [auth, setAuth] = useState<AuthorizationRecord | null>(null);
   const [checkout, setCheckout] = useState<CheckoutRecord | null>(null);

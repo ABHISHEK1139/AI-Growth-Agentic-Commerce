@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiPost, resolveApiUrl, type ApiError } from "@/lib/api";
+import { useStore } from "@/context/StoreContext";
 
 /**
  * Razorpay redirect return page.
@@ -35,6 +36,7 @@ type Phase = "verifying" | "success" | "failed" | "error";
 
 export default function RazorpayReturnPage() {
   const searchParams = useSearchParams();
+  const { clearCart } = useStore();
   const [phase, setPhase] = useState<Phase>("verifying");
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -75,7 +77,11 @@ export default function RazorpayReturnPage() {
         setOrderId(order_id);
         setPaymentId(payment_id);
         setConfirmedOrderId(confirmed_order_id);
-        setPhase(verifiedStatus === "paid" || verifiedStatus === "confirmed" || verified ? "success" : "failed");
+        const isSuccess = verifiedStatus === "paid" || verifiedStatus === "confirmed" || verified;
+        if (isSuccess) {
+          clearCart();
+        }
+        setPhase(isSuccess ? "success" : "failed");
       } else {
         setError(!res.ok ? (res.error.message || "Payment verification failed.") : "Payment verification failed.");
         setPhase("error");
@@ -84,7 +90,7 @@ export default function RazorpayReturnPage() {
       setError(e?.message || "An unexpected error occurred during verification.");
       setPhase("error");
     }
-  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status]);
+  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status, clearCart]);
 
   useEffect(() => {
     verifyAndConfirm();

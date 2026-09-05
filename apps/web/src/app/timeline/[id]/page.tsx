@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet, type ApiError } from "@/lib/api";
 
@@ -129,8 +130,9 @@ function metadataEntries(metadata: Record<string, unknown> | null): [string, str
 
 type Phase = "loading" | "loaded" | "failed";
 
-export default function TimelinePage({ params }: { params: { id: string } }) {
-  const reference = params?.id ?? "";
+export default function TimelinePage({ params }: { params?: { id: string } }) {
+  const routeParams = useParams<{ id: string }>();
+  const reference = routeParams?.id || params?.id || "";
   const inferred = useMemo(() => inferAggregateType(reference), [reference]);
 
   const [aggregateType, setAggregateType] = useState<AggregateType>(inferred);

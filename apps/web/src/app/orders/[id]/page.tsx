@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet, type ApiError } from "@/lib/api";
 import { useStore } from "@/context/StoreContext";
@@ -73,8 +74,9 @@ function formatTimestamp(raw: string): string {
 
 type Phase = "loading" | "loaded" | "failed";
 
-export default function OrderDetailPage({ params }: { params: { id: string } }) {
-  const orderId = params?.id ?? "";
+export default function OrderDetailPage({ params }: { params?: { id: string } }) {
+  const routeParams = useParams<{ id: string }>();
+  const orderId = routeParams?.id || params?.id || "";
   const { orders: storeOrders } = useStore();
 
   const [order, setOrder] = useState<OrderRecord | null>(null);
