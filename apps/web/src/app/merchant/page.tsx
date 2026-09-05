@@ -429,14 +429,14 @@ export default function MerchantConsolePage() {
                 </p>
               </div>
 
-              {doc ? (
+              {doc?.limits ? (
                 <div className="p-3.5 bg-[#174c3c]/5 border border-[#174c3c]/20 rounded-2xl text-xs text-slate-800 space-y-1">
                   <div className="font-bold">Active bound</div>
                   <div>
                     At or below{" "}
                     <Amount
-                      minor={doc.limits.auto_approval_limit_minor}
-                      currency={doc.limits.currency}
+                      minor={doc.limits.auto_approval_limit_minor ?? 5000000}
+                      currency={doc.limits.currency ?? "INR"}
                       className="font-bold"
                     />
                     : authorized without a human.
@@ -444,8 +444,8 @@ export default function MerchantConsolePage() {
                   <div>
                     Above it, and up to{" "}
                     <Amount
-                      minor={doc.limits.max_transaction_minor}
-                      currency={doc.limits.currency}
+                      minor={doc.limits.max_transaction_minor ?? 7000000}
+                      currency={doc.limits.currency ?? "INR"}
                       className="font-bold"
                     />
                     : human approval required.
@@ -453,8 +453,8 @@ export default function MerchantConsolePage() {
                   <div>
                     Above{" "}
                     <Amount
-                      minor={doc.limits.max_transaction_minor}
-                      currency={doc.limits.currency}
+                      minor={doc.limits.max_transaction_minor ?? 7000000}
+                      currency={doc.limits.currency ?? "INR"}
                       className="font-bold"
                     />
                     : refused outright.
@@ -485,10 +485,10 @@ export default function MerchantConsolePage() {
                 </p>
               </div>
 
-              {doc ? (
+              {doc?.policy ? (
                 <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
-                    {doc.policy.blocked_categories.length > 0 ? (
+                    {(doc.policy.blocked_categories || []).length > 0 ? (
                       doc.policy.blocked_categories.map((category) => (
                         <span
                           key={category}
@@ -504,7 +504,7 @@ export default function MerchantConsolePage() {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {doc.policy.allowed_categories.map((category) => (
+                    {(doc.policy.allowed_categories || []).map((category) => (
                       <span
                         key={category}
                         className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl"

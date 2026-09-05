@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 PaymentProviderName = Literal["fake", "razorpay"]
-ModelProviderName = Literal["mock", "openai_compatible", "groq", "grok"]
+ModelProviderName = Literal["mock", "openai_compatible", "groq", "grok", "ollama", "local"]
 # "auto" resolves to the DuckDuckGo fallback (see services.research.tools.search);
 # "duckduckgo" selects it explicitly. The .env shipped with SEARCH_PROVIDER=duckduckgo
 # while this literal omitted it, which crashed Settings() at startup.
