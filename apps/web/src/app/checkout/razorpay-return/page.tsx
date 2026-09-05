@@ -36,7 +36,7 @@ type Phase = "verifying" | "success" | "failed" | "error";
 
 export default function RazorpayReturnPage() {
   const searchParams = useSearchParams();
-  const { clearCart } = useStore();
+  const { cart, placeOrder, clearCart } = useStore();
   const [phase, setPhase] = useState<Phase>("verifying");
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -79,6 +79,16 @@ export default function RazorpayReturnPage() {
         setConfirmedOrderId(confirmed_order_id);
         const isSuccess = verifiedStatus === "paid" || verifiedStatus === "confirmed" || verified;
         if (isSuccess) {
+          if (confirmed_order_id && cart.length > 0) {
+            placeOrder({
+              orderId: confirmed_order_id,
+              paymentId: payment_id || `pay_${Date.now().toString(36)}`,
+              items: cart,
+              totalMinor: cart.reduce((acc, i) => acc + i.product.priceMinor * i.quantity, 0),
+              currency: cart[0]?.product.currency || "INR",
+              policySummary: "Approved and settled via Razorpay redirect verification",
+            });
+          }
           clearCart();
         }
         setPhase(isSuccess ? "success" : "failed");
@@ -90,7 +100,7 @@ export default function RazorpayReturnPage() {
       setError(e?.message || "An unexpected error occurred during verification.");
       setPhase("error");
     }
-  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status, clearCart]);
+  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status, cart, placeOrder, clearCart]);
 
   useEffect(() => {
     verifyAndConfirm();

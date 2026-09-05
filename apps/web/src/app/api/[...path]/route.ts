@@ -2408,8 +2408,13 @@ Buyer Question / Research Inquiry: "${question}"`,
     });
   }
 
-  // POST /api/verify-payment or /api/v1/payments/razorpay/verify-payment (Razorpay standard modal)
-  if (pathStr === "verify-payment" || pathStr === "v1/payments/razorpay/verify-payment") {
+  // POST /api/verify-payment or /api/v1/payments/razorpay/verify-payment or verify-signature
+  if (
+    pathStr === "verify-payment" ||
+    pathStr === "v1/payments/razorpay/verify-payment" ||
+    pathStr === "v1/payments/razorpay/verify-signature" ||
+    pathStr === "payments/razorpay/verify-signature"
+  ) {
     const paymentId = body.razorpay_payment_id || `pay_${Date.now().toString(36)}`;
     const orderId = body.razorpay_order_id || `order_${Date.now().toString(36)}`;
     const confirmedOrderId = body.confirmed_order_id || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;

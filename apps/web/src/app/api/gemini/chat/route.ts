@@ -278,6 +278,9 @@ export async function POST(req: NextRequest) {
         }
       } catch (modelErr: any) {
         const errMsg = String(modelErr?.message || modelErr);
+        let handledViaFallback = false;
+
+        // 1. If quota or rate limit exceeded on pro model, try flash
         if (targetModel === "gemini-3.1-pro-preview" && (errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED"))) {
           try {
             activeModelUsed = "gemini-3.5-flash";
@@ -291,15 +294,35 @@ export async function POST(req: NextRequest) {
               },
             });
             responseText = fallbackResponse.text || "";
-          } catch {
-            const fb = generateCatalogFallback(message, typedRole, activeProd);
-            responseText = fb.answer;
-            matchedProducts = fb.matchedProducts;
-            followUps = fb.followUps;
-            activeModelUsed = "catalog-intelligence-engine";
-            fallbackNotice = "Responded via verified store catalog engine.";
+            if (responseText.trim()) handledViaFallback = true;
+          } catch {}
+        }
+
+        // 2. If model name not found (404), try available stable models
+        if (!handledViaFallback && (errMsg.includes("404") || errMsg.includes("not found") || errMsg.includes("NOT_FOUND"))) {
+          const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+          for (const fallbackModel of candidateModels) {
+            try {
+              const fallbackResponse = await aiClient.models.generateContent({
+                model: fallbackModel,
+                contents,
+                config: {
+                  systemInstruction: fullSystemInstruction,
+                  temperature: 0.7,
+                },
+              });
+              responseText = fallbackResponse.text || "";
+              if (responseText.trim()) {
+                activeModelUsed = fallbackModel;
+                fallbackNotice = `Responded via ${fallbackModel} (stable model).`;
+                handledViaFallback = true;
+                break;
+              }
+            } catch {}
           }
-        } else {
+        }
+
+        if (!handledViaFallback) {
           console.warn("Gemini API call failed, gracefully using catalog intelligence:", errMsg);
           const fb = generateCatalogFallback(message, typedRole, activeProd);
           responseText = fb.answer;
