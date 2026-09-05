@@ -421,7 +421,7 @@ export function AIAssistantDrawer() {
       if (targetProd) {
         addToCart(targetProd, 1, false);
 
-        const autoLimit = userPreferences.autoApprovalLimitMinor || 50000000;
+        const autoLimit = userPreferences.autoApprovalLimitMinor || 500000;
         const total = targetProd.priceMinor;
         const isApproved = total <= autoLimit;
         const priceHash = `sha256_${Date.now().toString(16)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -444,8 +444,8 @@ export function AIAssistantDrawer() {
               currency: targetProd.currency || "INR",
               policyStatus: isApproved ? "AUTO_APPROVED" : "SUPERVISOR_REQUIRED",
               policyExplanation: isApproved
-                ? "Conforms to autonomous purchasing policy (< ₹5,000 threshold)."
-                : "Transaction exceeds ₹5,000 auto-approval threshold. One-click step-up authorization required.",
+                ? `Conforms to autonomous purchasing policy (< ${formatMinorToMajor(autoLimit, targetProd.currency)} threshold).`
+                : `Transaction exceeds ${formatMinorToMajor(autoLimit, targetProd.currency)} auto-approval threshold. One-click step-up authorization required.`,
             },
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
@@ -1074,14 +1074,14 @@ export function AIAssistantDrawer() {
                             </div>
                             <div className="pt-1 flex flex-col gap-1.5">
                               <Link
-                                href={`/orders/${msg.conversationalCheckout.orderId}`}
+                                href={`/orders/${encodeURIComponent(msg.conversationalCheckout.orderId || "")}`}
                                 onClick={closeAiDrawer}
                                 className="w-full py-2 bg-[#174c3c] hover:bg-[#103c2f] text-white font-bold text-[11px] rounded-xl text-center shadow-2xs transition-all"
                               >
                                 View Order Tracking &amp; Delivery &rarr;
                               </Link>
                               <Link
-                                href={`/timeline/order/${msg.conversationalCheckout.orderId}`}
+                                href={`/timeline/${encodeURIComponent(msg.conversationalCheckout.orderId || "")}`}
                                 onClick={closeAiDrawer}
                                 className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-xl text-center transition-all"
                               >

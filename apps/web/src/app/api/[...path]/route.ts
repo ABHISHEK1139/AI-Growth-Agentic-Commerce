@@ -64,6 +64,20 @@ function findProduct(idOrOffer: string) {
   );
 }
 
+function extractMemoryGb(p: ProductItem): number {
+  const ramStr = `${p.specsGrouped?.performance?.["RAM"] || ""} ${p.shortSpecs || ""} ${p.title}`.toLowerCase();
+  const match = ramStr.match(/\b(8|12|16|24|32|64)\s*gb\b/i);
+  return match ? parseInt(match[1], 10) : 8;
+}
+
+function extractStorageGb(p: ProductItem): number {
+  const storageStr = `${p.specsGrouped?.performance?.["Storage"] || ""} ${p.shortSpecs || ""} ${p.title}`.toLowerCase();
+  if (/\b(2|4)\s*tb\b/i.test(storageStr)) return 2048;
+  if (/\b1\s*tb\b/i.test(storageStr)) return 1024;
+  const match = storageStr.match(/\b(128|256|512)\s*gb\b/i);
+  return match ? parseInt(match[1], 10) : 512;
+}
+
 function productToCatalogOffer(p: ProductItem) {
   const offerId = p.offerId || (p.id.startsWith("prd_") ? p.id.replace("prd_", "off_") : `off_${p.id}`);
   return {
@@ -87,8 +101,8 @@ function productToCatalogOffer(p: ProductItem) {
     reviews_count: p.reviewCount,
     specifications: {
       brand: p.brand,
-      memory_gb: p.specsGrouped?.performance?.["RAM"]?.includes("16GB") ? 16 : 8,
-      storage_gb: 512,
+      memory_gb: extractMemoryGb(p),
+      storage_gb: extractStorageGb(p),
       weight_grams: Math.round((p.weightKg || 1.6) * 1000),
       ...p.specsGrouped?.performance,
     },
@@ -105,6 +119,8 @@ function productToCatalogProduct(p: ProductItem) {
     description: p.whyFitsYou?.summary || p.shortSpecs || "",
     specifications: {
       brand: p.brand,
+      memory_gb: extractMemoryGb(p),
+      storage_gb: extractStorageGb(p),
       ...p.specsGrouped?.performance,
       ...p.specsGrouped?.display,
       ...p.specsGrouped?.connectivity,
@@ -181,7 +197,14 @@ const STOPWORDS = new Set([
   "suggest", "to", "in", "of", "on", "at", "by", "is", "are", "which", "can", "you"
 ]);
 
-function searchAndRankProducts(query: string, requestedCategory: string, maxPriceMinor?: number) {
+function searchAndRankProducts(
+  query: string,
+  requestedCategory: string,
+  maxPriceMinor?: number,
+  minMemoryGb?: number,
+  minStorageGb?: number,
+  maxDeliveryDays?: number
+) {
   const qClean = (query || "").trim().toLowerCase();
   const catFromQuery = qClean ? detectCategoryFromText(qClean) : null;
   const effectiveCategory = catFromQuery || (requestedCategory ? requestedCategory.toLowerCase() : null);
@@ -256,6 +279,15 @@ function searchAndRankProducts(query: string, requestedCategory: string, maxPric
   let candidates = scored;
   if (budgetMinor) {
     candidates = candidates.filter((item) => item.product.priceMinor <= budgetMinor!);
+  }
+  if (typeof maxDeliveryDays === "number") {
+    candidates = candidates.filter((item) => (item.product.deliveryDays || 2) <= maxDeliveryDays);
+  }
+  if (typeof minMemoryGb === "number") {
+    candidates = candidates.filter((item) => extractMemoryGb(item.product) >= minMemoryGb);
+  }
+  if (typeof minStorageGb === "number") {
+    candidates = candidates.filter((item) => extractStorageGb(item.product) >= minStorageGb);
   }
 
   if (queryTokens.length > 0 || effectiveCategory) {
@@ -843,11 +875,22 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
 
   // GET /api/v1/campaigns/analytics
   if (pathStr === "v1/campaigns/analytics") {
+    const activeCount = campaigns.filter((c) => c.status === "active").length;
+    const completedCount = campaigns.filter((c) => c.status === "completed").length;
     return envelope({
-      total_spend_minor: 21300000,
-      total_revenue_minor: 145000000,
+      merchant_id: "mer_agentpay_flagship",
+      active_campaigns: activeCount,
+      completed_campaigns: completedCount,
+      average_sales_lift_pct: 26.8,
+      incremental_revenue_minor: 14500000,
+      discount_spent_minor: 2130000,
+      net_roi_multiplier: 6.8,
+      currency: "INR",
+      // Legacy aliases
+      total_spend_minor: 2130000,
+      total_revenue_minor: 14500000,
       roas: 6.8,
-      active_campaigns_count: campaigns.length,
+      active_campaigns_count: activeCount,
       top_performing_campaign: "cmp_back_to_college_2026",
     });
   }
@@ -1206,19 +1249,30 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     const eventType = url.searchParams.get("event_type") || undefined;
     const aggregateType = url.searchParams.get("aggregate_type") || undefined;
     const aggregateId = url.searchParams.get("aggregate_id") || undefined;
-    const limit = Number(url.searchParams.get("limit") || "50");
+    const startAt = url.searchParams.get("start_at") || url.searchParams.get("startAt") || undefined;
+    const endAt = url.searchParams.get("end_at") || url.searchParams.get("endAt") || undefined;
+    const limit = Math.min(Number(url.searchParams.get("limit") || "50"), 200);
 
     const dbEvents = listAuditEvents({
       eventType,
       aggregateType,
       aggregateId,
+      startAt,
+      endAt,
       limit,
     });
 
+    let filteredMem = auditEvents;
+    if (eventType) filteredMem = filteredMem.filter((ae) => ae.event_type === eventType);
+    if (aggregateType) filteredMem = filteredMem.filter((ae) => ae.aggregate_type === aggregateType);
+    if (aggregateId) filteredMem = filteredMem.filter((ae) => ae.aggregate_id === aggregateId || ae.aggregate_id.includes(aggregateId));
+    if (startAt) filteredMem = filteredMem.filter((ae) => new Date(ae.created_at).getTime() >= new Date(startAt).getTime());
+    if (endAt) filteredMem = filteredMem.filter((ae) => new Date(ae.created_at).getTime() <= new Date(endAt).getTime());
+
     const combinedEvents = [
       ...dbEvents,
-      ...auditEvents.filter((ae) => !dbEvents.some((dbe) => dbe.event_id === ae.event_id)),
-    ];
+      ...filteredMem.filter((ae) => !dbEvents.some((dbe) => dbe.event_id === ae.event_id)),
+    ].slice(0, limit);
 
     return envelope({ events: combinedEvents });
   }
@@ -1253,12 +1307,18 @@ export async function POST(req: NextRequest, { params }: { params: { path: strin
     const offset = typeof body.offset === "number" ? body.offset : 0;
     const maxPrice = typeof body.max_price_minor === "number" ? body.max_price_minor : undefined;
     const minPrice = typeof body.min_price_minor === "number" ? body.min_price_minor : undefined;
+    const minMemoryGb = typeof body.min_memory_gb === "number" ? body.min_memory_gb : undefined;
+    const minStorageGb = typeof body.min_storage_gb === "number" ? body.min_storage_gb : undefined;
+    const maxDeliveryDays = typeof body.max_delivery_days === "number" ? body.max_delivery_days : undefined;
 
     const dbResult = searchDbCatalog({
       q: query,
       category,
       minPriceMinor: minPrice,
       maxPriceMinor: maxPrice,
+      minMemoryGb,
+      minStorageGb,
+      maxDeliveryDays,
       limit,
       offset,
     });
@@ -1273,7 +1333,14 @@ export async function POST(req: NextRequest, { params }: { params: { path: strin
       });
     }
 
-    const { products: ranked } = searchAndRankProducts(query, category, maxPrice);
+    const { products: ranked } = searchAndRankProducts(
+      query,
+      category,
+      maxPrice,
+      minMemoryGb,
+      minStorageGb,
+      maxDeliveryDays
+    );
     const offers = ranked.slice(offset, offset + limit).map(productToCatalogOffer);
     return envelope({
       offers,
@@ -1927,56 +1994,11 @@ Buyer Question / Research Inquiry: "${question}"`,
     });
   }
 
-  // POST /api/v1/recommendations/cross-sell
-  if (pathStr === "v1/recommendations/cross-sell") {
-    const targetId = body.target_product_id || "";
-    const targetProd = findProduct(targetId);
-
-    let companionIds = ["prd_sony_wh1000xm5", "prd_keychron_k2_pro"];
-    const normTargetCat = normalizeCategory(targetProd?.category);
-    if (normTargetCat === "smartphone") {
-      companionIds = ["prd_sony_wh1000xm5", "prd_seed_acc_04", "prd_seed_aud_04"];
-    } else if (normTargetCat === "audio") {
-      companionIds = ["prd_keychron_k2_pro", "prd_dell_xps_15", "prd_seed_acc_01"];
-    } else if (normTargetCat === "monitor") {
-      companionIds = ["prd_keychron_k2_pro", "prd_seed_acc_01", "prd_seed_acc_03"];
-    }
-
-    const recs = companionIds
-      .map((cid) => {
-        const prod = findProduct(cid);
-        if (!prod) return null;
-        return {
-          product_id: prod.id,
-          title: prod.title,
-          category: prod.categoryLabel || prod.category,
-          price_minor: prod.priceMinor,
-          image_url: prod.imageUrl,
-          compatibility_reason: `Frequently paired with ${targetProd?.title ? targetProd.brand || "your device" : "your setup"} for productivity.`,
-          confidence: 0.94,
-        };
-      })
-      .filter(Boolean);
-
-    return envelope({
-      recommendations: recs.length > 0 ? recs : [
-        {
-          product_id: "prd_sony_wh1000xm5",
-          title: "Sony WH-1000XM5 Wireless Noise-Cancelling Headphones",
-          category: "Audio",
-          price_minor: 2999000,
-          image_url: "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=800&q=80",
-          compatibility_reason: "Frequently paired with computers and phones for premium ANC audio.",
-          confidence: 0.95,
-        }
-      ],
-    });
-  }
-
   // POST /api/v1/campaigns/propose
   if (pathStr === "v1/campaigns/propose") {
-    const title = body.title || body.name || "AI Growth Campaign";
-    const targetCat = body.target_category || "all";
+    const goalPrompt = body.goal_prompt || body.goal || "";
+    const title = body.title || body.name || (goalPrompt ? goalPrompt.slice(0, 48) : "AI Growth Campaign");
+    const targetCat = body.target_category || body.category || "all";
     const discountPct = body.max_discount_pct || (body.discount_basis_points ? Math.round(body.discount_basis_points / 100) : 10);
     const durationDays = body.duration_days || 14;
     const budgetMinor = body.budget_minor || 15000000;
@@ -2001,13 +2023,17 @@ Buyer Question / Research Inquiry: "${question}"`,
     }));
 
     const isWithinPolicy = discountPct <= 15;
+    const estimatedLiftPct = Math.min(35, Math.round(discountPct * 1.8));
+    const estimatedRevenueMinor = Math.round(budgetMinor * 2.4);
+    const estimatedDiscountCostMinor = Math.round(budgetMinor * 0.32);
+
     const newCamp = {
       campaign_id: `cmp_${Date.now().toString(36)}`,
       merchant_id: "mer_agentpay_flagship",
       title: title,
       name: title,
-      goal: body.goal || `Grow sales for ${targetCat} with automated ${discountPct}% incentive`,
-      status: "proposed",
+      goal: goalPrompt || `Grow sales for ${targetCat} with automated ${discountPct}% incentive`,
+      status: "proposed" as const,
       target_category: targetCat,
       max_discount_pct: discountPct,
       discount_basis_points: discountPct * 100,
@@ -2018,9 +2044,17 @@ Buyer Question / Research Inquiry: "${question}"`,
       end_date: new Date(Date.now() + 86400000 * durationDays).toISOString().split("T")[0],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      approved_at: null,
+      activated_at: null,
+      paused_at: null,
+      completed_at: null,
+      rejection_reason: null,
+      estimated_sales_lift_pct: estimatedLiftPct,
+      estimated_revenue_minor: estimatedRevenueMinor,
+      estimated_discount_cost_minor: estimatedDiscountCostMinor,
       products: campProducts,
       policy_check: {
-        decision: isWithinPolicy ? "allow" : "require_approval",
+        decision: (isWithinPolicy ? "allow" : "require_approval") as "allow" | "require_approval" | "block",
         passed_rules: isWithinPolicy ? ["WITHIN_MAX_DISCOUNT_CEILING", "MARGIN_PRESERVED_OVER_18PCT"] : [],
         violated_rules: isWithinPolicy ? [] : ["MAX_DISCOUNT_CEILING_EXCEEDED"],
         reason: isWithinPolicy
@@ -2035,7 +2069,7 @@ Buyer Question / Research Inquiry: "${question}"`,
         revenue_minor: 0,
       },
     };
-    campaigns.unshift(newCamp);
+    campaigns.unshift(newCamp as any);
 
     auditEvents.unshift({
       event_id: `evt_cmp_${Date.now().toString(36)}`,
@@ -2057,7 +2091,7 @@ Buyer Question / Research Inquiry: "${question}"`,
       created_at: new Date().toISOString(),
     });
 
-    return envelope({ campaign: newCamp });
+    return envelope({ ...newCamp, campaign: newCamp });
   }
 
   // Campaign lifecycle state transitions: /api/v1/campaigns/:id/(approve|activate|pause|complete|reject|submit-for-review)
@@ -2068,17 +2102,31 @@ Buyer Question / Research Inquiry: "${question}"`,
 
     const campIndex = campaigns.findIndex((c) => c.campaign_id === campId);
     if (campIndex >= 0 && action) {
-      const camp = campaigns[campIndex];
+      const camp: any = campaigns[campIndex];
       let newStatus = camp.status;
-      if (action === "approve") newStatus = "approved";
-      else if (action === "activate") newStatus = "active";
-      else if (action === "pause") newStatus = "paused";
-      else if (action === "complete") newStatus = "completed";
-      else if (action === "reject") newStatus = "rejected";
-      else if (action === "submit-for-review") newStatus = "review";
+      const nowIso = new Date().toISOString();
+
+      if (action === "approve") {
+        newStatus = "approved";
+        camp.approved_at = nowIso;
+      } else if (action === "activate") {
+        newStatus = "active";
+        camp.activated_at = nowIso;
+      } else if (action === "pause") {
+        newStatus = "paused";
+        camp.paused_at = nowIso;
+      } else if (action === "complete") {
+        newStatus = "completed";
+        camp.completed_at = nowIso;
+      } else if (action === "reject") {
+        newStatus = "rejected";
+        camp.rejection_reason = body?.reason || "Rejected by merchant administrator";
+      } else if (action === "submit-for-review") {
+        newStatus = "review";
+      }
 
       camp.status = newStatus;
-      camp.updated_at = new Date().toISOString();
+      camp.updated_at = nowIso;
 
       auditEvents.unshift({
         event_id: `evt_cmp_${Date.now().toString(36)}`,
@@ -2097,10 +2145,10 @@ Buyer Question / Research Inquiry: "${question}"`,
         model_version: null,
         amount_minor: camp.budget_minor || 0,
         metadata: { campaign_id: campId, previous_status: camp.status, new_status: newStatus },
-        created_at: new Date().toISOString(),
+        created_at: nowIso,
       });
 
-      return envelope({ campaign: camp, status: newStatus });
+      return envelope({ ...camp, campaign: camp, status: newStatus });
     }
   }
 

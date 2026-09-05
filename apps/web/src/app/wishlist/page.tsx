@@ -4,11 +4,17 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/context/StoreContext";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
+import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
 import { ProductCard } from "@/components/ProductCard";
 import { apiGet } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 import { exploreOfferToProductItem, toOfferView } from "@/catalog/adapt";
 import { lookupOfferInCatalog } from "@/catalog/client";
+
+const COMBINED_PRODUCTS: ProductItem[] = [
+  ...ALL_PRODUCTS,
+  ...SEED_CATALOG_PRODUCTS.filter((sp) => !ALL_PRODUCTS.some((ap) => ap.id === sp.id)),
+];
 
 export default function WishlistPage() {
   const { wishlist, openAiDrawer } = useStore();
@@ -26,9 +32,7 @@ export default function WishlistPage() {
 
       setIsLoading(true);
       try {
-        const loaded: ProductItem[] = [];
-
-        await Promise.all(
+        const loaded = await Promise.all(
           wishlist.map(async (productId) => {
             const res = await apiGet<any>(`/api/v1/catalog/products/${productId}`);
             const p = res.ok ? (res.data?.product || res.data) : null;
@@ -59,27 +63,23 @@ export default function WishlistPage() {
                 },
                 p
               );
-              loaded.push(exploreOfferToProductItem(offerView, "postgresql"));
-              return;
+              return exploreOfferToProductItem(offerView, "postgresql");
             }
 
             const lookup = await lookupOfferInCatalog({ productId });
             if (lookup.ok && lookup.data?.found) {
-              loaded.push(exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource));
-              return;
+              return exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource);
             }
 
-            const fallback = ALL_PRODUCTS.find(
+            const fallback = COMBINED_PRODUCTS.find(
               (item) => item.id === productId || item.slug === productId || item.offerId === productId
             );
-            if (fallback) {
-              loaded.push(fallback);
-            }
+            return fallback || null;
           })
         );
 
         if (!cancelled) {
-          setSavedProducts(loaded);
+          setSavedProducts(loaded.filter((p): p is ProductItem => p !== null));
         }
       } catch (err) {
         console.warn("Wishlist live fetch note:", err);

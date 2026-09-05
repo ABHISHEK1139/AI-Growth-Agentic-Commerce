@@ -69,8 +69,8 @@ export function toOfferView(
     offer_id: offer.offer_id,
     product_id: offer.product_id,
     merchant_id: offer.merchant_id,
-    title: product?.title || offer.product_id,
-    category: product?.category_id ?? null,
+    title: product?.title || (offer as any).title || offer.product_id,
+    category: product?.category_id ?? (offer as any).category ?? null,
     unit_price_minor: offer.unit_price_minor,
     currency: offer.currency,
     available_stock: offer.available_quantity,
@@ -79,9 +79,9 @@ export function toOfferView(
     expires_at: offer.expires_at,
     offer_version: offer.offer_version,
     pricing_source: offer.pricing_source,
-    rating: product?.average_rating ?? 0,
-    reviews_count: product?.rating_number ?? 0,
-    image_url: product?.imageUrl ?? null,
+    rating: product?.average_rating ?? (offer as any).rating ?? 0,
+    reviews_count: product?.rating_number ?? (offer as any).reviews_count ?? 0,
+    image_url: product?.imageUrl ?? (offer as any).image_url ?? (offer as any).imageUrl ?? null,
     specs,
   };
 }
