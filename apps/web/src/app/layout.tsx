@@ -10,7 +10,7 @@ import { Footer } from "@/components/Footer";
 import { MobileNav } from "@/components/MobileNav";
 
 export const metadata = {
-  title: "AI-Growth Agentic Commerce",
+  title: "AgentPay | AI Growth & Agentic Commerce",
   description: "Merchant-side AI commerce gateway and storefront for agentic commerce, featuring autonomous purchasing, dynamic catalog, and merchant console.",
 };
 

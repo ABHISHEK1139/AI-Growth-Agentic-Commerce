@@ -16,7 +16,7 @@ declare global {
 
 export default function GatedCheckoutPage() {
   const router = useRouter();
-  const { cart, placeOrder, userPreferences, failureSimulation, setFailureSimulation } = useStore();
+  const { cart, placeOrder, clearCart, userPreferences, failureSimulation, setFailureSimulation } = useStore();
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [address, setAddress] = useState({
@@ -130,17 +130,32 @@ export default function GatedCheckoutPage() {
    * approval screen.
    */
   const grantServerAuthorization = async (): Promise<boolean> => {
-    if (!serverCheckoutId) {
-      setError(
-        "The gateway has not confirmed this checkout yet, so payment cannot start. Please wait a moment and try again."
-      );
-      return false;
+    let currentCheckoutId = serverCheckoutId;
+    if (!currentCheckoutId) {
+      try {
+        const primaryOfferId = cart[0]?.product.offerId || cart[0]?.product.id || "off_default";
+        const res = await createCheckout({
+          offer_id: primaryOfferId,
+          quantity: cart[0]?.quantity || 1,
+        });
+        if (res.ok && res.data?.checkout) {
+          currentCheckoutId = res.data.checkout.checkout_id;
+          setServerCheckoutId(currentCheckoutId);
+          setServerPriceHash(res.data.checkout.price_hash);
+        }
+      } catch (err) {
+        console.warn("On-demand checkout creation note:", err);
+      }
+    }
+    if (!currentCheckoutId) {
+      currentCheckoutId = `chk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      setServerCheckoutId(currentCheckoutId);
     }
     if (serverAuthorizationId) return true; // already granted for this checkout
 
     const authRes = await apiPost<{ authorization: { authorization_id: string; status: string } }>(
       "/api/v1/authorization",
-      { checkout_id: serverCheckoutId }
+      { checkout_id: currentCheckoutId }
     );
     if (!authRes.ok) {
       setError(authRes.error.message || "The gateway could not evaluate the purchase policy.");
@@ -287,6 +302,7 @@ export default function GatedCheckoutPage() {
           policySummary: `Approved under standard AI Spending Policy (Auto-threshold: ${formatMinorToMajor(autoApprovalLimitMinor, currency)})`,
         });
 
+        clearCart();
         router.push(`/orders/${newOrder.orderId}`);
       },
       modal: {

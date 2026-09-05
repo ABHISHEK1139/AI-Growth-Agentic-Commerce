@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet, type ApiError } from "@/lib/api";
 
@@ -98,8 +99,9 @@ const STATUS_COPY: Record<string, { heading: string; detail: string }> = {
   },
 };
 
-export default function PaymentStatusPage({ params }: { params: { id: string } }) {
-  const paymentId = params?.id ?? "";
+export default function PaymentStatusPage({ params }: { params?: { id: string } }) {
+  const routeParams = useParams<{ id: string }>();
+  const paymentId = routeParams?.id || params?.id || "";
 
   const [payment, setPayment] = useState<PaymentRecord | null>(null);
   const [phase, setPhase] = useState<LoadPhase>("loading");
