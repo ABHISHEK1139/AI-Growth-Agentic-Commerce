@@ -171,7 +171,7 @@ class MockModelProvider:
             category = "phone_accessory"
         elif any(k in p_lower for k in ["keyboard", "mouse", "trackpad", "dock"]):
             category = "computer_accessory"
-        elif any(k in p_lower for k in ["phone", "smartphone", "mobile", "pixel", "iphone", "samsung", "galaxy"]):
+        elif any(k in p_lower for k in ["phone", "smartphone", "mobile", "pixel", "iphone", "samsung", "galaxy", "tablet", "ipad"]):
             category = "smartphone"
         elif any(k in p_lower for k in ["tv", "television", "home theater"]):
             category = "home_electronics"

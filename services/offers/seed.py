@@ -39,13 +39,9 @@ from services.offers.constraints import (
 #: because the application's datastore is not available.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_OUT_CATALOG_DIR = _REPO_ROOT / "data" / "out" / "catalog"
-_OUT_PRODUCTS_PATH = _OUT_CATALOG_DIR / "products.jsonl"
-_OUT_OFFERS_PATH = _OUT_CATALOG_DIR / "offers.jsonl"
-
 SEED_CATALOG_DIR = _REPO_ROOT / "data" / "seed" / "catalog"
-SEED_PRODUCTS_PATH = _OUT_PRODUCTS_PATH if _OUT_PRODUCTS_PATH.exists() else SEED_CATALOG_DIR / "products.jsonl"
-SEED_OFFERS_PATH = _OUT_OFFERS_PATH if _OUT_OFFERS_PATH.exists() else SEED_CATALOG_DIR / "offers.jsonl"
+SEED_PRODUCTS_PATH = SEED_CATALOG_DIR / "products.jsonl"
+SEED_OFFERS_PATH = SEED_CATALOG_DIR / "offers.jsonl"
 
 #: Default when an offer record omits stock, matching the importer's own default
 #: so the two readers agree on a record that leaves it out.
@@ -64,6 +60,31 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _clean_spec_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value) if value >= 0 else None
+        rounded = round(value)
+        return int(rounded) if rounded > 0 else (0 if value == 0 else None)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = float(stripped)
+            if parsed.is_integer():
+                return int(parsed) if parsed >= 0 else None
+            rounded = round(parsed)
+            return int(rounded) if rounded > 0 else (0 if parsed == 0 else None)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
     """Project a product's raw specifications onto the public schema.
 
@@ -73,12 +94,12 @@ def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
     """
     dim = raw.get("dimensions_mm") if isinstance(raw.get("dimensions_mm"), dict) else {}
     return ProductSpecificationsV1(
-        memory_gb=raw.get("memory_gb"),
-        storage_gb=raw.get("storage_gb"),
-        weight_grams=raw.get("weight_grams"),
-        length_mm=raw.get("length_mm") or (int(dim.get("length_mm")) if dim.get("length_mm") is not None else None),
-        width_mm=raw.get("width_mm") or (int(dim.get("width_mm")) if dim.get("width_mm") is not None else None),
-        height_mm=raw.get("height_mm") or (int(dim.get("height_mm")) if dim.get("height_mm") is not None else None),
+        memory_gb=_clean_spec_int(raw.get("memory_gb")),
+        storage_gb=_clean_spec_int(raw.get("storage_gb")),
+        weight_grams=_clean_spec_int(raw.get("weight_grams")),
+        length_mm=_clean_spec_int(raw.get("length_mm") or dim.get("length_mm")),
+        width_mm=_clean_spec_int(raw.get("width_mm") or dim.get("width_mm")),
+        height_mm=_clean_spec_int(raw.get("height_mm") or dim.get("height_mm")),
     )
 
 

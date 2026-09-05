@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -80,12 +81,13 @@ class FailingCheckoutService:
         ttl_minutes: int = 15,
         now: Any = None,
     ) -> CheckoutV1:
+        ts = (now or datetime.now(UTC)).isoformat()
         session.execute(
             text(
-                "INSERT INTO merchant (merchant_id, name, status) "
-                "VALUES (:merchant_id, :name, 'active')"
+                "INSERT INTO merchant (merchant_id, name, status, created_at) "
+                "VALUES (:merchant_id, :name, 'active', :created_at)"
             ),
-            {"merchant_id": self.merchant_id, "name": "Atomicity probe"},
+            {"merchant_id": self.merchant_id, "name": "Atomicity probe", "created_at": ts},
         )
         append_event(
             session,
