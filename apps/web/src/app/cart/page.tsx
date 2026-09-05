@@ -32,6 +32,8 @@ interface CrossSellRec {
   available_quantity: number | null;
   savings_minor: number | null;
   alternative_title: string | null;
+  original_price_minor?: number | null;
+  image_url?: string;
   /* Legacy aliases (kept for backward-compat with older responses) */
   pairing_id?: string;
   target_product_id?: string;
@@ -130,6 +132,44 @@ export default function CartPage() {
               const lookup = await lookupOfferInCatalog({ productId: recProductId });
               if (!cancelled && lookup.ok && lookup.data?.found) {
                 setSuggestion(exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource));
+              } else if (!cancelled && (rec.title || recProductId)) {
+                const offerView = toOfferView(
+                  {
+                    schema_version: "1.0",
+                    offer_id: recOfferId,
+                    product_id: recProductId,
+                    merchant_id: "mrc_demo_electronics",
+                    unit_price_minor: recPrice || 149900,
+                    currency: recCurrency || "INR",
+                    available_quantity: 20,
+                    delivery_days: 1,
+                    return_period_days: 14,
+                    expires_at: "",
+                    offer_version: 1,
+                    pricing_source: "merchant_configured",
+                    status: "active",
+                    specifications: {
+                      memory_gb: null,
+                      storage_gb: null,
+                      weight_grams: null,
+                      length_mm: null,
+                      width_mm: null,
+                      height_mm: null,
+                    },
+                  },
+                  {
+                    title: rec.title || "Complementary Accessory",
+                    category_id: rec.category || "accessory",
+                    imageUrl: rec.image_url || "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80",
+                    average_rating: 4.8,
+                    rating_number: 140,
+                    specifications: {
+                      brand: "Certified Companion",
+                      compatibility: rec.compatibility_reason || "Plug and play companion",
+                    },
+                  }
+                );
+                setSuggestion(exploreOfferToProductItem(offerView, "seed_fixture"));
               }
             }
           }

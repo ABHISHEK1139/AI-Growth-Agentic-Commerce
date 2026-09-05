@@ -48,12 +48,34 @@ export default function ReturnsWizardPage() {
     async function loadEligibleOrders() {
       setOrdersLoading(true);
       try {
+        const mappedLocalOrders: ServerOrder[] = (localOrders || []).map((o) => ({
+          schema_version: "1.0",
+          order_id: o.orderId,
+          checkout_id: o.orderId.replace("ord_", "chk_"),
+          payment_id: o.paymentId,
+          buyer_id: "byr_active_session",
+          merchant_id: "mrc_demo_electronics",
+          amount_minor: o.totalMinor,
+          currency: o.currency || "INR",
+          status: (o.status as any) || "confirmed",
+          confirmed_at: o.createdAt || new Date().toISOString(),
+        }));
+
         const res = await apiGet<OrderPage>("/api/v1/orders?limit=20&offset=0");
-        if (!cancelled && res.ok && res.data?.orders?.length) {
-          setServerOrders(res.data.orders);
-          setSelectedOrderId(res.data.orders[0].order_id);
-        } else if (!cancelled && localOrders.length) {
-          setSelectedOrderId(localOrders[0].orderId);
+        const remoteOrders = res.ok && Array.isArray(res.data?.orders) ? res.data.orders : [];
+
+        const combined = [...remoteOrders];
+        for (const local of mappedLocalOrders) {
+          if (!combined.some((o) => o.order_id === local.order_id)) {
+            combined.unshift(local);
+          }
+        }
+
+        if (!cancelled) {
+          setServerOrders(combined);
+          if (combined.length > 0) {
+            setSelectedOrderId((prev) => prev && combined.some((o) => o.order_id === prev) ? prev : combined[0].order_id);
+          }
         }
       } catch (err) {
         console.warn("Returns order fetch note:", err);
@@ -76,15 +98,26 @@ export default function ReturnsWizardPage() {
       setSelectableItems(items);
       if (items[0]) setSelectedProductId(items[0].id);
     } else {
-      runCatalogSearch({ limit: 4 }).then((res) => {
-        if (!cancelled && res.kind === "ok" && res.outcome.offers.length > 0) {
-          const items = res.outcome.offers.map((o) =>
-            exploreOfferToProductItem(o, res.outcome.catalogSource)
+      (async () => {
+        try {
+          const res = await apiGet<any>(`/api/v1/orders/${selectedOrderId}`);
+          if (!cancelled && res.ok && res.data?.items?.length) {
+            const items = res.data.items.map((it: any) => it.product || it);
+            setSelectableItems(items);
+            if (items[0]) setSelectedProductId(items[0].id || items[0].product_id);
+            return;
+          }
+        } catch {}
+
+        const searchRes = await runCatalogSearch({ limit: 4 });
+        if (!cancelled && searchRes.kind === "ok" && searchRes.outcome.offers.length > 0) {
+          const items = searchRes.outcome.offers.map((o) =>
+            exploreOfferToProductItem(o, searchRes.outcome.catalogSource)
           );
           setSelectableItems(items);
           if (items[0]) setSelectedProductId(items[0].id);
         }
-      });
+      })();
     }
     return () => {
       cancelled = true;

@@ -69,6 +69,9 @@ export interface DbSearchOptions {
   category?: string;
   minPriceMinor?: number;
   maxPriceMinor?: number;
+  minMemoryGb?: number;
+  minStorageGb?: number;
+  maxDeliveryDays?: number;
   limit?: number;
   offset?: number;
 }
@@ -99,7 +102,17 @@ function normalizeCategoryFilter(category?: string): string | null {
 
 export function searchCatalog(options: DbSearchOptions): DbSearchResult {
   const db = getServerDb();
-  const { q, category, minPriceMinor, maxPriceMinor, limit = 16, offset = 0 } = options;
+  const {
+    q,
+    category,
+    minPriceMinor,
+    maxPriceMinor,
+    minMemoryGb,
+    minStorageGb,
+    maxDeliveryDays,
+    limit = 16,
+    offset = 0,
+  } = options;
 
   let where: string[] = ["o.status = 'active'"];
   let params: any[] = [];
@@ -124,6 +137,21 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
   if (typeof maxPriceMinor === "number") {
     where.push("o.unit_price_minor <= ?");
     params.push(maxPriceMinor);
+  }
+
+  if (typeof maxDeliveryDays === "number") {
+    where.push("o.delivery_days <= ?");
+    params.push(maxDeliveryDays);
+  }
+
+  if (typeof minMemoryGb === "number") {
+    where.push("(json_extract(p.specifications, '$.memory_gb') >= ? OR p.title LIKE ? OR p.specifications LIKE ?)");
+    params.push(minMemoryGb, `%${minMemoryGb}GB%`, `%"memory_gb":${minMemoryGb}%`);
+  }
+
+  if (typeof minStorageGb === "number") {
+    where.push("(json_extract(p.specifications, '$.storage_gb') >= ? OR p.title LIKE ? OR p.specifications LIKE ?)");
+    params.push(minStorageGb, `%${minStorageGb}GB%`, `%"storage_gb":${minStorageGb}%`);
   }
 
   const whereClause = where.join(" AND ");

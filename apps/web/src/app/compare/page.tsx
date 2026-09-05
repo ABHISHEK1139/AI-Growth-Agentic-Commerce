@@ -139,7 +139,7 @@ function CompareContent() {
             outsidePage: false,
           });
         } else {
-          const fallback = ALL_PRODUCTS.find(
+          const fallback = COMBINED_PRODUCTS.find(
             (p) => p.offerId === offerId || p.id === offerId || p.slug === offerId
           );
           if (fallback) {
@@ -243,19 +243,27 @@ function CompareContent() {
 
   const addCandidate = (prodId: string) => {
     if (fromUrl) {
-      const all = Array.from(new Set([...productIds, prodId])).slice(0, 4);
+      const existingProductIds = compared.map((c) => c.offer.product_id);
+      const all = Array.from(new Set([...existingProductIds, ...productIdsFromUrl, prodId])).slice(0, 4);
       router.push(`/compare?products=${all.join(",")}`);
     } else {
       toggleCompare(prodId);
     }
   };
 
-  const removeCandidate = (prodId: string) => {
+  const removeCandidate = (candidateOffer: ExploreOffer, candidateRequested: string) => {
     if (fromUrl) {
-      const remaining = productIds.filter((id) => id !== prodId);
-      router.push(remaining.length > 0 ? `/compare?products=${remaining.join(",")}` : "/compare");
+      const remainingProducts = compared
+        .filter(
+          (c) =>
+            c.offer.offer_id !== candidateOffer.offer_id &&
+            c.offer.product_id !== candidateOffer.product_id &&
+            c.requested !== candidateRequested
+        )
+        .map((c) => c.offer.product_id);
+      router.push(remainingProducts.length > 0 ? `/compare?products=${remainingProducts.join(",")}` : "/compare");
     } else {
-      toggleCompare(prodId);
+      toggleCompare(candidateOffer.product_id);
     }
   };
 
@@ -419,7 +427,7 @@ function CompareContent() {
                             </div>
                           )}
                           <button
-                            onClick={() => removeCandidate(offer.product_id)}
+                            onClick={() => removeCandidate(offer, candidate.requested)}
                             className="absolute top-2 right-2 w-7 h-7 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full text-xs flex items-center justify-center transition-all shadow-xs"
                             title="Remove from comparison"
                           >

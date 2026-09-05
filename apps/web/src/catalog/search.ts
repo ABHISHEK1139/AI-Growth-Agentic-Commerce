@@ -73,7 +73,20 @@ export async function runCatalogSearch(filters: CatalogFilters): Promise<Catalog
     if (result.ok) {
       const offers = Array.isArray(result.data.offers) ? result.data.offers : [];
       const joined = await Promise.all(
-        offers.map(async (offer) => {
+        offers.map(async (offer: any) => {
+          if (offer.title && (offer.image_url || offer.imageUrl)) {
+            return {
+              view: toOfferView(offer, {
+                title: offer.title,
+                category_id: offer.category || offer.category_id,
+                average_rating: offer.rating || offer.average_rating,
+                rating_number: offer.reviews_count || offer.rating_number,
+                imageUrl: offer.image_url || offer.imageUrl,
+                specifications: offer.specifications,
+              }),
+              failed: false,
+            };
+          }
           const productResult = await getCatalogProduct(offer.product_id);
           if (!productResult.ok) return { view: toOfferView(offer, null), failed: true };
           const product = productResult.data?.product;

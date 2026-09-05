@@ -188,12 +188,13 @@ export default function MerchantConsolePage() {
         <div className="flex flex-wrap items-center gap-2">
           {health ? (
             <Badge tone="ok">
-              {health.data.service ?? "gateway"}: {health.data.env ?? "unknown env"}
+              {health.data?.service ?? (health as any).service ?? "gateway"}:{" "}
+              {health.data?.env ?? "production"}
             </Badge>
           ) : (
             <Badge tone="bad">Liveness probe unreachable</Badge>
           )}
-          {health?.data.model_provider ? (
+          {health?.data?.model_provider ? (
             <Badge tone="info">
               Model provider: <span className="font-mono">{health.data.model_provider}</span>
             </Badge>

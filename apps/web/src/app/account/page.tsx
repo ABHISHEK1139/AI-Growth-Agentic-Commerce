@@ -27,7 +27,7 @@ interface OrderPage {
 }
 
 export default function AccountPage() {
-  const { userPreferences, updateUserPreferences } = useStore();
+  const { userPreferences, updateUserPreferences, orders: storeOrders } = useStore();
 
   const [activeTab, setActiveTab] = useState<"profile" | "ai_prefs" | "orders" | "addresses" | "security">("ai_prefs");
   const [autoLimit, setAutoLimit] = useState(userPreferences.autoApprovalLimitMinor / 100);
@@ -42,9 +42,31 @@ export default function AccountPage() {
     async function loadServerOrders() {
       setOrdersLoading(true);
       try {
+        const mappedLocalOrders: OrderRecord[] = (storeOrders || []).map((o) => ({
+          schema_version: "1.0",
+          order_id: o.orderId,
+          checkout_id: o.orderId.replace("ord_", "chk_"),
+          payment_id: o.paymentId,
+          buyer_id: "byr_active_session",
+          merchant_id: "mrc_demo_electronics",
+          amount_minor: o.totalMinor,
+          currency: o.currency || "INR",
+          status: (o.status as any) || "confirmed",
+          confirmed_at: o.createdAt || new Date().toISOString(),
+        }));
+
         const res = await apiGet<OrderPage>("/api/v1/orders?limit=20&offset=0");
-        if (!cancelled && res.ok && res.data) {
-          setServerOrders(res.data.orders || []);
+        const remoteOrders = res.ok && Array.isArray(res.data?.orders) ? res.data.orders : [];
+
+        const combined = [...remoteOrders];
+        for (const local of mappedLocalOrders) {
+          if (!combined.some((o) => o.order_id === local.order_id)) {
+            combined.unshift(local);
+          }
+        }
+
+        if (!cancelled) {
+          setServerOrders(combined);
         }
       } catch (err) {
         console.warn("Failed to load account orders:", err);
@@ -57,7 +79,7 @@ export default function AccountPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [storeOrders]);
 
   const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
