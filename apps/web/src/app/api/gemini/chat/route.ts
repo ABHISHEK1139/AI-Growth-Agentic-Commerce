@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
+import {
+  buildFullSystemInstruction,
+  trimConversationHistory,
+  AI_ASSISTANT_BUDGET,
+  type AssistantPersonaRole,
+} from "@/catalog/assistantConfig";
 
 function getAiClient(): GoogleGenAI | null {
   const apiKey = (process.env.GEMINI_API_KEY || "").trim();
@@ -15,42 +21,14 @@ function getAiClient(): GoogleGenAI | null {
   });
 }
 
-export type GeminiRole = "concierge" | "hardware_specialist" | "merchant_auditor" | "custom";
+export type GeminiRole = AssistantPersonaRole;
 export type ModelTier = "auto" | "gemini-3.5-flash" | "gemini-3.1-flash-lite" | "gemini-3.1-pro-preview";
 
 export interface ChatHistoryItem {
-  role: "user" | "model";
+  role: "user" | "model" | "assistant";
   text: string;
 }
 
-const ROLE_SYSTEM_INSTRUCTIONS: Record<GeminiRole, string> = {
-  concierge: `You are the Official Personal Shopping Concierge for our premium electronics and gadgets catalog.
-Your mission is to help shoppers discover the exact right product for their needs and budget.
-Maintain a warm, refined, highly knowledgeable tone.
-Provide clear, honest pros and cons, explain price-to-performance tradeoffs, and recommend matching accessories where helpful.
-Always format currency in Indian Rupees (₹) with proper comma separation.
-When referencing products from our catalog, use their exact model name so the user can easily locate or add them to cart.`,
-
-  hardware_specialist: `You are a Senior Hardware Architect and Benchmarking Specialist.
-Your mission is to perform deep technical evaluations of laptop architectures, monitors, thermal envelopes, ports, and peripheral gear.
-Analyze real-world developer workloads (Docker containers, compilation times, memory pressure with 16GB vs 32GB RAM), color space fidelity (100% sRGB vs 95% DCI-P3), and interface standards (Thunderbolt 4 vs USB 3.2 Gen 2, HDMI 2.0 vs 2.1).
-Deliver precise, technically rigorous, objective assessments with structured tables when comparing multiple models.`,
-
-  merchant_auditor: `You are an Autonomous Commerce Risk Officer and Merchant Policy Auditor.
-Your mission is to advise merchant store administrators on transaction guardrails, automated spending thresholds, checkout approval rules, campaign return-on-ad-spend (RoAS), and audit ledger compliance.
-Provide clear risk assessment scoring, mitigation steps, and policy configuration advice.`,
-
-  custom: `You are an adaptable AI shopping and technical commerce assistant. Follow the shopper's instructions precisely while remaining objective, accurate, and helpful.`,
-};
-
-function buildCatalogSummary(): string {
-  return ALL_PRODUCTS.slice(0, 30)
-    .map(
-      (p) =>
-        `- [ID: ${p.id}] ${p.title} | Brand: ${p.brand} | Category: ${p.category} | Price: ₹${(p.priceMinor / 100).toLocaleString("en-IN")} | Rating: ${p.rating}/5 | Key Specs: ${p.shortSpecs || "Standard specifications"}`
-    )
-    .join("\n");
-}
 
 function detectTaskModel(
   query: string,
@@ -207,24 +185,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Message is required" }, { status: 400 });
     }
 
-    const typedRole = (["concierge", "hardware_specialist", "merchant_auditor", "custom"].includes(role)
-      ? role
-      : "concierge") as GeminiRole;
-
-    const baseInstruction =
-      typedRole === "custom" && customSystemInstruction
-        ? customSystemInstruction
-        : ROLE_SYSTEM_INSTRUCTIONS[typedRole];
-
-    const catalogContext = `\n\n--- CURRENT VERIFIED STORE CATALOG ---\n${buildCatalogSummary()}\n---------------------------------------\nIf the shopper asks for recommendations or specific items, prioritize matching these verified catalog products. Mention their exact titles and current prices in ₹.`;
-
-    let activeProductContext = "";
+    const validRoles: GeminiRole[] = ["grok_teardown", "concierge", "hardware_specialist", "merchant_auditor", "custom"];
+    const typedRole: GeminiRole = validRoles.includes(role as GeminiRole) ? (role as GeminiRole) : "concierge";
     const activeProd = activeProductId ? ALL_PRODUCTS.find((p) => p.id === activeProductId) : undefined;
-    if (activeProd) {
-      activeProductContext = `\n\n--- CURRENTLY VIEWED PRODUCT ---\nTitle: ${activeProd.title}\nBrand: ${activeProd.brand}\nPrice: ₹${(activeProd.priceMinor / 100).toLocaleString("en-IN")}\nCategory: ${activeProd.category}\nRating: ${activeProd.rating} / 5 (${activeProd.reviewCount} reviews)\nSummary: ${activeProd.whyFitsYou?.summary || activeProd.shortSpecs}\nSpecs: ${JSON.stringify(activeProd.specsGrouped || activeProd.shortSpecs)}\nStock: ${activeProd.stock} units available\n---------------------------------`;
-    }
 
-    const fullSystemInstruction = `${baseInstruction}${activeProductContext}${catalogContext}`;
+    const fullSystemInstruction = buildFullSystemInstruction({
+      role: typedRole,
+      activeProduct: activeProd,
+      customSystemInstruction,
+    });
     const { model: targetModel, reasoning } = detectTaskModel(message, history, modelPreference);
 
     const aiClient = getAiClient();
@@ -243,16 +212,17 @@ export async function POST(req: NextRequest) {
       activeModelUsed = "catalog-intelligence-engine";
       fallbackNotice = "Responded via verified store catalog engine.";
     } else {
-      // Format history for multi-turn chat
+      // Format history with smart sliding window within 8K–12K token budget
       const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
-      const recentHistory = (history as ChatHistoryItem[]).slice(-10);
-      for (const item of recentHistory) {
-        if (item.text && item.text.trim()) {
-          contents.push({
-            role: item.role === "user" ? "user" : "model",
-            parts: [{ text: item.text.trim() }],
-          });
-        }
+      const trimmedHistory = trimConversationHistory(
+        history,
+        AI_ASSISTANT_BUDGET.conversationBudgetTokens
+      );
+      for (const item of trimmedHistory) {
+        contents.push({
+          role: item.role === "user" ? "user" : "model",
+          parts: [{ text: item.content }],
+        });
       }
       contents.push({
         role: "user",
@@ -265,7 +235,8 @@ export async function POST(req: NextRequest) {
           contents,
           config: {
             systemInstruction: fullSystemInstruction,
-            temperature: 0.7,
+            temperature: 0.5,
+            maxOutputTokens: AI_ASSISTANT_BUDGET.maxResponseTokens,
           },
         });
 
@@ -290,7 +261,8 @@ export async function POST(req: NextRequest) {
               contents,
               config: {
                 systemInstruction: fullSystemInstruction,
-                temperature: 0.7,
+                temperature: 0.5,
+                maxOutputTokens: AI_ASSISTANT_BUDGET.maxResponseTokens,
               },
             });
             responseText = fallbackResponse.text || "";
@@ -303,12 +275,15 @@ export async function POST(req: NextRequest) {
           const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
           for (const fallbackModel of candidateModels) {
             try {
+              activeModelUsed = fallbackModel;
+              fallbackNotice = `Responded via ${fallbackModel} (auto model resolution).`;
               const fallbackResponse = await aiClient.models.generateContent({
                 model: fallbackModel,
                 contents,
                 config: {
                   systemInstruction: fullSystemInstruction,
-                  temperature: 0.7,
+                  temperature: 0.5,
+                  maxOutputTokens: AI_ASSISTANT_BUDGET.maxResponseTokens,
                 },
               });
               responseText = fallbackResponse.text || "";

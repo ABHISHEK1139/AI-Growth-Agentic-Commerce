@@ -1,47 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import type { CustomModelConfig } from "@/catalog/modelConfig";
+import {
+  buildFullSystemInstruction,
+  trimConversationHistory,
+  AI_ASSISTANT_BUDGET,
+  type AssistantPersonaRole,
+} from "@/catalog/assistantConfig";
 
-export type GrokRole = "grok_teardown" | "concierge" | "hardware_specialist" | "merchant_auditor" | "custom";
+export type GrokRole = AssistantPersonaRole;
 export type GrokModelTier = "auto" | "grok-2-latest" | "grok-2" | "grok-beta" | "openai/gpt-oss-120b" | "groq-fast";
 
 export interface ChatHistoryItem {
   role: "user" | "model" | "assistant";
   text: string;
-}
-
-const GROK_ROLE_INSTRUCTIONS: Record<GrokRole, string> = {
-  grok_teardown: `You are Grok AI Commerce Intelligence: the maximum truth-seeking, direct, technically rigorous hardware evaluator and shopping co-pilot.
-Your mission is to give buyers the unfiltered truth about hardware architecture, price-to-performance tradeoffs, thermal envelopes, and value.
-- First-Principles Reasoning: Analyze silicon, cooling, RAM bandwidth, display color accuracy, and port IO from physical reality rather than marketing claims.
-- Zero Fluff: Be direct, witty, and concise. No generic corporate disclaimers.
-- Honest Pricing: Always quote prices in Indian Rupees (₹) with proper comma separation. If a product is overpriced or bottlenecked, state it frankly.
-- Real Catalog Grounding: Reference only products that exist in our verified store catalog. When recommending an item, cite its exact model title.`,
-
-  concierge: `You are Grok Shopping Concierge: an intelligent, insightful shopping guide for our premium electronics store.
-Provide honest pros and cons, explain price-to-performance tradeoffs, and recommend accessories that make engineering sense.
-Always format currency in Indian Rupees (₹) with proper comma separation.
-When referencing catalog items, use exact model titles so the user can easily locate or purchase them.`,
-
-  hardware_specialist: `You are Grok Senior Hardware Architect and Benchmarking Specialist.
-Perform deep technical evaluations of laptop architectures, monitors, thermal dynamics, ports, and peripheral gear.
-Analyze developer workloads (Docker containers, compilation times, memory pressure with 16GB vs 32GB RAM), color spaces (100% sRGB vs 95% DCI-P3), and interface standards (Thunderbolt 4 vs USB 3.2 Gen 2, HDMI 2.0 vs 2.1).
-Provide structured comparisons with precise, technically rigorous assessments.`,
-
-  merchant_auditor: `You are Grok Autonomous Commerce Risk Officer and Merchant Policy Auditor.
-Advise store administrators on transaction guardrails, automated spending thresholds, checkout approval policies, and audit ledger compliance.
-Provide clear risk assessment scoring, mitigation steps, and policy configuration advice.`,
-
-  custom: `You are Grok AI, an adaptable, truth-seeking shopping and technical assistant. Follow user instructions precisely with maximum honesty and clarity.`,
-};
-
-function buildCatalogSummary(): string {
-  return ALL_PRODUCTS.slice(0, 35)
-    .map(
-      (p) =>
-        `- [ID: ${p.id}] ${p.title} | Brand: ${p.brand} | Category: ${p.category} | Price: ₹${(p.priceMinor / 100).toLocaleString("en-IN")} | Rating: ${p.rating}/5 | Key Specs: ${p.shortSpecs || "Standard specifications"}`
-    )
-    .join("\n");
 }
 
 function resolveGrokEndpointAndKey(
@@ -196,32 +168,28 @@ function generateGrokCatalogFallback(
 
   let answer = "";
   if (activeProduct) {
-    answer = `Here is the first-principles breakdown on the **${activeProduct.title}**:\n\n` +
-      `• **Price**: ₹${(activeProduct.priceMinor / 100).toLocaleString("en-IN")} (Verified In Stock)\n` +
-      `• **Teardown Verdict**: ${activeProduct.whyFitsYou?.summary || activeProduct.shortSpecs || "Solid build with premium thermal envelope and clean IO layout."}\n` +
-      `• **Hardware Overview**: ${activeProduct.shortSpecs || "High-performance architecture."}\n` +
-      `• **Rating**: ★ ${activeProduct.rating} / 5 based on ${activeProduct.reviewCount} customer reviews.\n\n` +
-      (activeProduct.whyFitsYou?.pros?.length ? `**Key Highlights:**\n` + activeProduct.whyFitsYou.pros.slice(0, 3).map((s) => `• ${s}`).join("\n") + "\n\n" : "") +
-      `**Grok Recommendation:** If this fits your workflow, you can add it directly to bag or initiate instant in-app checkout.`;
+    answer = `**${activeProduct.title}** (₹${(activeProduct.priceMinor / 100).toLocaleString("en-IN")})\n\n` +
+      `• **Overview**: ${activeProduct.whyFitsYou?.summary || activeProduct.shortSpecs || "High-performance architecture with verified specs."}\n` +
+      `• **Rating**: ★ ${activeProduct.rating} / 5 (${activeProduct.reviewCount} reviews)\n` +
+      `• **Stock Status**: ${activeProduct.stock > 0 ? "In Stock (Verified)" : "Pre-order"}\n\n` +
+      `Would you like to review complementary accessories or initiate instant checkout?`;
   } else if (top) {
-    answer = `Based on first-principles analysis of our current catalog, here are the top options matching your query:\n\n` +
+    answer = `Here are the top options matching your request:\n\n` +
       selectedProducts
         .map(
           (p, i) =>
             `${i + 1}. **${p.title}** — ₹${(p.priceMinor / 100).toLocaleString("en-IN")}\n` +
-            `   • *Specs*: ${p.shortSpecs || p.brand}\n` +
-            `   • *Rating*: ★ ${p.rating} / 5 (${p.reviewCount} reviews)\n` +
-            `   • *Verdict*: ${p.whyFitsYou?.summary || p.shortSpecs || "Exceptional price-to-performance ratio in its tier."}`
+            `   • ${p.shortSpecs || p.brand} (★ ${p.rating}/5)`
         )
-        .join("\n\n") +
-      `\n\nWould you like a deep architectural comparison between any of these, or to proceed with checkout?`;
+        .join("\n") +
+      `\n\nWould you like a side-by-side comparison, or are you ready to proceed with checkout?`;
   } else {
-    answer = `I scanned our verified hardware catalog for "${query}". You can explore our top-tier laptops, 4K monitors, or audio peripherals directly, or refine your search with specific budget and performance criteria.`;
+    answer = `I scanned our verified catalog for "${query}". You can browse our high-performance laptops, 4K displays, and peripherals, or share your specific budget and workflow needs.`;
   }
 
-  const followUps = selectedProducts.map((p) => `Deep breakdown of ${p.title.slice(0, 25)}...`);
+  const followUps = selectedProducts.map((p) => `Compare ${p.title.slice(0, 24)}...`);
   followUps.push("Compare price-to-performance ratio");
-  followUps.push("Check real-world thermal and battery endurance");
+  followUps.push("Check real-world thermal & battery endurance");
 
   return { answer, matchedProducts: selectedProducts, followUps: followUps.slice(0, 4) };
 }
@@ -254,27 +222,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing or empty message parameter" }, { status: 400 });
     }
 
-    const typedRole: GrokRole = GROK_ROLE_INSTRUCTIONS[role as GrokRole] ? (role as GrokRole) : "grok_teardown";
+    const validRoles: GrokRole[] = ["grok_teardown", "concierge", "hardware_specialist", "merchant_auditor", "custom"];
+    const typedRole: GrokRole = validRoles.includes(role as GrokRole) ? (role as GrokRole) : "grok_teardown";
     const activeProd = activeProductId ? ALL_PRODUCTS.find((p) => p.id === activeProductId) : undefined;
 
-    const baseSystemPrompt = GROK_ROLE_INSTRUCTIONS[typedRole];
-    const catalogData = buildCatalogSummary();
-
-    const activeProdContext = activeProd
-      ? `\n\nCurrently Active Product Under Review:\n- Title: ${activeProd.title}\n- Brand: ${activeProd.brand}\n- Price: ₹${(activeProd.priceMinor / 100).toLocaleString("en-IN")}\n- Specs: ${activeProd.shortSpecs}\n- Rating: ${activeProd.rating} / 5 (${activeProd.reviewCount} reviews)\n- Stock: ${activeProd.stock > 0 ? "In Stock" : "Pre-order"}`
-      : "";
-
-    const fullSystemInstruction = `${baseSystemPrompt}
-
-${customSystemInstruction ? `Custom Guidelines:\n${customSystemInstruction}\n` : ""}
-Store Catalog Snapshot:
-${catalogData}${activeProdContext}
-
-Important Rules:
-1. Always deliver sharp, first-principles, accurate engineering truth.
-2. Prices must be in ₹ (Indian Rupees) with standard formatting.
-3. If recommending products, use exact names from the catalog.
-4. Keep responses structured, highly readable, and free of marketing fluff.`;
+    const fullSystemInstruction = buildFullSystemInstruction({
+      role: typedRole,
+      activeProduct: activeProd,
+      customSystemInstruction,
+    });
 
     const { endpoint, key, targetModel, provider, isLoopback } = resolveGrokEndpointAndKey(
       modelPreference,
@@ -300,13 +256,17 @@ Important Rules:
         { role: "system", content: fullSystemInstruction },
       ];
 
-      for (const item of history.slice(-8)) {
-        if (item.text && item.text.trim()) {
-          messages.push({
-            role: item.role === "user" ? "user" : "assistant",
-            content: item.text.trim(),
-          });
-        }
+      // Aggressively trim multi-turn history to fit the 8K-12K token conversation budget
+      const trimmedHistory = trimConversationHistory(
+        history,
+        AI_ASSISTANT_BUDGET.conversationBudgetTokens
+      );
+
+      for (const item of trimmedHistory) {
+        messages.push({
+          role: item.role,
+          content: item.content,
+        });
       }
 
       messages.push({
@@ -328,8 +288,8 @@ Important Rules:
           body: JSON.stringify({
             model: targetModel,
             messages,
-            temperature: 0.6,
-            max_tokens: 1024,
+            temperature: 0.5,
+            max_tokens: AI_ASSISTANT_BUDGET.maxResponseTokens,
           }),
         });
 

@@ -47,6 +47,13 @@ The platform includes:
 #### Conversational Commerce
 Customers can interact with an in-app AI shopping assistant using natural language to describe their requirements, budget, and intended use case. The system converts that intent into product-search strategies while financial actions remain controlled by deterministic backend services.
 
+##### Customer-Facing AI Context & Prompt Architecture
+* **Target Model Context**: `32K tokens` providing generous room for multi-turn shopping exploration without context overflows.
+* **Conversation Budget**: `8K–12K tokens` with aggressive sliding-window trimming (works backwards from latest turns to preserve recent context while preventing token bloat).
+* **System Prompt Budget**: `~1.5K–2K tokens` combining compact behavioral instructions with a ground-truth store catalog snapshot.
+* **Assistant Response Target**: `~300–500 tokens` (`max_tokens: 500`), keeping replies conversational, direct, and under 150 words normally.
+* **Deterministic Commerce Boundary**: The LLM interprets customer intent and recommends options; deterministic backend services remain authoritative over prices, stock availability, cart calculation, discount gating, and Razorpay payments.
+
 #### AI Upsell & Cross-Sell
 The recommendation engine analyzes product compatibility and identifies complementary products while verifying real inventory before making recommendations. For example, it can recommend compatible accessories for a laptop rather than simply suggesting unrelated products.
 
