@@ -242,7 +242,7 @@ export const CORE_PRODUCTS: ProductItem[] = [
       id: "prd_dell_sleeve",
       title: "Dell Premier 15 Neoprene Waterproof Sleeve",
       priceMinor: 199900,
-      imageUrl: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+      imageUrl: "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=400&q=80",
       alternativeSavingsMinor: 50000,
       alternativeTitle: "EcoShield 15.6 Ultra-Light Sleeve (Save ₹500)",
     },
@@ -666,7 +666,7 @@ export const CORE_PRODUCTS: ProductItem[] = [
       id: "prd_walnut_wrist_rest",
       title: "Solid Walnut Wood Ergonomic Palm Rest for 75% Keyboard",
       priceMinor: 199900,
-      imageUrl: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+      imageUrl: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=400&q=80",
     },
   },
   {
@@ -864,7 +864,7 @@ export const CORE_PRODUCTS: ProductItem[] = [
       id: "prd_hdmi_21_cable",
       title: "Ultra High-Speed HDMI 2.1 48Gbps 2-Meter Braided Cable",
       priceMinor: 99900,
-      imageUrl: "https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80",
+      imageUrl: "https://images.unsplash.com/photo-1588508065123-287b28e013da?auto=format&fit=crop&w=400&q=80",
     },
   },
 ];
