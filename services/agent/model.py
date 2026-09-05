@@ -49,7 +49,7 @@ CHAT_COMPLETIONS_PATH = "chat/completions"
 #: The ``MODEL_PROVIDER`` values that mean "reach an OpenAI-compatible endpoint".
 #: All three behave identically -- the base URL is what distinguishes them, which
 #: is the whole point of ADR-0010.
-HTTP_PROVIDERS: frozenset[str] = frozenset({"openai_compatible", "groq", "grok"})
+HTTP_PROVIDERS: frozenset[str] = frozenset({"openai_compatible", "groq", "grok", "ollama", "local"})
 
 #: First ``{`` to last ``}``. Used only after the whole body fails to decode, to
 #: lift an object out of a fenced code block or out of surrounding prose.

@@ -5,10 +5,18 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sparkles, Maximize2, Zap, Cpu, ShoppingBag, ShieldCheck, RefreshCw, AlertTriangle, AlertCircle, Search, ArrowRight, Lock, CheckCircle2, CreditCard } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
+import { AIModelConfigModal } from "@/components/AIModelConfigModal";
+import { getStoredModelConfig, type CustomModelConfig } from "@/catalog/modelConfig";
+import { Sliders } from "lucide-react";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
 import { exploreCatalog, askProductQuestion } from "@/catalog/client";
 import { exploreOfferToProductItem } from "@/catalog/adapt";
+import {
+  sendGrokChatMessage,
+  type GrokRole,
+  type GrokModelTier,
+} from "@/catalog/grokClient";
 import {
   sendGeminiChatMessage,
   type GeminiRole,
@@ -84,6 +92,19 @@ export function AIAssistantDrawer() {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeProductsInView, setActiveProductsInView] = useState<ProductItem[]>([]);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [activeCustomConfig, setActiveCustomConfig] = useState<CustomModelConfig | null>(null);
+
+  useEffect(() => {
+    const stored = getStoredModelConfig();
+    if (stored) {
+      setActiveCustomConfig(stored);
+    }
+  }, []);
+
+  const [aiEngine, setAiEngine] = useState<"grok" | "gemini">("grok");
+  const [grokRole, setGrokRole] = useState<GrokRole>("grok_teardown");
+  const [grokModelTier, setGrokModelTier] = useState<GrokModelTier>("auto");
   const [geminiRole, setGeminiRole] = useState<GeminiRole>("concierge");
   const [modelTier, setModelTier] = useState<ModelTier>("auto");
 
@@ -483,54 +504,105 @@ export function AIAssistantDrawer() {
       return;
     }
 
-    // 2. GEMINI MULTI-TURN CHATBOT (Server-Side @google/genai with Model Tiering & Role System Instructions)
-    let geminiFailed = false;
-    let geminiErrorMessage = "";
-    try {
-      const historyPayload: ChatHistoryItem[] = messages.slice(-10).map((m) => ({
-        role: m.sender === "user" ? "user" : "model",
-        text: m.text,
-      }));
+    // 2. MULTI-MODEL AI ROUTING (Grok AI / Custom Config / Google Gemini)
+    let aiCallFailed = false;
+    let aiCallErrorMessage = "";
 
-      const activeProd = aiDrawerContext.product || activeProductsInView[0];
+    if (aiEngine === "grok") {
+      try {
+        const historyPayload: any[] = messages.slice(-10).map((m) => ({
+          role: m.sender === "user" ? "user" : "assistant",
+          text: m.text,
+        }));
 
-      const geminiRes = await sendGeminiChatMessage({
-        message: query,
-        history: historyPayload,
-        role: geminiRole,
-        modelPreference: modelTier,
-        activeProductId: activeProd?.id,
-      });
+        const activeProd = aiDrawerContext.product || activeProductsInView[0];
 
-      if (geminiRes.ok && geminiRes.answer && geminiRes.answer.trim()) {
-        if (geminiRes.matchedProducts && geminiRes.matchedProducts.length > 0) {
-          setActiveProductsInView(geminiRes.matchedProducts);
+        const grokRes = await sendGrokChatMessage({
+          message: query,
+          history: historyPayload,
+          role: grokRole,
+          modelPreference: grokModelTier,
+          activeProductId: activeProd?.id,
+          customConfig: activeCustomConfig || getStoredModelConfig() || undefined,
+        });
+
+        if (grokRes.ok && grokRes.answer && grokRes.answer.trim()) {
+          if (grokRes.matchedProducts && grokRes.matchedProducts.length > 0) {
+            setActiveProductsInView(grokRes.matchedProducts);
+          }
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `agt_${Date.now()}`,
+              sender: "agent",
+              text: grokRes.answer!,
+              modelUsed: grokRes.modelUsed,
+              fallbackNotice: grokRes.fallbackNotice,
+              durationMs: grokRes.durationMs,
+              matchedProducts: grokRes.matchedProducts,
+              followUps: grokRes.followUps,
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            },
+          ]);
+          setLoading(false);
+          return;
+        } else {
+          aiCallFailed = true;
+          aiCallErrorMessage = grokRes.error || "Unable to receive response from Grok AI.";
         }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `agt_${Date.now()}`,
-            sender: "agent",
-            text: geminiRes.answer!,
-            modelUsed: geminiRes.modelUsed,
-            fallbackNotice: geminiRes.fallbackNotice,
-            durationMs: geminiRes.durationMs,
-            matchedProducts: geminiRes.matchedProducts,
-            followUps: geminiRes.followUps,
-            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          },
-        ]);
-        setLoading(false);
-        return;
-      } else {
-        geminiFailed = true;
-        geminiErrorMessage = geminiRes.error || "Unable to receive response from AI model.";
+      } catch (gErr: any) {
+        console.warn("Grok Chat note, attempting fallback:", gErr);
+        aiCallFailed = true;
+        aiCallErrorMessage = gErr?.message || "Network error connecting to Grok AI.";
       }
-    } catch (gErr: any) {
-      console.warn("Gemini Chat note, attempting catalog fallback:", gErr);
-      geminiFailed = true;
-      geminiErrorMessage = gErr?.message || "Network error while connecting to assistant.";
+    } else {
+      try {
+        const historyPayload: ChatHistoryItem[] = messages.slice(-10).map((m) => ({
+          role: m.sender === "user" ? "user" : "model",
+          text: m.text,
+        }));
+
+        const activeProd = aiDrawerContext.product || activeProductsInView[0];
+
+        const geminiRes = await sendGeminiChatMessage({
+          message: query,
+          history: historyPayload,
+          role: geminiRole,
+          modelPreference: modelTier,
+          activeProductId: activeProd?.id,
+        });
+
+        if (geminiRes.ok && geminiRes.answer && geminiRes.answer.trim()) {
+          if (geminiRes.matchedProducts && geminiRes.matchedProducts.length > 0) {
+            setActiveProductsInView(geminiRes.matchedProducts);
+          }
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `agt_${Date.now()}`,
+              sender: "agent",
+              text: geminiRes.answer!,
+              modelUsed: geminiRes.modelUsed,
+              fallbackNotice: geminiRes.fallbackNotice,
+              durationMs: geminiRes.durationMs,
+              matchedProducts: geminiRes.matchedProducts,
+              followUps: geminiRes.followUps,
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            },
+          ]);
+          setLoading(false);
+          return;
+        } else {
+          aiCallFailed = true;
+          aiCallErrorMessage = geminiRes.error || "Unable to receive response from Gemini AI.";
+        }
+      } catch (gErr: any) {
+        console.warn("Gemini Chat note, attempting catalog fallback:", gErr);
+        aiCallFailed = true;
+        aiCallErrorMessage = gErr?.message || "Network error while connecting to assistant.";
+      }
     }
 
     // 3. PRODUCT SPEC Q&A & RESEARCH FALLBACK: Route to POST /api/v1/research/ask
@@ -701,13 +773,13 @@ export function AIAssistantDrawer() {
       }
 
       if (matchedItems.length === 0) {
-        if (geminiFailed) {
+        if (aiCallFailed) {
           setMessages((prev) => [
             ...prev,
             {
               id: `agt_${Date.now()}`,
               sender: "agent",
-              text: geminiErrorMessage || `We encountered an issue communicating with the assistant. You can retry your request or explore our verified catalog.`,
+              text: aiCallErrorMessage || `We encountered an issue communicating with the assistant. You can retry your request or explore our verified catalog.`,
               isError: true,
               errorHeading: "Assistant Temporarily Unavailable",
               queryAttempted: query,
@@ -812,8 +884,8 @@ export function AIAssistantDrawer() {
           </span>
           <span className="font-mono text-xs text-[#a9d1b6]">✦</span>
           <span>Ask AI Assistant</span>
-          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white/90">
-            Gemini AI
+          <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+            ⚡ Grok AI
           </span>
         </button>
       </aside>
@@ -835,15 +907,34 @@ export function AIAssistantDrawer() {
           <div className="p-3.5 border-b border-slate-200 bg-slate-50 flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-[#174c3c] text-white rounded-xl text-xs font-bold font-mono">
-                  <Sparkles className="h-3.5 w-3.5" />
+                <span className={`p-1.5 ${aiEngine === "grok" ? "bg-black text-amber-400" : "bg-[#174c3c] text-white"} rounded-xl text-xs font-bold font-mono transition-colors`}>
+                  {aiEngine === "grok" ? <Zap className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
                 </span>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Gemini Shopping Assistant</h3>
-                  <p className="text-[10px] text-slate-500">Multi-Turn AI with Dynamic Model Routing</p>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="font-bold text-slate-900 text-sm">
+                      {aiEngine === "grok" ? "Grok AI Assistant" : "Gemini Assistant"}
+                    </h3>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
+                      aiEngine === "grok" ? "bg-amber-100 text-amber-900 border border-amber-300" : "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                    }`}>
+                      {activeCustomConfig ? (activeCustomConfig.displayName || activeCustomConfig.modelName) : (aiEngine === "grok" ? "Grok AI" : "Gemini")}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    {aiEngine === "grok" ? "First-principles hardware teardowns & truth-seeking co-pilot" : "Multi-turn shopping concierge"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsConfigModalOpen(true)}
+                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-amber-700 transition-colors flex items-center gap-1"
+                  title="Configure AI Model (Ollama, xAI Grok, LM Studio, custom endpoint)"
+                >
+                  <Sliders className="h-3.5 w-3.5 text-amber-600" />
+                </button>
                 <Link
                   href="/chat"
                   onClick={closeAiDrawer}
@@ -862,33 +953,89 @@ export function AIAssistantDrawer() {
             </div>
 
             {/* Persona & Model Controls Bar */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Role:</span>
-                <select
-                  value={geminiRole}
-                  onChange={(e) => setGeminiRole(e.target.value as GeminiRole)}
-                  className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[11px] focus:outline-none"
+            <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-200/60 text-[11px]">
+              {/* Engine Toggle */}
+              <div className="flex items-center bg-slate-200/80 p-0.5 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setAiEngine("grok")}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-all ${
+                    aiEngine === "grok" ? "bg-black text-amber-300 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                  }`}
                 >
-                  <option value="concierge">🛍️ Concierge</option>
-                  <option value="hardware_specialist">🔬 Hardware Specialist</option>
-                  <option value="merchant_auditor">🛡️ Risk Auditor</option>
-                </select>
+                  ⚡ Grok
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiEngine("gemini")}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-all ${
+                    aiEngine === "gemini" ? "bg-[#174c3c] text-white shadow-xs" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  ✨ Gemini
+                </button>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Model:</span>
-                <select
-                  value={modelTier}
-                  onChange={(e) => setModelTier(e.target.value as ModelTier)}
-                  className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[11px] focus:outline-none"
-                >
-                  <option value="auto">🤖 Auto</option>
-                  <option value="gemini-3.1-flash-lite">⚡ Lite</option>
-                  <option value="gemini-3.5-flash">✨ Flash</option>
-                  <option value="gemini-3.1-pro-preview">🧠 Pro</option>
-                </select>
-              </div>
+              {/* Role Select */}
+              {aiEngine === "grok" ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-medium text-[10px]">Role:</span>
+                  <select
+                    value={grokRole}
+                    onChange={(e) => setGrokRole(e.target.value as GrokRole)}
+                    className="bg-white border border-slate-200 rounded-md px-1 py-0.5 text-slate-700 font-semibold text-[10px] focus:outline-none max-w-[105px] truncate"
+                  >
+                    <option value="grok_teardown">⚡ Teardown</option>
+                    <option value="concierge">🛍️ Concierge</option>
+                    <option value="hardware_specialist">🔬 Hardware</option>
+                    <option value="merchant_auditor">🛡️ Risk</option>
+                  </select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-medium text-[10px]">Role:</span>
+                  <select
+                    value={geminiRole}
+                    onChange={(e) => setGeminiRole(e.target.value as GeminiRole)}
+                    className="bg-white border border-slate-200 rounded-md px-1 py-0.5 text-slate-700 font-semibold text-[10px] focus:outline-none max-w-[105px] truncate"
+                  >
+                    <option value="concierge">🛍️ Concierge</option>
+                    <option value="hardware_specialist">🔬 Hardware</option>
+                    <option value="merchant_auditor">🛡️ Risk</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Model Select */}
+              {aiEngine === "grok" ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-medium text-[10px]">Model:</span>
+                  <select
+                    value={grokModelTier}
+                    onChange={(e) => setGrokModelTier(e.target.value as GrokModelTier)}
+                    className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[10px] focus:outline-none max-w-[90px] truncate"
+                  >
+                    <option value="auto">🤖 Auto</option>
+                    <option value="grok-2-latest">⚡ Grok 2</option>
+                    <option value="openai/gpt-oss-120b">🧠 Reasoning</option>
+                    <option value="groq-fast">🚀 Ultra-Fast</option>
+                  </select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 font-medium text-[10px]">Model:</span>
+                  <select
+                    value={modelTier}
+                    onChange={(e) => setModelTier(e.target.value as ModelTier)}
+                    className="bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 font-semibold text-[10px] focus:outline-none max-w-[90px] truncate"
+                  >
+                    <option value="auto">🤖 Auto</option>
+                    <option value="gemini-3.1-flash-lite">⚡ Lite</option>
+                    <option value="gemini-3.5-flash">✨ Flash</option>
+                    <option value="gemini-3.1-pro-preview">🧠 Pro</option>
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1370,6 +1517,11 @@ export function AIAssistantDrawer() {
           </div>
         </div>
       </div>
+      <AIModelConfigModal
+        isOpen={isConfigModalOpen}
+        onClose={() => setIsConfigModalOpen(false)}
+        onConfigSaved={(cfg) => setActiveCustomConfig(cfg)}
+      />
     </div>
   );
 }

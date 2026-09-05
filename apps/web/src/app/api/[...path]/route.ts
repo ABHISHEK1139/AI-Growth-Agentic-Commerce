@@ -713,6 +713,67 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     });
   }
 
+  // GET /api/v1/capability, /api/v1/agent/capability, /.well-known/agent-capability.json
+  if (
+    pathStr === "v1/capability" ||
+    pathStr === "v1/agent/capability" ||
+    pathStr === ".well-known/agent-capability.json"
+  ) {
+    return NextResponse.json({
+      schema_version: "1.0",
+      authentication: {
+        method: "api_key_exchange",
+        token_endpoint: "/v1/auth/token",
+        scopes: ["catalog:read", "checkout:write", "payment:write"],
+      },
+      capabilities: [
+        "catalog_search",
+        "offer_query",
+        "checkout",
+        "authorization",
+        "payment",
+        "payment_status",
+        "order_lookup",
+      ],
+      limits: {
+        max_results: 50,
+        max_quantity: 10,
+        max_transaction_minor: 7000000,
+        auto_approval_limit_minor: 5000000,
+        currency: "INR",
+      },
+      endpoints: {
+        search: "/v1/catalog/search",
+        offers_query: "/v1/catalog/offers",
+        checkout: "/v1/checkout",
+        authorization: "/v1/authorizations",
+        payment: "/v1/payments",
+        payment_status: "/v1/payments/{payment_id}",
+        order: "/v1/orders/{order_id}",
+      },
+      policy: {
+        policy_version: "1.0",
+        allowed_categories: [
+          "laptop",
+          "smartphone",
+          "audio",
+          "camera",
+          "monitor",
+          "computer_accessory",
+          "phone_accessory",
+          "home_electronics",
+          "appliance",
+        ],
+        blocked_categories: ["weapons", "tobacco", "adult"],
+        explicit_approval_required: true,
+      },
+      payment_provider: "razorpay",
+      test_mode: true,
+      external_protocol_certification: "none",
+      protocol_notice: "APCP/1.0 - Razorpay Agentic Autonomous Commerce Protocol",
+    });
+  }
+
   // GET /api/v1/catalog/products/:id
   if (pathStr.startsWith("v1/catalog/products/")) {
     const id = pathStr.replace("v1/catalog/products/", "");
