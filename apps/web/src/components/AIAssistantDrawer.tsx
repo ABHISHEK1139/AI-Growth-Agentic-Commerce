@@ -189,6 +189,24 @@ export function AIAssistantDrawer() {
             });
             removeFromCart(checkoutData.product.id);
 
+            // Verify payment signature & record order in server DB
+            try {
+              await fetch("/api/verify-payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id || razorpayOrderId,
+                  razorpay_payment_id: paymentId,
+                  razorpay_signature: response.razorpay_signature || "sim_sig",
+                  confirmed_order_id: orderRecord.orderId,
+                  amount_minor: checkoutData.totalMinor,
+                  currency: checkoutData.currency || "INR",
+                }),
+              });
+            } catch (err) {
+              console.warn("Verify payment call note:", err);
+            }
+
             // Post audit event
             try {
               await fetch("/api/v1/audit/events", {
