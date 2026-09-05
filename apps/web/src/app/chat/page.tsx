@@ -225,7 +225,7 @@ export default function AIChatPage() {
 
     try {
       // 1. Primary route: Grok / Configured Local Model
-      const historyPayload: any[] = messages.map((m) => ({
+      const historyPayload: any[] = messages.slice(-30).map((m) => ({
         role: m.role === "user" ? "user" : "assistant",
         text: m.text,
       }));
@@ -243,7 +243,7 @@ export default function AIChatPage() {
 
       // 2. Cascading fallback to Gemini if primary returned empty or error
       if (!response.ok || !response.answer) {
-        const geminiHistory: ChatHistoryItem[] = messages.map((m) => ({
+        const geminiHistory: ChatHistoryItem[] = messages.slice(-30).map((m) => ({
           role: m.role === "user" ? "user" : "model",
           text: m.text,
         }));

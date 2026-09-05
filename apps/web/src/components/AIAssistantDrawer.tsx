@@ -501,7 +501,7 @@ export function AIAssistantDrawer() {
     // Automatically dispatches through our primary intelligence (Grok / Local Model / Configured Provider)
     // and seamlessly falls back to Gemini or catalog intelligence without user intervention.
     try {
-      const historyPayload: any[] = messages.slice(-10).map((m) => ({
+      const historyPayload: any[] = messages.slice(-30).map((m) => ({
         role: m.sender === "user" ? "user" : "assistant",
         text: m.text,
       }));
@@ -545,7 +545,7 @@ export function AIAssistantDrawer() {
 
     // Secondary fallback: Google Gemini
     try {
-      const historyPayload: ChatHistoryItem[] = messages.slice(-10).map((m) => ({
+      const historyPayload: ChatHistoryItem[] = messages.slice(-30).map((m) => ({
         role: m.sender === "user" ? "user" : "model",
         text: m.text,
       }));
