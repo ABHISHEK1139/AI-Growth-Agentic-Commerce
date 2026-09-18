@@ -7,6 +7,7 @@ from buyer_agent.client import AgentPayClient
 from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
+from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
 from packages.schemas.v1 import CapabilityDocumentV1
 from packages.security.tokens import issue_access_token
@@ -29,7 +30,10 @@ def agent_client(test_app):
 
     mock_session = MagicMock()
     test_app.dependency_overrides[get_db] = lambda: mock_session
-    return AgentPayClient(client=TestClient(test_app))
+    try:
+        yield AgentPayClient(client=TestClient(test_app))
+    finally:
+        test_app.dependency_overrides.pop(get_db, None)
 
 
 def test_contract_capability_discovery(agent_client):
@@ -151,13 +155,14 @@ def test_contract_negotiation_bounds(test_app):
     assert countered.status == "counter_offered"
     assert countered.counter_price_minor == floor
 
-    with pytest.raises(Exception):
+    with pytest.raises(DomainError) as exc_info:
         NegotiationEngine.evaluate_bid(
             round_number=MAX_NEGOTIATION_ROUNDS + 1,
             proposed_price_minor=floor,
             list_price_minor=list_price,
             max_discount_basis_points=1000,
         )
+    assert exc_info.value.code == ErrorCode.NEGOTIATION_ROUNDS_EXCEEDED
 
     # HTTP surface requires auth
     mock_session = MagicMock()

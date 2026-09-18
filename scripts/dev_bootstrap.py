@@ -49,6 +49,10 @@ def main() -> int:
     # Seed through the same code path the worker uses, pointed at SQLite.
     import os
 
+    # The settings loader ignores ambient environment values unless live
+    # credentials are opted in, so without this flag the DATABASE_URL below
+    # would be silently discarded and the seed could land in Postgres.
+    os.environ["ALLOW_LIVE_CREDENTIALS"] = "1"
     os.environ["DATABASE_URL"] = DB_URL
     # The engine cache must not hold the Postgres URL from any earlier import.
     from apps.api.db import get_engine, get_session_factory

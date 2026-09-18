@@ -233,13 +233,19 @@ def test_scenario_07_price_slippage_mismatch_halt():
     )
     session.query.return_value.filter.return_value.first.return_value = mock_auth
     with pytest.raises(DomainError) as exc:
-        auth_service.revalidate_for_payment(
-            session,
-            authorization_id="ath_1",
-            checkout_id="chk_1",
-            current_price_hash="tampered_new_hash",
-            now=now,
-        )
+        with patch(
+            "services.authorization.service.AuthorizationRepository.get_by_id",
+            return_value=mock_auth,
+        ):
+            auth_service.revalidate_for_payment(
+                session,
+                authorization_id="ath_1",
+                checkout_id="chk_1",
+                current_price_hash="tampered_new_hash",
+                merchant_id="mrc_1",
+                buyer_id="buy_1",
+                now=now,
+            )
     assert exc.value.code == ErrorCode.PRICE_CHANGED
 
 

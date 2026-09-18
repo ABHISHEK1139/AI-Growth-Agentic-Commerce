@@ -279,7 +279,7 @@ def test_verify_razorpay_signature_valid(mock_payment_service_class):
     # We also need to mock the session.query(Payment) since the endpoint checks for it now (BUG-58 fix)
     with (
         patch("apps.api.routers.razorpay_checkout.Depends"),
-        patch("apps.api.routers.razorpay_checkout.current_principal"),
+        patch("apps.api.routers.razorpay_checkout.require_scopes"),
     ):
         # The test client uses the overridden get_db which returns a real session.
         # Let's insert a dummy payment directly into the DB so the query succeeds,

@@ -108,6 +108,7 @@ class AgentLoopRunner:
             offers = self._commerce.search_offers(
                 merchant_id=merchant_id,
                 category=validated_args.intent.category if validated_args.intent else None,
+                quantity=validated_args.quantity or 1,
                 limit=10,
             )
             result_data = {
@@ -117,35 +118,27 @@ class AgentLoopRunner:
 
         elif tool_name == "get_offer":
             if validated_args.offer_id:
-                try:
-                    offer = self._commerce.get_offer(
-                        merchant_id=merchant_id,
-                        offer_id=validated_args.offer_id,
-                    )
-                    result_data = {"offer": offer.model_dump(mode="json")}
-                except Exception:
-                    offers = self._commerce.search_offers(merchant_id=merchant_id, limit=1)
-                    result_data = {
-                        "offer": offers[0].model_dump(mode="json") if offers else None,
-                        "count": len(offers),
-                    }
+                # A failure here is information, not an invitation to answer
+                # with somebody else's offer: substituting an unrelated
+                # listing would present false price and stock as fact.
+                offer = self._commerce.get_offer(
+                    merchant_id=merchant_id,
+                    offer_id=validated_args.offer_id,
+                )
+                result_data = {"offer": offer.model_dump(mode="json")}
             else:
                 offers = self._commerce.search_offers(merchant_id=merchant_id, limit=1)
                 result_data = {"offer": offers[0].model_dump(mode="json") if offers else None}
 
         elif tool_name == "compare_offers":
-            offer_ids = (
-                validated_args.offer_ids
-                or ([validated_args.offer_id] if validated_args.offer_id else [])
+            offer_ids = validated_args.offer_ids or (
+                [validated_args.offer_id] if validated_args.offer_id else []
             )
             if offer_ids:
-                try:
-                    offers = self._commerce.compare_offers(
-                        merchant_id=merchant_id,
-                        offer_ids=offer_ids,
-                    )
-                except Exception:
-                    offers = self._commerce.search_offers(merchant_id=merchant_id, limit=len(offer_ids) or 3)
+                offers = self._commerce.compare_offers(
+                    merchant_id=merchant_id,
+                    offer_ids=offer_ids,
+                )
             else:
                 offers = self._commerce.search_offers(merchant_id=merchant_id, limit=3)
             result_data = {
@@ -161,53 +154,52 @@ class AgentLoopRunner:
             }
 
         elif tool_name == "check_inventory":
-            if validated_args.offer_id:
-                try:
-                    offer = self._commerce.get_offer(
-                        merchant_id=merchant_id,
-                        offer_id=validated_args.offer_id,
-                    )
-                    result_data = {
-                        "offer_id": validated_args.offer_id,
-                        "in_stock": True,
-                        "status": "available",
-                        "unit_price_minor": offer.unit_price_minor,
-                        "currency": offer.currency,
-                    }
-                except Exception:
-                    result_data = {
-                        "offer_id": validated_args.offer_id,
-                        "in_stock": False,
-                        "status": "out_of_stock",
-                    }
-            else:
-                result_data = {"status": "available", "in_stock": True}
+            if not validated_args.offer_id:
+                raise DomainError(
+                    "offer_id is required for check_inventory",
+                    code=ErrorCode.VALIDATION_ERROR,
+                )
+            # No fallback: an unreadable offer is reported through the error,
+            # never as a confident in-stock verdict.
+            offer = self._commerce.get_offer(
+                merchant_id=merchant_id,
+                offer_id=validated_args.offer_id,
+            )
+            result_data = {
+                "offer_id": validated_args.offer_id,
+                "in_stock": True,
+                "status": "available",
+                "unit_price_minor": offer.unit_price_minor,
+                "currency": offer.currency,
+            }
 
         elif tool_name == "get_delivery_options":
-            delivery_days = 2
-            if validated_args.offer_id:
-                with contextlib.suppress(Exception):
-                    offer = self._commerce.get_offer(
-                        merchant_id=merchant_id, offer_id=validated_args.offer_id
-                    )
-                    delivery_days = offer.delivery_days or 2
+            if not validated_args.offer_id:
+                raise DomainError(
+                    "offer_id is required for get_delivery_options",
+                    code=ErrorCode.VALIDATION_ERROR,
+                )
+            offer = self._commerce.get_offer(
+                merchant_id=merchant_id, offer_id=validated_args.offer_id
+            )
             result_data = {
-                "delivery_days": delivery_days,
+                "delivery_days": offer.delivery_days or 2,
                 "guaranteed": True,
                 "shipping_cost_minor": 0,
                 "options": ["standard_express_courier"],
             }
 
         elif tool_name == "get_return_policy":
-            return_days = 10
-            if validated_args.offer_id:
-                with contextlib.suppress(Exception):
-                    offer = self._commerce.get_offer(
-                        merchant_id=merchant_id, offer_id=validated_args.offer_id
-                    )
-                    return_days = offer.return_period_days or 10
+            if not validated_args.offer_id:
+                raise DomainError(
+                    "offer_id is required for get_return_policy",
+                    code=ErrorCode.VALIDATION_ERROR,
+                )
+            offer = self._commerce.get_offer(
+                merchant_id=merchant_id, offer_id=validated_args.offer_id
+            )
             result_data = {
-                "return_period_days": return_days,
+                "return_period_days": offer.return_period_days or 10,
                 "policy": "10-day verified return with Razorpay source refund and scheduled courier pickup",
                 "eligible": True,
             }

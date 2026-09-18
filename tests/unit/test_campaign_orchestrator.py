@@ -148,14 +148,37 @@ def test_campaign_lifecycle_transitions():
     assert campaign.approved_at is None
 
     # Merchant approves
-    approved = service.approve_campaign(campaign.campaign_id)
+    approved = service.approve_campaign(campaign.campaign_id, merchant_id="merch_1")
     assert approved.status == CampaignStatus.APPROVED
     assert approved.approved_at is not None
 
     # Merchant activates
-    active = service.activate_campaign(campaign.campaign_id)
+    active = service.activate_campaign(campaign.campaign_id, merchant_id="merch_1")
     assert active.status == CampaignStatus.ACTIVE
     assert active.activated_at is not None
+
+
+def test_campaign_cross_tenant_access_refused():
+    """Approving another merchant's campaign — or omitting the tenant — is NOT_FOUND, never a state change."""
+    from packages.errors.exceptions import DomainError
+    from packages.errors.registry import ErrorCode
+
+    service = CampaignService()
+    campaign = service.propose_campaign(
+        merchant_id="merch_1",
+        goal_prompt="Promote laptop developer bundle with 5% discount",
+        max_discount_pct=5.0,
+        duration_days=5,
+        category="laptops",
+    )
+
+    with pytest.raises(DomainError) as exc_info:
+        service.approve_campaign(campaign.campaign_id, merchant_id="merch_attacker")
+    assert exc_info.value.code == ErrorCode.NOT_FOUND
+    # Omitting the tenant resolves to no merchant's campaign either.
+    with pytest.raises(DomainError) as exc_info2:
+        service.approve_campaign(campaign.campaign_id)
+    assert exc_info2.value.code == ErrorCode.NOT_FOUND
 
 
 def test_campaign_api_workflow(client, auth_headers):

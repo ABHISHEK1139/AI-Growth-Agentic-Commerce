@@ -8,15 +8,23 @@ export function calculateRemainingSeconds(
   serverOffsetMs: number = 0
 ): number {
   const targetMs = new Date(targetIsoString).getTime();
+  // Unparseable timestamps fail closed to zero: a countdown that cannot be
+  // computed must read expired, never "NaN:NaN" and never far-future.
+  if (Number.isNaN(targetMs)) return 0;
   const nowMs = Date.now() + serverOffsetMs;
   const diffSec = Math.floor((targetMs - nowMs) / 1000);
   return Math.max(0, diffSec);
 }
 
 export function formatCountdown(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "00:00";
+  const total = Math.floor(totalSeconds);
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const mm = mins.toString().padStart(2, "0");
+  const ss = secs.toString().padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 /**
@@ -46,6 +54,8 @@ export function serverOffsetMs(
 /** True when `targetIsoString` is at or before the server-anchored present. */
 export function hasExpired(targetIsoString: string, offsetMs: number = 0): boolean {
   const targetMs = new Date(targetIsoString).getTime();
-  if (Number.isNaN(targetMs)) return false;
+  // Fail closed: a malformed timestamp must read as expired, never as a
+  // hold that lives forever.
+  if (Number.isNaN(targetMs)) return true;
   return targetMs - (Date.now() + offsetMs) <= 0;
 }

@@ -5,8 +5,11 @@ FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-COPY apps/web/package.json apps/web/package-lock.json ./
-RUN npm ci
+COPY apps/web/package.json ./
+# No committed lockfile exists for the web app, so `npm ci` (which requires
+# one) cannot run here. `npm install` resolves fresh; commit a lockfile and
+# switch back to `ci` for reproducible builds.
+RUN npm install
 
 # 2. Rebuild the source code
 FROM base AS builder
@@ -16,6 +19,12 @@ COPY apps/web ./
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+
+# NEXT_PUBLIC_* values are baked into the client bundle at build time: a
+# runtime -e flag alone is silently ignored. Declare the build arg here and
+# pass it from compose so the baked origin matches the deployment.
+ARG NEXT_PUBLIC_API_BASE_URL=""
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 
 RUN npm run build
 

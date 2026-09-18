@@ -89,10 +89,11 @@ def evaluate_policy(
       3. Currency allowlist
       4. Category allowlist/blocklist
       5. Merchant allowlist
-      6. Maximum transaction limit
-      7. Policy version match
-      8. Auto-approval limit
-      9. Allow
+      6. Payment rail allowlist
+      7. Maximum transaction limit
+      8. Policy version agreement
+      9. Auto-approval limit
+      10. Allow
     """
     inputs_hash = inputs.compute_hash()
     policy_ver = buyer_policy.version
@@ -176,7 +177,21 @@ def evaluate_policy(
             inputs_hash=inputs_hash,
         )
 
-    # 5. Maximum transaction limit (lowest ceiling wins)
+    # 5. Payment rail allowlist — a merchant that only takes UPI must not
+    # silently approve a card charge. The field existed on the inputs but was
+    # never read, so every rail was allowed everywhere.
+    if (
+        merchant_rules.allowed_payment_methods
+        and inputs.payment_method not in merchant_rules.allowed_payment_methods
+    ):
+        return PolicyDecisionResult(
+            decision="BLOCK",
+            reason_code=ErrorCode.POLICY_BLOCKED.value,
+            policy_version=policy_ver,
+            inputs_hash=inputs_hash,
+        )
+
+    # 7. Maximum transaction limit (lowest ceiling wins)
     effective_max_limit = min(
         merchant_rules.max_transaction_minor, buyer_policy.max_transaction_minor
     )
@@ -188,11 +203,12 @@ def evaluate_policy(
             inputs_hash=inputs_hash,
         )
 
-    # 6. Policy version mismatch
-    if (
-        inputs.policy_version != buyer_policy.version
-        and inputs.policy_version != merchant_rules.version
-    ):
+    # 8. Policy version agreement. The caller stamps the inputs with the
+    # buyer's version, so comparing the inputs against the buyer rules can
+    # never fire; the meaningful comparison is buyer rules vs merchant rules.
+    # When the two parties disagree on which policy governs, no deterministic
+    # decision exists and the safe answer is to block.
+    if buyer_policy.version != merchant_rules.version:
         return PolicyDecisionResult(
             decision="BLOCK",
             reason_code=ErrorCode.POLICY_VERSION_MISMATCH.value,
@@ -200,7 +216,7 @@ def evaluate_policy(
             inputs_hash=inputs_hash,
         )
 
-    # 7. Auto-approval limit
+    # 9. Auto-approval limit
     effective_auto_limit = min(
         merchant_rules.auto_approval_limit_minor, buyer_policy.auto_approval_limit_minor
     )
@@ -212,7 +228,7 @@ def evaluate_policy(
             inputs_hash=inputs_hash,
         )
 
-    # 8. Unconditional allow
+    # 10. Unconditional allow
     return PolicyDecisionResult(
         decision="ALLOW",
         reason_code="OK",

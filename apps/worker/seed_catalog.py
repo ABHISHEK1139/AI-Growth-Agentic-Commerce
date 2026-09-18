@@ -92,6 +92,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    if not offers_path.exists():
+        logger.error(
+            "offers artifact not found",
+            extra={"event": "SEED_ARTIFACT_MISSING", "path": str(offers_path)},
+        )
+        return 2
+
     factory = get_session_factory()
     with factory() as session:
         # The catalog tables carry a foreign key to `merchant`, so a first import

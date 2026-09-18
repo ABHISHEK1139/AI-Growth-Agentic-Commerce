@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from packages.observability.context import new_id
 from packages.security.tenancy import TenantScope
 from services.catalog.models import (
+    CatalogImport,
     CatalogVersion,
     ImportRun,
     Product,
@@ -51,6 +53,51 @@ def compute_file_checksum(*paths: Path | str) -> str:
                 while chunk := f.read(65536):
                     hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    """Coerce untrusted import data to float without ever raising."""
+    try:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return default
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return parsed
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    """Coerce untrusted import data to int without ever raising."""
+    try:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return default
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, float):
+            parsed = int(value)
+        elif isinstance(value, str):
+            parsed = int(value.strip())
+        else:
+            return default
+    except (TypeError, ValueError):
+        return default
+    return parsed
+
+
+def _parse_offer_expiry(value: object, now: datetime) -> datetime:
+    """Offer expiry with a future default: a missing or malformed timestamp
+    must not silently expire the offer at import time."""
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
+        except ValueError:
+            pass
+    return now + timedelta(days=30)
 
 
 class CatalogService:
@@ -173,8 +220,8 @@ class CatalogService:
                         status=status,
                         description=p_data.get("description", []),
                         specifications=p_data.get("specifications", {}),
-                        average_rating=float(p_data.get("average_rating", 0.0)),
-                        rating_number=int(p_data.get("rating_number", 0)),
+                        average_rating=_safe_float(p_data.get("average_rating"), 0.0),
+                        rating_number=_safe_int(p_data.get("rating_number"), 0),
                         created_at=now,
                     )
                     session.add(prod)
@@ -222,22 +269,13 @@ class CatalogService:
                     if not prod_id:
                         continue
 
-                    price_minor = int(o_data.get("unit_price_minor", 0))
-                    delivery_days = int(o_data.get("delivery_days", 3))
-                    return_period_days = int(o_data.get("return_period_days", 14))
+                    price_minor = _safe_int(o_data.get("unit_price_minor"), 0)
+                    delivery_days = _safe_int(o_data.get("delivery_days"), 3)
+                    return_period_days = _safe_int(o_data.get("return_period_days"), 14)
                     pricing_source = o_data.get("pricing_source", "synthetic_band_random")
-                    offer_version = int(o_data.get("offer_version", 1))
+                    offer_version = _safe_int(o_data.get("offer_version"), 1)
 
-                    expires_at_str = o_data.get("expires_at")
-                    if expires_at_str:
-                        try:
-                            expires_at = datetime.fromisoformat(
-                                expires_at_str.replace("Z", "+00:00")
-                            )
-                        except Exception:
-                            expires_at = now
-                    else:
-                        expires_at = now
+                    expires_at = _parse_offer_expiry(o_data.get("expires_at"), now)
 
                     offer = Offer(
                         offer_id=offer_id,
@@ -262,7 +300,7 @@ class CatalogService:
                     # lets the flush order them inventory-first. Collected and
                     # added after one flush of the offers, so the cost is a single
                     # extra round trip rather than one per row.
-                    avail_qty = int(o_data.get("available_quantity", 10))
+                    avail_qty = _safe_int(o_data.get("available_quantity"), 10)
                     pending_inventory.append(
                         Inventory(
                             offer_id=offer_id,
@@ -302,7 +340,6 @@ class CatalogService:
 
     def create_import(self, session: Session, *, merchant_id: str, filename: str) -> CatalogImport:
         """Create a new staging import record and return it."""
-        from services.catalog.models import CatalogImport
 
         import_id = new_id("cimp")
         imp = CatalogImport(
@@ -322,15 +359,30 @@ class CatalogService:
         self,
         session: Session,
         *,
+        merchant_id: str,
         import_id: str,
         rows: list[dict[str, str]],
     ) -> tuple[int, int, list[dict[int, str]]]:
         """Parse and stage CSV rows into CatalogImportRow staging table.
 
-        Returns (total, invalid_count, row_errors) where row_errors is a list of
-        {row_number: error_message} dicts for rows that could not be parsed.
+        The import must belong to ``merchant_id``: staging rows into another
+        tenant's import would let one merchant rewrite another's catalog
+        draft. Returns (total, invalid_count, row_errors) where row_errors
+        is a list of {row_number: error_message} dicts for rows that could
+        not be parsed.
         """
-        from services.catalog.models import CatalogImportRow
+        from services.catalog.models import CatalogImport, CatalogImportRow
+
+        imp = (
+            session.query(CatalogImport)
+            .filter(
+                CatalogImport.import_id == import_id,
+                CatalogImport.merchant_id == merchant_id,
+            )
+            .first()
+        )
+        if imp is None:
+            raise ValueError(f"Import {import_id} not found")
 
         staged = 0
         invalid = 0
@@ -359,17 +411,13 @@ class CatalogService:
             # Parse numeric fields
             price_minor: int | None = None
             if price_str is not None:
-                try:
+                with contextlib.suppress(ValueError):
                     price_minor = int(price_str)
-                except ValueError:
-                    pass
 
             inventory: int | None = None
             if inventory_str is not None:
-                try:
+                with contextlib.suppress(ValueError):
                     inventory = int(inventory_str)
-                except ValueError:
-                    pass
 
             row = CatalogImportRow(
                 row_id=row_id,
@@ -395,15 +443,31 @@ class CatalogService:
         session.flush()
         return staged, invalid, row_errors
 
-    def validate_import(self, session: Session, *, import_id: str) -> tuple[int, int, str | None]:
+    def validate_import(
+        self, session: Session, *, merchant_id: str, import_id: str
+    ) -> tuple[int, int, str | None]:
         """Validate all staged rows for a catalog import.
 
         Checks required fields, price/inventory ranges, currency, status values,
         and title length. Updates is_valid and validation_errors on each row.
 
+        The import must belong to ``merchant_id``; otherwise it is reported
+        as not found, never validated on another tenant's behalf.
+
         Returns (valid_count, invalid_count, error_summary).
         """
         from services.catalog.models import CatalogImport, CatalogImportRow
+
+        imp_lookup = (
+            session.query(CatalogImport)
+            .filter(
+                CatalogImport.import_id == import_id,
+                CatalogImport.merchant_id == merchant_id,
+            )
+            .first()
+        )
+        if imp_lookup is None:
+            raise ValueError(f"Import {import_id} not found")
 
         # Fetch all staging rows for this import
         rows = (
@@ -456,8 +520,15 @@ class CatalogService:
                 row.validation_errors = None
                 valid_count += 1
 
-        # Update import record
-        imp = session.query(CatalogImport).filter(CatalogImport.import_id == import_id).first()
+        # Update import record (same tenant-checked row loaded above)
+        imp = (
+            session.query(CatalogImport)
+            .filter(
+                CatalogImport.import_id == import_id,
+                CatalogImport.merchant_id == merchant_id,
+            )
+            .first()
+        )
         if imp:
             imp.total_rows = len(rows)
             imp.valid_rows = valid_count
@@ -487,7 +558,14 @@ class CatalogService:
         """
         from services.catalog.models import CatalogImport, CatalogImportRow, CatalogVersion
 
-        imp = session.query(CatalogImport).filter(CatalogImport.import_id == import_id).first()
+        imp = (
+            session.query(CatalogImport)
+            .filter(
+                CatalogImport.import_id == import_id,
+                CatalogImport.merchant_id == merchant_id,
+            )
+            .first()
+        )
         if not imp:
             raise ValueError(f"Import {import_id} not found")
         if imp.status not in ("valid", "invalid"):
@@ -514,7 +592,7 @@ class CatalogService:
         # Collect valid rows, group by SKU to deduplicate
         valid_rows = (
             session.query(CatalogImportRow)
-            .filter(CatalogImportRow.import_id == import_id, CatalogImportRow.is_valid == True)
+            .filter(CatalogImportRow.import_id == import_id, CatalogImportRow.is_valid)
             .order_by(CatalogImportRow.row_number)
             .all()
         )
@@ -629,9 +707,24 @@ class CatalogService:
 
         return catalog_version_id, products_created, offers_created
 
-    def rollback_import(self, session: Session, *, import_id: str) -> None:
-        """Delete a pending/validated import and all its staging rows."""
+    def rollback_import(self, session: Session, *, merchant_id: str, import_id: str) -> None:
+        """Delete a pending/validated import and all its staging rows.
+
+        Scoped to ``merchant_id``: without the tenant predicate this would
+        delete another merchant's draft.
+        """
         from services.catalog.models import CatalogImport, CatalogImportRow
+
+        imp = (
+            session.query(CatalogImport)
+            .filter(
+                CatalogImport.import_id == import_id,
+                CatalogImport.merchant_id == merchant_id,
+            )
+            .first()
+        )
+        if imp is None:
+            raise ValueError(f"Import {import_id} not found")
 
         # Remove staging rows
         session.query(CatalogImportRow).filter(CatalogImportRow.import_id == import_id).delete(

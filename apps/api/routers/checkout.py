@@ -21,7 +21,7 @@ CheckoutPrincipal = Annotated[Principal, Depends(require_scopes(Scope.CHECKOUT_W
 
 class CreateCheckoutRequest(BaseModel):
     offer_id: str
-    quantity: int = Field(default=1, ge=1)
+    quantity: int = Field(default=1, ge=1, le=10)
     ttl_minutes: int = Field(default=15, ge=1, le=1440)
 
 

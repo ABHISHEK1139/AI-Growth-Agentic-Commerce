@@ -97,12 +97,20 @@ EXEMPT_PATH_PREFIXES: tuple[str, ...] = (
 # The payment and authorization rates are the tight ones by design: they are the
 # endpoints that move money and the ones an abusive client would hammer.
 _ROUTE_RULES: dict[str, RateLimitRule] = {
-    # Money and approval, internal surface.
+    # Money and approval, internal surface. Both spellings are covered: the
+    # live routes are singular (/authorization, /checkout) and several have
+    # plural aliases — each spelling needs its own entry or it silently
+    # falls through to the generous default.
     "POST /api/v1/payments": RateLimitRule(limit=10, window_seconds=60),
+    "POST /api/v1/payments/*": RateLimitRule(limit=10, window_seconds=60),
     "POST /api/v1/authorizations": RateLimitRule(limit=20, window_seconds=60),
-    # Money and approval, public agent surface.
+    "POST /api/v1/authorization": RateLimitRule(limit=20, window_seconds=60),
+    "POST /api/v1/authorization/*": RateLimitRule(limit=20, window_seconds=60),
+    # Money and approval, public agent surface (singular + plural aliases).
     "POST /api/v1/agent/payment": RateLimitRule(limit=10, window_seconds=60),
+    "POST /api/v1/agent/payments": RateLimitRule(limit=10, window_seconds=60),
     "POST /api/v1/agent/authorization": RateLimitRule(limit=20, window_seconds=60),
+    "POST /api/v1/agent/authorizations": RateLimitRule(limit=20, window_seconds=60),
     # Token exchange: tight, because it is the brute-force surface.
     "POST /api/v1/agent/auth/token": RateLimitRule(limit=20, window_seconds=60),
     # Catalog reads: cheap and chatty, an agent compares many options.
@@ -116,9 +124,12 @@ _ROUTE_RULES: dict[str, RateLimitRule] = {
     "POST /api/v1/research/ask": RateLimitRule(limit=20, window_seconds=60),
     # E-commerce connectors.
     "POST /api/v1/connectors/*": RateLimitRule(limit=30, window_seconds=60),
-    # Checkout: a handful per session is normal.
+    # Checkout: a handful per session is normal (singular + plural alias).
     "POST /api/v1/checkouts": RateLimitRule(limit=30, window_seconds=60),
+    "POST /api/v1/checkout": RateLimitRule(limit=30, window_seconds=60),
+    "POST /api/v1/checkout/*": RateLimitRule(limit=30, window_seconds=60),
     "POST /api/v1/agent/checkout": RateLimitRule(limit=30, window_seconds=60),
+    "POST /api/v1/agent/checkouts": RateLimitRule(limit=30, window_seconds=60),
     # Provider callbacks are not client traffic and are signature-verified; a high
     # ceiling still bounds a misbehaving retry loop.
     "POST /api/v1/webhooks/*": RateLimitRule(limit=300, window_seconds=60),
@@ -126,6 +137,7 @@ _ROUTE_RULES: dict[str, RateLimitRule] = {
     # generous default while the internal payment route was tightly limited.
     "POST /api/create-order": RateLimitRule(limit=10, window_seconds=60),
     "POST /api/v1/payments/razorpay/create-order": RateLimitRule(limit=10, window_seconds=60),
+    "POST /api/v1/payments/razorpay/checkout-url": RateLimitRule(limit=10, window_seconds=60),
     "POST /api/verify-payment": RateLimitRule(limit=20, window_seconds=60),
     "POST /api/v1/payments/razorpay/verify-signature": RateLimitRule(limit=20, window_seconds=60),
     # LLM-backed surfaces: every call can trigger model completions and outbound

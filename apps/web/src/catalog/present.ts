@@ -139,6 +139,20 @@ export function categoryIdForSlug(slug: string): string | null {
   return CATEGORY_SLUG_TO_ID[slug.toLowerCase()] ?? null;
 }
 
+/**
+ * Canonical route slug for a catalog category id (the inverse of
+ * CATEGORY_SLUG_TO_ID). A category id that has no route returns null so the
+ * caller links to search instead of a route that renders "not listed".
+ */
+export function canonicalSlugForCategoryId(categoryId: string): string | null {
+  const wanted = (categoryId || "").toLowerCase();
+  if (!wanted) return null;
+  for (const [slug, id] of Object.entries(CATEGORY_SLUG_TO_ID)) {
+    if (id === wanted) return slug;
+  }
+  return null;
+}
+
 export function categoryTitleForSlug(slug: string): string {
   return CATEGORY_SLUG_TITLE[slug.toLowerCase()] ?? slug;
 }

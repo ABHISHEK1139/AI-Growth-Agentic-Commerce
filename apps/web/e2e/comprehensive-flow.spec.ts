@@ -27,8 +27,8 @@ test.describe("Full End-to-End Human User Flows & Edge Cases", () => {
     const addToBagBtn = page.locator("button:has-text('Add to Bag'), button:has-text('Add to Cart')").first();
     await addToBagBtn.click();
 
-    // Verify Cart Drawer opens or badge increments
-    await page.waitForTimeout(500);
+    // Verify Cart Drawer opens or badge increments (web-first: no fixed sleeps)
+    await expect(page.locator("[role='dialog'], header").first()).toBeVisible();
 
     // 5. Navigate to Cart page
     await page.goto("/cart");
@@ -40,34 +40,29 @@ test.describe("Full End-to-End Human User Flows & Edge Cases", () => {
 
     // Verify checkout address fields are interactable
     const nameInput = page.locator("input[name*='name'], input[placeholder*='Name'], input[value*='Alex']").first();
-    if (await nameInput.isVisible()) {
-      await expect(nameInput).toBeEnabled();
-    }
+    await expect(nameInput).toBeVisible();
+    await expect(nameInput).toBeEnabled();
   });
 
   test("2. AI Assistant & In-App Conversational Checkout", async ({ page }) => {
     await page.goto("/");
 
-    // Open AI Drawer via nav button
-    const openAssistantBtn = page.locator("button:has-text('Ask'), button[aria-label*='AI'], button:has-text('Chat')").first();
-    if (await openAssistantBtn.isVisible()) {
-      await openAssistantBtn.click();
-      await page.waitForTimeout(600);
+    // Open AI Drawer via nav button (no conditional: a missing trigger is a failure)
+    const openAssistantBtn = page.locator("button:has-text('Ask'), button[aria-label*='AI'], button:has-text('Chat']").first();
+    await expect(openAssistantBtn).toBeVisible();
+    await openAssistantBtn.click();
 
-      // Verify chat input is visible
-      const chatInput = page.locator("textarea, input[placeholder*='Ask']").first();
-      await expect(chatInput).toBeVisible();
+    // Verify chat input is visible (web-first: the drawer animates in)
+    const chatInput = page.locator("textarea, input[placeholder*='Ask']").first();
+    await expect(chatInput).toBeVisible();
 
-      // Trigger conversational checkout
-      await chatInput.fill("checkout");
-      await page.keyboard.press("Enter");
+    // Trigger conversational checkout
+    await chatInput.fill("checkout");
+    await page.keyboard.press("Enter");
 
-      await page.waitForTimeout(1000);
-
-      // Verify either assistant reply or in-app checkout card appears
-      const responseElements = page.locator("article, div[class*='bubble'], div[class*='message']");
-      expect(await responseElements.count()).toBeGreaterThan(0);
-    }
+    // Verify either assistant reply or in-app checkout card appears
+    const responseElements = page.locator("article, div[class*='bubble'], div[class*='message']");
+    await expect(responseElements.first()).toBeVisible();
   });
 
   test("3. Agent-Readable Catalog Protocols (UAP, AP2, ACP)", async ({ request }) => {

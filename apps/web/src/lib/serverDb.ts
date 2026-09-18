@@ -34,11 +34,13 @@ export function getServerDb(): DatabaseSync {
         SET category_id = 'computer_accessory'
         WHERE category_id = 'laptop'
         AND product_id NOT LIKE 'prd_seed_%'
+        AND title NOT LIKE '%ideapad%'
+        AND title NOT LIKE '%thinkpad%'
         AND (
           title LIKE '%sticker%' OR title LIKE '%decal%' OR title LIKE '%battery%' OR title LIKE '%charger%'
           OR title LIKE '%backpack%' OR title LIKE '%bag%' OR title LIKE '%tote%' OR title LIKE '%clutch%'
           OR title LIKE '%fan%' OR title LIKE '%cable%' OR title LIKE '%cord%' OR title LIKE '%adapter%'
-          OR title LIKE '%screen%' OR title LIKE '%drive%' OR title LIKE '%pad%' AND title NOT LIKE '%ideapad%' AND title NOT LIKE '%thinkpad%'
+          OR title LIKE '%screen%' OR title LIKE '%drive%' OR title LIKE '%pad%'
         );
 
         UPDATE product
@@ -211,7 +213,7 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
       image_url: imageUrl,
       unit_price_minor: r.unit_price_minor,
       currency: r.currency || "INR",
-      available_quantity: r.available_quantity || 15,
+      available_quantity: r.available_quantity ?? 15,
       delivery_days: r.delivery_days || 2,
       return_period_days: r.return_period_days || 14,
       expires_at: r.expires_at || new Date(Date.now() + 86400000 * 30).toISOString(),
@@ -245,7 +247,7 @@ export function searchCatalog(options: DbSearchOptions): DbSearchResult {
       category: r.category_id,
       unit_price_minor: r.unit_price_minor,
       currency: r.currency || "INR",
-      available_stock: r.available_quantity || 15,
+      available_stock: r.available_quantity ?? 15,
       delivery_days: r.delivery_days || 2,
       return_period_days: r.return_period_days || 14,
       expires_at: r.expires_at || new Date(Date.now() + 86400000 * 30).toISOString(),
@@ -331,7 +333,7 @@ export function getProductById(productId: string): any | null {
           currency: row.currency || "INR",
           delivery_days: row.delivery_days || 2,
           return_period_days: row.return_period_days || 14,
-          available_quantity: row.available_quantity || 15,
+          available_quantity: row.available_quantity ?? 15,
         }
       : null,
     images: images.length > 0
@@ -345,6 +347,9 @@ export function getOfferById(offerId: string): any | null {
   const cleanId = (offerId || "").trim();
   if (!cleanId) return null;
 
+  // An offer id names an offer; a product id names a product that may back
+  // several offers. Prefer the exact offer match so a product id can never
+  // resolve to a sibling offer with a different price.
   const row = db.prepare(`
     SELECT o.*, p.title, p.category_id, p.specifications, p.average_rating, p.rating_number,
            COALESCE(inv.available_quantity, 15) as available_quantity,
@@ -353,8 +358,19 @@ export function getOfferById(offerId: string): any | null {
     JOIN product p ON o.product_id = p.product_id
     LEFT JOIN inventory inv ON o.offer_id = inv.offer_id
     LEFT JOIN product_image pi ON p.product_id = pi.product_id AND pi.position = 0
-    WHERE o.offer_id = ? OR p.product_id = ?
-  `).get(cleanId, cleanId) as any;
+    WHERE o.offer_id = ?
+  `).get(cleanId) as any
+    ?? db.prepare(`
+    SELECT o.*, p.title, p.category_id, p.specifications, p.average_rating, p.rating_number,
+           COALESCE(inv.available_quantity, 15) as available_quantity,
+           pi.source_url as image_url
+    FROM offer o
+    JOIN product p ON o.product_id = p.product_id
+    LEFT JOIN inventory inv ON o.offer_id = inv.offer_id
+    LEFT JOIN product_image pi ON p.product_id = pi.product_id AND pi.position = 0
+    WHERE p.product_id = ?
+    ORDER BY o.offer_id ASC
+  `).get(cleanId) as any;
 
   if (!row) return null;
 
@@ -379,7 +395,7 @@ export function getOfferById(offerId: string): any | null {
     image_url: imageUrl,
     unit_price_minor: row.unit_price_minor,
     currency: row.currency || "INR",
-    available_quantity: row.available_quantity || 15,
+    available_quantity: row.available_quantity ?? 15,
     delivery_days: row.delivery_days || 2,
     return_period_days: row.return_period_days || 14,
     expires_at: row.expires_at || new Date(Date.now() + 86400000 * 30).toISOString(),
@@ -411,7 +427,7 @@ export function saveOrder(order: {
 }): any {
   const db = getServerDb();
   const now = new Date().toISOString();
-  const orderNumber = order.order_number || `ORD-${Date.now().toString().slice(-6)}`;
+  const orderNumber = order.order_number || `ORD-${Date.now().toString().slice(-6)}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
   const totalMinor = order.total_minor ?? order.amount_minor ?? 0;
   const amountMinor = order.amount_minor ?? order.total_minor ?? 0;
   const currency = order.currency || "INR";
@@ -777,6 +793,93 @@ export function approveAuthorization(authId: string): boolean {
   const db = getServerDb();
   const res = db.prepare(`UPDATE authorization SET status = 'approved' WHERE authorization_id = ?`).run(authId);
   return res.changes > 0;
+}
+
+export function rejectAuthorization(authId: string): boolean {
+  const db = getServerDb();
+  const res = db.prepare(`UPDATE authorization SET status = 'rejected' WHERE authorization_id = ?`).run(authId);
+  return res.changes > 0;
+}
+
+export function getAuthorizationById(authId: string): any | null {
+  const db = getServerDb();
+  const cleanId = (authId || "").trim();
+  if (!cleanId) return null;
+
+  const r = db.prepare(`SELECT * FROM authorization WHERE authorization_id = ?`).get(cleanId) as any;
+  if (!r) return null;
+
+  return {
+    authorization_id: r.authorization_id,
+    checkout_id: r.checkout_id,
+    buyer_id: r.buyer_id,
+    merchant_id: r.merchant_id,
+    amount_ceiling_minor: r.amount_ceiling_minor,
+    currency: r.currency || "INR",
+    price_hash: r.price_hash,
+    policy_version: r.policy_version,
+    status: r.status,
+    valid_until: r.valid_until,
+    created_at: r.created_at,
+  };
+}
+
+export function getCheckoutById(checkoutId: string): any | null {
+  const db = getServerDb();
+  const cleanId = (checkoutId || "").trim();
+  if (!cleanId) return null;
+
+  const r = db.prepare(`SELECT * FROM checkout WHERE checkout_id = ?`).get(cleanId) as any;
+  if (!r) return null;
+
+  let priceSnapshot: any = null;
+  try {
+    priceSnapshot = typeof r.price_snapshot === "string" ? JSON.parse(r.price_snapshot) : (r.price_snapshot || null);
+  } catch {
+    priceSnapshot = null;
+  }
+
+  // Recover the unit price and product through the bound offer so the view
+  // carries the same nested pricing breakdown POST /api/v1/checkout returns.
+  // No schema change needed: quantity is derived from total / unit price.
+  let unitPrice = 0;
+  let productId: string = r.offer_id;
+  try {
+    const offer = getOfferById(r.offer_id);
+    if (offer) {
+      if (typeof offer.unit_price_minor === "number") unitPrice = offer.unit_price_minor;
+      if (offer.product_id) productId = offer.product_id;
+    }
+  } catch {
+    // Offer row gone; totals below still stand on their own.
+  }
+  const total = r.total_minor || 0;
+  const quantity = unitPrice > 0 && total > 0 ? Math.max(1, Math.round(total / unitPrice)) : 1;
+
+  return {
+    schema_version: "1.0",
+    checkout_id: r.checkout_id,
+    buyer_id: r.buyer_id,
+    merchant_id: r.merchant_id,
+    offer_id: r.offer_id,
+    offer_version: r.offer_version || 1,
+    product_id: productId,
+    status: r.status,
+    pricing: {
+      unit_price_minor: unitPrice,
+      quantity,
+      subtotal_minor: r.subtotal_minor ?? total,
+      shipping_minor: r.shipping_minor || 0,
+      tax_minor: r.tax_minor || 0,
+      discount_minor: r.discount_minor || 0,
+      total_minor: total,
+      currency: r.currency || "INR",
+    },
+    price_hash: r.price_hash,
+    price_snapshot: priceSnapshot,
+    expires_at: r.expires_at,
+    created_at: r.created_at,
+  };
 }
 
 export function saveAuditEvent(event: {

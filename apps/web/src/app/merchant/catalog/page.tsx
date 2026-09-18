@@ -106,7 +106,14 @@ export default function MerchantCatalogQualityPage() {
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    // Reset the input so the same file can be retried after a rejection.
+    e.target.value = "";
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setImportError("CSV file is too large (limit 5 MB).");
+      setImportPhase("error");
+      return;
+    }
     setImportPhase("uploading");
     setImportError(null);
     setActiveImport(null);
@@ -362,14 +369,38 @@ export default function MerchantCatalogQualityPage() {
                   </tbody>
                 </table>
                 {rowsTotal > 50 ? (
-                  <div className="p-3 text-xs text-slate-500 text-center">
-                    Showing {importRows.length} of {rowsTotal} rows
+                  <div className="p-3 text-xs text-slate-500 text-center space-x-3">
+                    <span>
+                      Showing {importRows.length} of {rowsTotal} rows (page {rowsPage})
+                    </span>
+                    <button
+                      type="button"
+                      disabled={rowsPage <= 1}
+                      onClick={() => activeImport && void loadImportRows(activeImport.import_id, rowsPage - 1)}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 font-bold disabled:opacity-40 hover:bg-slate-50"
+                    >
+                      &larr; Prev
+                    </button>
+                    <button
+                      type="button"
+                      disabled={rowsPage * 50 >= rowsTotal}
+                      onClick={() => activeImport && void loadImportRows(activeImport.import_id, rowsPage + 1)}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 font-bold disabled:opacity-40 hover:bg-slate-50"
+                    >
+                      Next &rarr;
+                    </button>
                   </div>
                 ) : null}
               </div>
             ) : null}
           </div>
         ) : (
+          <div className="space-y-3">
+            {importError ? (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
+                {importError}
+              </div>
+            ) : null}
           <label className="flex flex-col items-center justify-center gap-3 py-12 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:border-slate-300 hover:bg-slate-50 transition-colors">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -391,7 +422,7 @@ export default function MerchantCatalogQualityPage() {
             <span className="text-xs text-slate-400">
               {importPhase === "uploading"
                 ? "Staging rows\u2026"
-                : "UTF-8 .csv, up to 10 MB"}
+                : "UTF-8 .csv, up to 5 MB and 10,000 rows"}
             </span>
             <input
               ref={fileInputRef}
@@ -401,6 +432,7 @@ export default function MerchantCatalogQualityPage() {
               onChange={handleFileUpload}
             />
           </label>
+          </div>
         )}
       </div>
 
@@ -540,9 +572,9 @@ export default function MerchantCatalogQualityPage() {
           {offers.kind === "open" ? (
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl p-4 text-xs">
               <strong className="block mb-1 text-emerald-950 font-bold">
-                ✓ Live Merchant Catalog Feed
+                ✓ Live Catalog Feed
               </strong>
-              Displaying active inventory and real-time catalog pricing managed under your merchant account.
+              Gateway default-tenant read (no merchant session) — not scoped to your tenant. Sign in with a merchant session for tenant-scoped rows.
               {offers.catalogSource ? (
                 <span className="block mt-1 text-emerald-800">
                   Catalog source: <strong className="font-mono">{offers.catalogSource}</strong>

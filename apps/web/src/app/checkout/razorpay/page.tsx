@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import Script from "next/script";
-import { resolveApiUrl } from "@/lib/api";
+import { apiPost, newIdempotencyKey } from "@/lib/api";
+import { formatMinorToMajor, majorToMinor } from "@/lib/money";
 
 declare global {
   interface Window {
@@ -17,11 +18,12 @@ export default function RazorpayStandardCheckoutPage() {
   const [paymentResult, setPaymentResult] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The publishable key with safe test fallback
+  // The publishable key. No fallback literal: without a configured key the
+  // page says so and refuses to take a payment (see the panel below).
   const razorpayKeyId = (
     process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
     process.env.RAZORPAY_KEY_ID ||
-    "***REMOVED***"
+    ""
   ).trim();
   const providerConfigured = razorpayKeyId.length > 0;
 
@@ -38,28 +40,28 @@ export default function RazorpayStandardCheckoutPage() {
     setPaymentResult(null);
 
     try {
-      // Step 1: Create Order via Backend API
-      const orderRes = await fetch(resolveApiUrl("/api/create-order"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          amount: amountInr * 100, // paise (100 INR = 10,000 paise)
+      // Step 1: Create Order via Backend API (idempotent: a double click
+      // reuses one key, so it cannot create two provider orders).
+      const idempotencyKey = newIdempotencyKey();
+      const orderRes = await apiPost<{ order_id: string; amount: number; currency: string }>(
+        "/api/create-order",
+        {
+          amount: majorToMinor(amountInr),
           currency: "INR",
           receipt: `rcpt_${Date.now()}`,
           notes: {
             channel: "AgentPay Standard Web Checkout",
             description: "Agentic Commerce Test Transaction",
           },
-        }),
-      });
+        },
+        { idempotencyKey }
+      );
 
-      const orderData = await orderRes.json();
-      if (!orderRes.ok || !orderData.data?.order_id) {
-        throw new Error(orderData.detail || "Failed to create Razorpay order.");
+      if (!orderRes.ok || !orderRes.data?.order_id) {
+        throw new Error(!orderRes.ok ? orderRes.error.message : "Failed to create Razorpay order.");
       }
 
-      const { order_id, amount, currency } = orderData.data;
+      const { order_id, amount, currency } = orderRes.data;
       setStatusMessage("Step 2/3: Opening Razorpay Checkout Modal...");
 
       // Step 2: Open Standard Razorpay Checkout Modal
@@ -87,19 +89,16 @@ export default function RazorpayStandardCheckoutPage() {
           setStatusMessage("Step 3/3: Verifying HMAC-SHA256 signature...");
           try {
             // Step 3: Verify Payment Signature via Backend
-            const verifyRes = await fetch(resolveApiUrl("/api/verify-payment"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({
+            const verifyRes = await apiPost<{ verified: boolean }>(
+              "/api/verify-payment",
+              {
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
-              }),
-            });
+              }
+            );
 
-            const verifyData = await verifyRes.json();
-            if (verifyRes.ok && verifyData.data?.verified) {
+            if (verifyRes.ok && verifyRes.data?.verified) {
               setPaymentResult({
                 status: "SUCCESS",
                 paymentId: response.razorpay_payment_id,
@@ -250,10 +249,10 @@ export default function RazorpayStandardCheckoutPage() {
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-            <div>
-              <span className="text-xs text-slate-400 block uppercase font-bold">Total to Pay</span>
-              <span className="text-2xl font-black text-slate-900">₹{amountInr}.00</span>
-            </div>
+              <div>
+                <span className="text-xs text-slate-400 block uppercase font-bold">Total to Pay</span>
+                <span className="text-2xl font-black text-slate-900">{formatMinorToMajor(majorToMinor(amountInr), "INR")}</span>
+              </div>
 
             <button
               onClick={handlePayment}
@@ -297,7 +296,7 @@ export default function RazorpayStandardCheckoutPage() {
               <div className="space-y-1 font-mono text-xs text-emerald-900 bg-white/80 p-3 rounded-xl border border-emerald-200/60">
                 <div>Payment ID: <strong>{paymentResult.paymentId}</strong></div>
                 <div>Order ID: <strong>{paymentResult.orderId}</strong></div>
-                <div>Amount: <strong>₹{paymentResult.amount}</strong></div>
+                <div>Amount: <strong>{formatMinorToMajor(majorToMinor(paymentResult.amount), "INR")}</strong></div>
                 <div>Status: <strong>PAID / VERIFIED</strong></div>
               </div>
             </div>

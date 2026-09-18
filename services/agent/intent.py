@@ -145,9 +145,7 @@ class IntentValidator:
                 category = "laptop"
             elif any(w in p_lower for w in ("smartphone", "phone", "iphone", "android")):
                 category = "smartphone"
-            elif any(
-                w in p_lower for w in ("monitor", "display", "screen", "4k", "uhd")
-            ):
+            elif any(w in p_lower for w in ("monitor", "display", "screen", "4k", "uhd")):
                 category = "monitor"
             elif any(
                 w in p_lower for w in ("audio", "headphone", "earphone", "earbuds", "speaker")
@@ -155,13 +153,25 @@ class IntentValidator:
                 category = "audio"
             elif any(w in p_lower for w in ("camera", "dslr", "lens", "optics", "gopro")):
                 category = "camera"
-            elif any(w in p_lower for w in ("appliance", "kitchen", "cooker", "blender", "fridge", "purifier")):
+            elif any(
+                w in p_lower
+                for w in ("appliance", "kitchen", "cooker", "blender", "fridge", "purifier")
+            ):
                 category = "appliance"
             elif any(w in p_lower for w in ("charger", "case", "cover", "magsafe", "power bank")):
                 category = "phone_accessory"
             elif any(
                 w in p_lower
-                for w in ("accessory", "cable", "mouse", "keyboard", "sleeve", "trackpad", "dock", "ipad")
+                for w in (
+                    "accessory",
+                    "cable",
+                    "mouse",
+                    "keyboard",
+                    "sleeve",
+                    "trackpad",
+                    "dock",
+                    "ipad",
+                )
             ):
                 category = "computer_accessory"
 

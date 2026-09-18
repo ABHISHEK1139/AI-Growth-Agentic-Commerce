@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { ALL_PRODUCTS, ProductItem } from "@/data/products";
 import { bootstrapSession } from "@/lib/api";
 
@@ -126,14 +126,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const toastTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    const timers = toastTimers.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.length = 0;
+    };
+  }, []);
+
   const showToast = useCallback((toast: Omit<ToastItem, "id">) => {
     const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const newToast: ToastItem = { ...toast, id };
     setToasts((prev) => [...prev.slice(-3), newToast]);
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       removeToast(id);
     }, 4000);
+    toastTimers.current.push(timer);
   }, [removeToast]);
 
   const [currentIntent, setCurrentIntent] = useState<StructuredIntent>({
@@ -349,7 +359,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const placeOrder = (orderData: Omit<OrderRecord, "orderId" | "createdAt" | "status" | "deliveryDate"> & { orderId?: string }) => {
     const orderId = orderData.orderId || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const now = new Date();
-    const delivery = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+    // Deliver by the slowest item's own estimate instead of a flat +2 days.
+    const items = orderData.items;
+    const maxDays = Array.isArray(items) && items.length > 0
+      ? Math.max(...items.map((i) => (typeof i?.product?.deliveryDays === "number" && i.product.deliveryDays > 0 ? i.product.deliveryDays : 2)))
+      : 2;
+    const delivery = new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000);
     const newOrder: OrderRecord = {
       ...orderData,
       orderId,

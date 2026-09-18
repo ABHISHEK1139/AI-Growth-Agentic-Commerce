@@ -14,7 +14,6 @@ const columns = [
       ["Appliances", "/category/appliances"],
       ["Cameras", "/category/cameras"],
       ["Workspace", "/category/monitors"],
-      ["Best deals", "/search?deals=true"],
     ],
   },
   {

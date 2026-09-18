@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from packages.errors.exceptions import DomainError
@@ -112,13 +113,16 @@ class OrderService:
             nested = session.begin_nested()  # SAVEPOINT — keeps session usable on error
             session.add(order)
             session.flush()
-        except Exception as exc:
+        except IntegrityError as exc:
+            # Unique violation on checkout_id/payment_id: a concurrent request
+            # won the race. Re-read inside the savepoint rollback and answer
+            # from the row that actually exists.
             nested.rollback()  # roll back to SAVEPOINT; outer transaction stays clean
             existing = session.query(Order).filter(Order.checkout_id == checkout_id).first()
             if existing is not None and existing.payment_id == payment_id:
                 return _order_to_schema(existing)
             raise DomainError(
-                f"Checkout {checkout_id} could not be confirmed.",
+                f"Checkout {checkout_id} is already confirmed by another payment.",
                 code=ErrorCode.ALREADY_FINALIZED,
             ) from exc
 

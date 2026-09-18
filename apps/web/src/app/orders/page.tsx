@@ -74,10 +74,14 @@ export default function OrdersListPage() {
   const [offset, setOffset] = useState(0);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<ApiError | null>(null);
+  // True when the gateway could not be reached and the list below is only
+  // what this browser saved. The header copy says so explicitly.
+  const [usingLocalFallback, setUsingLocalFallback] = useState(false);
 
   const load = useCallback(async () => {
     setPhase("loading");
     setError(null);
+    setUsingLocalFallback(false);
 
     const result = await apiGet<OrderPage>(`/api/v1/orders?limit=${PAGE_SIZE}&offset=${offset}`);
 
@@ -86,8 +90,8 @@ export default function OrdersListPage() {
       order_id: o.orderId,
       checkout_id: o.orderId.replace("ord_", "chk_"),
       payment_id: o.paymentId,
-      buyer_id: "byr_active_session",
-      merchant_id: "mrc_demo_electronics",
+      buyer_id: "buy_shopper_demo",
+      merchant_id: "merchant_demo",
       amount_minor: o.totalMinor,
       currency: o.currency || "INR",
       status: (o.status as any) || "confirmed",
@@ -103,6 +107,7 @@ export default function OrdersListPage() {
           limit: PAGE_SIZE,
           offset: 0,
         });
+        setUsingLocalFallback(true);
         setPhase("loaded");
         return;
       }
@@ -113,18 +118,20 @@ export default function OrdersListPage() {
 
     const data = result.data;
     const remoteOrders = Array.isArray(data?.orders) ? data.orders : [];
-    // Combine remote and local orders avoiding duplicates by order_id
-    const combinedOrders = [...remoteOrders];
-    for (const localOrd of mappedLocalOrders) {
-      if (!combinedOrders.some((o) => o.order_id === localOrd.order_id)) {
-        combinedOrders.push(localOrd);
-      }
-    }
+    // Device-saved orders the gateway does not know about (e.g. recorded
+    // while offline). Shown only on the first page so server-side paging
+    // stays exact; counted in the total so "Showing a–b of N" adds up.
+    const localOnly = mappedLocalOrders.filter(
+      (localOrd) => !remoteOrders.some((o) => o.order_id === localOrd.order_id)
+    );
+    const visibleLocal = offset === 0 ? localOnly : [];
+    const combinedOrders = [...visibleLocal, ...remoteOrders];
+    const remoteTotal = typeof data?.total === "number" ? data.total : remoteOrders.length;
 
     setPage({
       orders: combinedOrders,
       count: combinedOrders.length,
-      total: Math.max(combinedOrders.length, typeof data?.total === "number" ? data.total : 0),
+      total: remoteTotal + localOnly.length,
       limit: typeof data?.limit === "number" ? data.limit : PAGE_SIZE,
       offset: typeof data?.offset === "number" ? data.offset : offset,
     });
@@ -150,11 +157,13 @@ export default function OrdersListPage() {
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
         <h1 className="text-2xl sm:text-3xl font-black text-slate-900">Your Orders</h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          {phase === "loading"
-            ? "Reading your orders from the gateway\u2026"
-            : phase === "failed"
-            ? "Your orders could not be read."
-            : `${total} ${total === 1 ? "order" : "orders"} recorded by AgentPay.`}
+            {phase === "loading"
+              ? "Reading your orders from the gateway\u2026"
+              : phase === "failed"
+              ? "Your orders could not be read."
+              : usingLocalFallback
+              ? `${total} ${total === 1 ? "order" : "orders"} saved on this device (gateway unreachable).`
+              : `${total} ${total === 1 ? "order" : "orders"} recorded by AgentPay.`}
         </p>
       </div>
 

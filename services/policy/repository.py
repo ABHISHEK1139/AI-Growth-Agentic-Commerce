@@ -62,7 +62,18 @@ class MerchantRulesRepository(TenantScopedRepository[MerchantRules]):
         super().__init__(session, scope)
 
     def get_by_merchant_id(self, merchant_id: str | None = None) -> MerchantRules | None:
-        statement = self.scoped_select()
+        from packages.errors.exceptions import ForbiddenError
+
+        target = merchant_id or self._scope.merchant_id
+        # The argument must agree with the scope: silently answering a
+        # different merchant's row is how one tenant inherits another's
+        # ceilings, so a mismatch is refused instead of served.
+        if target != self._scope.merchant_id:
+            raise ForbiddenError(
+                "This account cannot act on another tenant.",
+                details={"reason": "cross_tenant"},
+            )
+        statement = self.scoped_select().where(MerchantRules.merchant_id == target)
         return self._session.execute(statement).scalars().first()
 
     def upsert_rules(

@@ -13,6 +13,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from packages.errors.exceptions import DomainError
+from packages.errors.registry import ErrorCode
 from services.research.cache.research_cache import RESEARCH_CACHE
 from services.research.evidence import (
     ResearchAnswer,
@@ -51,6 +53,7 @@ class ResearchOrchestrator:
         force_refresh: bool = False,
         search_provider_name: str = "null",
         searxng_base_url: str = DEFAULT_SEARXNG_BASE_URL,
+        merchant_id: str | None = None,
     ) -> ResearchAnswer:
         """Execute Q&A research flow with deterministic routing and transparency.
 
@@ -67,9 +70,11 @@ class ResearchOrchestrator:
             target_spec=ResearchPlanner.extract_spec_focus(question),
         )
 
-        # 1. Check Research Cache (if not force-refreshed)
+        # 1. Check Research Cache (if not force-refreshed). Namespaced by
+        # tenant: an answer synthesized for one merchant is never served to
+        # another from cache.
         if not force_refresh:
-            cached = RESEARCH_CACHE.get(product_id, question)
+            cached = RESEARCH_CACHE.get(product_id, question, merchant_id)
             if cached is not None:
                 return ResearchAnswer(
                     ok=True,
@@ -243,8 +248,28 @@ class ResearchOrchestrator:
                     extracted_evidence.append(ranked_ev)
                     if top_url is None:
                         top_url = hit.url
+            except DomainError as exc:
+                # A security refusal (SSRF block, injection finding) means
+                # "no evidence from this URL" — ranking the attacker's own
+                # snippet as evidence would launder the blocked content.
+                if exc.code == ErrorCode.FORBIDDEN:
+                    session.transparency_steps.append(
+                        f"× Skipped blocked source {hit.url} (policy refusal)"
+                    )
+                    continue
+                # Any other domain failure degrades to the hit snippet below.
+                ranked_ev = EvidenceRanker.rank_evidence(
+                    claim=hit.snippet,
+                    query=question,
+                    source_url=hit.url,
+                    source_trust_score=scored_source.trust_score,
+                    source_type=scored_source.source_type,
+                )
+                extracted_evidence.append(ranked_ev)
+                if top_url is None:
+                    top_url = hit.url
             except Exception:
-                # Use hit snippet directly if page fetch timed out or blocked
+                # Use hit snippet directly if page fetch timed out
                 ranked_ev = EvidenceRanker.rank_evidence(
                     claim=hit.snippet,
                     query=question,
@@ -285,7 +310,7 @@ class ResearchOrchestrator:
                 for e in extracted_evidence[:3]
             ]
 
-            # Cache the result for subsequent users
+            # Cache the result for subsequent users of the same tenant
             RESEARCH_CACHE.set(
                 product_id=product_id,
                 question=question,
@@ -298,6 +323,7 @@ class ResearchOrchestrator:
                 source_type=best.source_type,
                 confidence_score=best.confidence_score,
                 confidence_level=best.confidence_level,
+                merchant_id=merchant_id,
             )
 
             return ResearchAnswer(

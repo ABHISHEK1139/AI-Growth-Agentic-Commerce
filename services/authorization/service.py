@@ -464,24 +464,22 @@ class AuthorizationService:
         authorization_id: str,
         checkout_id: str,
         current_price_hash: str,
-        merchant_id: str | None = None,
-        buyer_id: str | None = None,
+        merchant_id: str,
+        buyer_id: str,
         now: datetime | None = None,
     ) -> Authorization:
-        """Pre-payment revalidation gate (Requirement 13, Property 5, BUG-49)."""
+        """Pre-payment revalidation gate (Requirement 13, Property 5, BUG-49).
+
+        Tenancy is mandatory: the approval is always loaded through the
+        tenant-scoped repository, so an approval from another merchant or
+        buyer can never satisfy this gate even if its identifier is guessed.
+        """
         current_time = now or datetime.now(UTC)
 
         # 0. Enforce tenant-scoped lookup via AuthorizationRepository (BUG-49)
-        if merchant_id or buyer_id:
-            scope = TenantScope(merchant_id=merchant_id or "", buyer_id=buyer_id)
-            repo = AuthorizationRepository(session, scope)
-            auth = repo.get_by_id(authorization_id)
-        else:
-            auth = (
-                session.query(Authorization)
-                .filter(Authorization.authorization_id == authorization_id)
-                .first()
-            )
+        scope = TenantScope(merchant_id=merchant_id, buyer_id=buyer_id)
+        repo = AuthorizationRepository(session, scope)
+        auth = repo.get_by_id(authorization_id)
 
         if auth is None:
             raise DomainError("The approval does not exist.", code=ErrorCode.NOT_FOUND)

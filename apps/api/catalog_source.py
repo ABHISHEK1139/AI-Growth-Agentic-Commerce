@@ -19,6 +19,7 @@ the case where the deployment's datastore is absent.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -81,10 +82,8 @@ def search_catalog(
         return CatalogSearchOutcome(candidates=candidates, source="postgresql")
     except Exception as exc:
         if session is not None:
-            try:
+            with contextlib.suppress(Exception):
                 session.rollback()
-            except Exception:
-                pass
         reason = type(exc).__name__
         logger.warning(
             "catalog search fell back to the seed artifacts",

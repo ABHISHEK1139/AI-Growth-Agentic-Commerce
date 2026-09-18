@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import threading
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -77,10 +77,7 @@ def _is_secret_like(value: Any) -> bool:
         return False
     if len(value) >= _LONG_TOKEN_LENGTH:
         return True
-    for pattern in _KEY_PREFIX_PATTERNS:
-        if pattern.match(value):
-            return True
-    return False
+    return any(pattern.match(value) for pattern in _KEY_PREFIX_PATTERNS)
 
 
 @dataclass(slots=True)
@@ -192,7 +189,7 @@ class AlertManager:
                 cleaned[key] = "[redacted]"
             elif isinstance(value, dict):
                 cleaned[key] = AlertManager._redact(value)
-            elif isinstance(value, (list, tuple)):
+            elif isinstance(value, list | tuple):
                 cleaned[key] = [
                     AlertManager._redact(v)
                     if isinstance(v, dict)
@@ -242,7 +239,7 @@ def merge_contexts(*contexts: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-__all__: Iterable[str] = (
+__all__: Sequence[str] = (
     "Alert",
     "AlertKind",
     "AlertManager",

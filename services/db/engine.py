@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 from functools import lru_cache
+from typing import Any
 
 from sqlalchemy import Engine, create_engine, event, text
 
-from apps.api.config import get_settings
+#: Fallback when DATABASE_URL is unset. Mirrors the default in
+#: ``apps.api.config.Settings`` without importing the delivery layer, which
+#: the architecture contract forbids (services must never import apps.*).
+_DEFAULT_DATABASE_URL = "postgresql+psycopg://agentpay:agentpay@localhost:5432/agentpay"
+
+
+def _database_url() -> str:
+    return os.environ.get("DATABASE_URL", _DEFAULT_DATABASE_URL)
 
 
 def _install_sqlite_compat(engine: Engine) -> Engine:
@@ -18,23 +28,20 @@ def _install_sqlite_compat(engine: Engine) -> Engine:
         return "JSON"
 
     @event.listens_for(engine, "connect")
-    def _register_now(dbapi_connection: object, _record: object) -> None:
+    def _register_now(dbapi_connection: Any, _record: Any) -> None:
         import datetime
 
-        try:
+        with contextlib.suppress(AttributeError):
             dbapi_connection.create_function(
                 "now", 0, lambda: datetime.datetime.now(datetime.UTC).isoformat()
             )
-        except AttributeError:
-            pass
 
     return engine
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    settings = get_settings()
-    url = settings.database_url
+    url = _database_url()
 
     if url.startswith("sqlite"):
         engine = create_engine(

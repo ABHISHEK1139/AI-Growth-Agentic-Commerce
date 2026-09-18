@@ -33,7 +33,7 @@ venv: ## Create the local virtualenv and install everything
 
 .PHONY: env
 env: ## Create .env from the template if it does not exist
-	@test -f .env || (cp .env.example .env && echo "created .env from .env.example")
+	$(VENV_BIN)/python -c "import pathlib,shutil; p=pathlib.Path('.env'); p.exists() or (shutil.copy('.env.example', '.env'), print('created .env from .env.example'))"
 
 # --- Stack ----------------------------------------------------------------
 
@@ -100,8 +100,8 @@ catalog: ## Run all six pipeline stages (honours MAX_LINES_DEBUG)
 
 .PHONY: catalog-demo
 catalog-demo: ## Generate sample data then run the full pipeline (no download needed)
-	$(VENV_BIN)/python -m pipeline.sample_data
-	MAX_LINES_DEBUG=100 $(VENV_BIN)/python -m pipeline.build_catalog all
+	AGENTPAY_RAW_DIR=./data/raw $(VENV_BIN)/python -m pipeline.sample_data
+	AGENTPAY_RAW_DIR=./data/raw MAX_LINES_DEBUG=100 $(VENV_BIN)/python -m pipeline.build_catalog all
 
 .PHONY: catalog-report
 catalog-report: ## Recompute and print the catalog health report
@@ -149,9 +149,13 @@ web-build: ## Build Next.js production web app
 web-lint: ## Run Next.js linter
 	cd apps/web && npm run lint
 
+.PHONY: test-e2e
+test-e2e: ## Run the Tier 1-4 requirement-driven e2e suites
+	$(VENV_BIN)/python -m pytest tests/e2e -q
+
 .PHONY: check
-check: lint test ## Everything CI runs on a pull request
+check: lint test test-contract test-security ## Everything CI runs on a pull request
 
 .PHONY: check-all
-check-all: lint test test-contract test-security web-build ## Run full quality verification across backend and frontend
+check-all: lint test test-contract test-security test-e2e web-build web-lint ## Full verification: backend, contract, security, e2e, frontend
 

@@ -1,4 +1,10 @@
-"""Independent AgentPay API Client for external autonomous buyers (Task 26, Requirement 20)."""
+"""Independent AgentPay API Client for external autonomous buyers (Task 26, Requirement 20).
+
+All paths are the canonical public agent surface. The server also registers a
+few legacy aliases, but this client never probes for them: a 404 means the
+route moved and must fail loudly rather than silently hitting a different
+handler.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,16 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+#: Canonical capability document (also served at legacy aliases, unused here).
+CAPABILITY_PATH = "/.well-known/agent-commerce"
+#: Canonical token exchange (``TokenExchangeRequest``: ``api_key`` + optional ``scopes``).
+TOKEN_PATH = "/api/v1/agent/auth/token"  # noqa: S105 - URL path, not a credential
+#: Canonical agent commerce paths (see ``apps/api/routers/agent.py``).
+SEARCH_PATH = "/api/v1/agent/search"
+CHECKOUT_PATH = "/api/v1/agent/checkout"
+AUTHORIZATION_PATH = "/api/v1/agent/authorization"
+PAYMENTS_PATH = "/api/v1/agent/payments"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,41 +55,49 @@ class AgentPayClient:
             headers["Idempotency-Key"] = idempotency_key
         return headers
 
-    def get_capabilities(self) -> ClientResponse:
-        """Fetch the public machine-readable capability document."""
-        res = self._client.get("/.well-known/agent-capability.json")
-        if res.status_code == 404:
-            res = self._client.get("/.well-known/agent-commerce")
-        if res.status_code == 404:
-            res = self._client.get("/api/v1/capability")
+    def _wrap(self, res: httpx.Response) -> ClientResponse:
+        try:
+            data = res.json() if res.content else {}
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {"data": data}
+        # The gateway uses ``ok: true/false`` envelopes. Three domain codes
+        # are "in-band" (HTTP 200 with an error envelope), so HTTP status
+        # alone cannot decide success: any ``error`` body or ``ok: false``
+        # is a failure even at 200.
+        is_success = bool(res.is_success)
+        if isinstance(data, dict) and ("error" in data or data.get("ok") is False):
+            is_success = False
         return ClientResponse(
             status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
+            data=data,
+            is_success=is_success,
         )
 
-    def authenticate(self, api_key: str) -> ClientResponse:
+    def get_capabilities(self) -> ClientResponse:
+        """Fetch the public machine-readable capability document."""
+        return self._wrap(self._client.get(CAPABILITY_PATH))
+
+    def authenticate(self, api_key: str, scopes: list[str] | None = None) -> ClientResponse:
         """Exchange buyer API key for short-lived scoped bearer token."""
+        payload: dict[str, Any] = {"api_key": api_key}
+        if scopes is not None:
+            payload["scopes"] = scopes
+        else:
+            payload["scopes"] = ["catalog:read", "checkout:write", "payment:write"]
         res = self._client.post(
-            "/api/v1/auth/tokens",
-            json={"api_key": api_key, "grant_type": "api_key"},
+            TOKEN_PATH,
+            json=payload,
             headers=self._headers(),
         )
-        if res.status_code == 404:
-            res = self._client.post(
-                "/api/v1/agent/auth/token",
-                json={
-                    "api_key": api_key,
-                    "scopes": ["catalog:read", "checkout:write", "payment:write"],
-                },
-                headers=self._headers(),
-            )
-        data = res.json() if res.content else {}
-        if res.is_success and "data" in data and "access_token" in data["data"]:
+        wrapped = self._wrap(res)
+        data = wrapped.data
+        if wrapped.is_success and "data" in data and "access_token" in data["data"]:
             self.set_token(data["data"]["access_token"])
-        elif res.is_success and "access_token" in data:
+        elif wrapped.is_success and "access_token" in data:
             self.set_token(data["access_token"])
-        return ClientResponse(status_code=res.status_code, data=data, is_success=res.is_success)
+        return wrapped
 
     def search_offers(
         self,
@@ -94,21 +118,12 @@ class AgentPayClient:
             "max_delivery_days": max_delivery_days,
             "limit": limit,
         }
-        res = self._client.post(
-            "/api/v1/agent/search",
-            json=payload,
-            headers=self._headers(),
-        )
-        if res.status_code == 404:
-            res = self._client.post(
-                "/api/v1/agent/offers/query",
+        return self._wrap(
+            self._client.post(
+                SEARCH_PATH,
                 json=payload,
                 headers=self._headers(),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )
 
     def create_checkout(
@@ -124,21 +139,12 @@ class AgentPayClient:
             "quantity": quantity,
             "ttl_minutes": ttl_minutes,
         }
-        res = self._client.post(
-            "/api/v1/agent/checkout",
-            json=payload,
-            headers=self._headers(),
-        )
-        if res.status_code == 404:
-            res = self._client.post(
-                "/api/v1/agent/checkouts",
+        return self._wrap(
+            self._client.post(
+                CHECKOUT_PATH,
                 json=payload,
                 headers=self._headers(),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )
 
     def request_authorization(
@@ -152,21 +158,12 @@ class AgentPayClient:
             "checkout_id": checkout_id,
             "ttl_minutes": ttl_minutes,
         }
-        res = self._client.post(
-            "/api/v1/agent/authorization",
-            json=payload,
-            headers=self._headers(),
-        )
-        if res.status_code == 404:
-            res = self._client.post(
-                "/api/v1/agent/authorizations",
+        return self._wrap(
+            self._client.post(
+                AUTHORIZATION_PATH,
                 json=payload,
                 headers=self._headers(),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )
 
     def create_payment(
@@ -181,38 +178,21 @@ class AgentPayClient:
             "checkout_id": checkout_id,
             "authorization_id": authorization_id,
         }
-        res = self._client.post(
-            "/api/v1/agent/payments",
-            json=payload,
-            headers=self._headers(idempotency_key=idempotency_key),
-        )
-        if res.status_code == 404:
-            res = self._client.post(
-                "/api/v1/agent/payment",
+        return self._wrap(
+            self._client.post(
+                PAYMENTS_PATH,
                 json=payload,
                 headers=self._headers(idempotency_key=idempotency_key),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )
 
     def get_payment_status(self, payment_id: str) -> ClientResponse:
         """Fetch status of payment attempt."""
-        res = self._client.get(
-            f"/api/v1/agent/payments/{payment_id}",
-            headers=self._headers(),
-        )
-        if res.status_code == 404:
-            res = self._client.get(
-                f"/api/v1/payments/{payment_id}",
+        return self._wrap(
+            self._client.get(
+                f"{PAYMENTS_PATH}/{payment_id}",
                 headers=self._headers(),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )
 
     def negotiate_offer(
@@ -223,30 +203,19 @@ class AgentPayClient:
         round_number: int = 1,
     ) -> ClientResponse:
         """Negotiate price for an offer within policy bounds."""
-        res = self._client.post(
-            f"/api/v1/agent/offers/{offer_id}/negotiate",
-            json={"proposed_price_minor": proposed_price_minor, "round": round_number},
-            headers=self._headers(),
-        )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
+        return self._wrap(
+            self._client.post(
+                f"/api/v1/agent/offers/{offer_id}/negotiate",
+                json={"proposed_price_minor": proposed_price_minor, "round": round_number},
+                headers=self._headers(),
+            )
         )
 
     def get_order(self, order_id: str) -> ClientResponse:
         """Fetch confirmed order."""
-        res = self._client.get(
-            f"/api/v1/agent/orders/{order_id}",
-            headers=self._headers(),
-        )
-        if res.status_code == 404:
-            res = self._client.get(
-                f"/api/v1/orders/{order_id}",
+        return self._wrap(
+            self._client.get(
+                f"/api/v1/agent/orders/{order_id}",
                 headers=self._headers(),
             )
-        return ClientResponse(
-            status_code=res.status_code,
-            data=res.json() if res.content else {},
-            is_success=res.is_success,
         )

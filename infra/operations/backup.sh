@@ -24,11 +24,21 @@ set -euo pipefail
 # Timestamp is the UTC ISO 8601 with colons replaced — colons are awkward in
 # filenames and `:%z` doesn't strip them on every toolchain.
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_FILE="${BACKUP_DIR}/agentpay-${TIMESTAMP}.sql.gz"
+# Underscore naming matches infra/operations/backup.py, so the Python
+# retention pruner recognises (and eventually cleans) these files too.
+BACKUP_FILE="${BACKUP_DIR}/agentpay_manual_${TIMESTAMP}.sql.gz"
 
 mkdir -p "${BACKUP_DIR}"
 
-echo "Backing up ${DATABASE_URL} to ${BACKUP_FILE}"
+# Never print DATABASE_URL: it embeds the password and this script runs from
+# cron, where stdout is mailed or shipped to a log aggregator. Show the
+# destination and a redacted user@host only.
+REDACTED_URL="$(printf '%s' "${DATABASE_URL}" | sed -E 's|://([^:/?#]+):[^@/?#]+@|://\1:***@|')"
+echo "Backing up ${REDACTED_URL} to ${BACKUP_FILE}"
+
+# A failed pg_dump must not leave a partial archive that a later restore
+# mistakes for a good backup.
+trap 'rm -f "${BACKUP_FILE}"' ERR
 pg_dump \
     --no-owner \
     --no-privileges \
@@ -36,5 +46,6 @@ pg_dump \
     --if-exists \
     --format=plain \
     "${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}"
+trap - ERR
 
 echo "Backup complete: $(stat -c %s "${BACKUP_FILE}") bytes"

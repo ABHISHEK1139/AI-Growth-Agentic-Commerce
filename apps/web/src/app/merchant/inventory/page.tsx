@@ -145,7 +145,7 @@ export default function MerchantInventoryPage() {
           {offers.kind === "open" ? (
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl p-4 text-xs">
               <strong className="block mb-1 text-emerald-950 font-bold">✓ Live Inventory Assortment</strong>
-              Real-time stock availability synchronized with the central catalog and reservations engine.
+              Stock availability as served. Gateway default-tenant read (no merchant session) — not scoped to your tenant.
             </div>
           ) : null}
 

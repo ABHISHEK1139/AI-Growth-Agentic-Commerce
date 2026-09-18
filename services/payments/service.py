@@ -125,6 +125,7 @@ class PaymentService:
         *,
         payment_id: str,
         merchant_id: str | None = None,
+        buyer_id: str | None = None,
     ) -> PaymentV1:
         """Fetch payment status.
 
@@ -136,6 +137,8 @@ class PaymentService:
         query = session.query(Payment).filter(Payment.payment_id == payment_id)
         if merchant_id:
             query = query.filter(Payment.merchant_id == merchant_id)
+        if buyer_id:
+            query = query.filter(Payment.buyer_id == buyer_id)
         payment = query.first()
         if payment is None:
             raise DomainError("The payment does not exist.", code=ErrorCode.NOT_FOUND)
@@ -305,7 +308,7 @@ class PaymentService:
                 idempotency_key=idempotency_key,
                 request_hash=req_hash,
             )
-            if is_replay and cached_body:
+            if is_replay and cached_body:  # noqa: SIM102 - inner liveness check is documented below
                 # A cached response is only honest while the world it describes
                 # still exists. If the checkout has since expired or been
                 # cancelled, or the original payment attempt failed, replaying
@@ -464,6 +467,25 @@ class PaymentService:
         if checkout is None:
             raise DomainError("The checkout does not exist.", code=ErrorCode.NOT_FOUND)
 
+        # A dead checkout must never be revived by a late callback: the
+        # payment transition below would otherwise mark an expired, cancelled,
+        # or policy-rejected checkout verified and mint an order for it.
+        if checkout.status == "expired":
+            raise DomainError(
+                f"Checkout {payment.checkout_id} has expired.",
+                code=ErrorCode.CHECKOUT_EXPIRED,
+            )
+        if checkout.status in (
+            "cancelled",
+            "policy_blocked",
+            "price_changed",
+            "inventory_changed",
+        ):
+            raise DomainError(
+                f"Checkout {payment.checkout_id} is already final (status: {checkout.status}).",
+                code=ErrorCode.ALREADY_FINALIZED,
+            )
+
         if checkout.status == "completed":
             from services.orders.models import Order
 
@@ -495,24 +517,38 @@ class PaymentService:
             ) or self._provider.verify_signature(pay_id.encode(), provider_signature)
 
             if signature_valid:
-                # Signature authenticates the caller; verify provider details if available
-                prov_mismatch = False
-                with suppress(Exception):
+                # Signature authenticates the caller; the provider fetch below
+                # must still succeed with an exact amount/currency/capture
+                # match. A fetch failure is NOT agreement: it leaves the gate
+                # closed and lets the second gate (or a retry) decide.
+                try:
                     target_pay_id = pay_id or payment.provider_payment_id
                     if target_pay_id:
                         prov_payment = self._provider.fetch_payment(target_pay_id)
                         if (
-                            prov_payment.amount_minor is not None
-                            and prov_payment.amount_minor != payment.amount_minor
+                            prov_payment.amount_minor == payment.amount_minor
+                            and prov_payment.currency.upper() == payment.currency.upper()
+                            and prov_payment.status in ("captured", "paid")
+                            and prov_payment.captured is True
                         ):
+                            prov_mismatch = False
+                        else:
                             prov_mismatch = True
                     elif order_id:
                         prov_order = self._provider.fetch_order(order_id)
                         if (
-                            prov_order.amount_minor is not None
-                            and prov_order.amount_minor != payment.amount_minor
+                            prov_order.amount_minor == payment.amount_minor
+                            and prov_order.currency.upper() == payment.currency.upper()
+                            and prov_order.status == "paid"
                         ):
+                            prov_mismatch = False
+                        else:
                             prov_mismatch = True
+                    else:
+                        prov_mismatch = True
+                except Exception:
+                    # Provider unreachable: do not verify on signature alone.
+                    prov_mismatch = True
                 if not prov_mismatch:
                     is_verified = True
 
@@ -525,6 +561,7 @@ class PaymentService:
                         prov_payment.status in ("captured", "paid")
                         and prov_payment.captured
                         and prov_payment.amount_minor == payment.amount_minor
+                        and prov_payment.currency.upper() == payment.currency.upper()
                     ):
                         is_verified = True
                 elif payment.provider_order_id:
@@ -532,6 +569,7 @@ class PaymentService:
                     if (
                         prov_order.status == "paid"
                         and prov_order.amount_minor == payment.amount_minor
+                        and prov_order.currency.upper() == payment.currency.upper()
                     ):
                         is_verified = True
 
@@ -541,9 +579,15 @@ class PaymentService:
                 code=ErrorCode.WEBHOOK_SIGNATURE_INVALID,
             )
 
-        # 1. Update payment status via state transition engine
-        payment.provider_payment_id = provider_payment_id
-        payment.provider_signature = provider_signature
+        # 1. Update payment status via state transition engine. Identifiers are
+        # only overwritten when the caller actually supplied them: a
+        # verification through the order path carries no payment id, and
+        # writing None would sever the provider linkage refunds and the audit
+        # trail depend on.
+        if provider_payment_id is not None:
+            payment.provider_payment_id = provider_payment_id
+        if provider_signature is not None:
+            payment.provider_signature = provider_signature
         payment.verified_at = current_time
         payment.updated_at = current_time
         transition(
@@ -685,8 +729,9 @@ class PaymentService:
         payment_id: str,
         amount_minor: int | None = None,
         reason: str = "Customer requested refund",
+        merchant_id: str | None = None,
     ) -> dict[str, Any]:
-        """Issue a full or partial refund for a confirmed payment.
+        """Issue a full or partial refund for a verified payment.
 
         Args:
             payment_id: The internal payment to refund.
@@ -694,14 +739,21 @@ class PaymentService:
                 the full original charge (partial refunds are not yet propagated
                 to the provider; only the full amount is forwarded).
             reason: Human-readable reason for the audit log.
+            merchant_id: When supplied, the payment must belong to this tenant.
         """
         payment = session.query(Payment).filter(Payment.payment_id == payment_id).first()
         if payment is None:
             raise DomainError("The payment does not exist.", code=ErrorCode.NOT_FOUND)
 
-        if payment.status != "confirmed":
+        if merchant_id is not None and payment.merchant_id != merchant_id:
+            raise DomainError("You do not have access to this resource.", code=ErrorCode.FORBIDDEN)
+
+        # Only a verified capture holds funds that can be returned. The
+        # lifecycle (created/pending/verified/failed/...) never produces a
+        # "confirmed" payment status, so gating on it refused every refund.
+        if payment.status != "verified":
             raise DomainError(
-                f"Only confirmed payments can be refunded (current status: {payment.status}).",
+                f"Only verified payments can be refunded (current status: {payment.status}).",
                 code=ErrorCode.BAD_REQUEST,
             )
 
@@ -713,6 +765,11 @@ class PaymentService:
             )
 
         refund_amount = amount_minor if amount_minor is not None else payment.amount_minor
+        if refund_amount <= 0 or refund_amount > payment.amount_minor:
+            raise DomainError(
+                "The refund amount must be positive and must not exceed the captured amount.",
+                code=ErrorCode.VALIDATION_ERROR,
+            )
 
         provider_refund = self._provider.refund(
             provider_payment_id=payment.provider_payment_id,

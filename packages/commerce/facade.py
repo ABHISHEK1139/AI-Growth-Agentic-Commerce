@@ -51,6 +51,7 @@ class CommerceFacade(Protocol):
         min_memory_gb: int | None = None,
         min_storage_gb: int | None = None,
         max_delivery_days: int | None = None,
+        quantity: int = 1,
         limit: int = 10,
     ) -> list[OfferV1]:
         """Deterministically filtered, ranked, tenant-scoped offers."""

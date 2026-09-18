@@ -121,8 +121,6 @@ def parse_major_units(value: str | int, *, currency: str | None = None) -> int:
     exponent = currency_exponent(currency) if currency is not None else 2
     factor = 10**exponent
 
-    from decimal import ROUND_HALF_EVEN, Decimal
-
     if isinstance(value, bool | float):
         raise MoneyValueError("money must be provided as an integer or decimal string, never float")
     if isinstance(value, int):

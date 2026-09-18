@@ -6,9 +6,8 @@ import { useStore } from "@/context/StoreContext";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
 import { ProductCard } from "@/components/ProductCard";
-import { apiGet } from "@/lib/api";
 import { Loader2 } from "lucide-react";
-import { exploreOfferToProductItem, toOfferView } from "@/catalog/adapt";
+import { exploreOfferToProductItem } from "@/catalog/adapt";
 import { lookupOfferInCatalog } from "@/catalog/client";
 
 const COMBINED_PRODUCTS: ProductItem[] = [
@@ -19,6 +18,7 @@ const COMBINED_PRODUCTS: ProductItem[] = [
 export default function WishlistPage() {
   const { wishlist, openAiDrawer } = useStore();
   const [savedProducts, setSavedProducts] = useState<ProductItem[]>([]);
+  const [staleCount, setStaleCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -27,59 +27,40 @@ export default function WishlistPage() {
     async function loadWishlistProducts() {
       if (!wishlist.length) {
         setSavedProducts([]);
+        setStaleCount(0);
         return;
       }
 
       setIsLoading(true);
       try {
+        // Resolve every saved id against the live catalog first. Only items
+        // the gateway cannot resolve fall back to the static copy, labelled
+        // cached — never with an invented live price.
         const loaded = await Promise.all(
           wishlist.map(async (productId) => {
-            const res = await apiGet<any>(`/api/v1/catalog/products/${productId}`);
-            const p = res.ok ? (res.data?.product || res.data) : null;
-            if (p && p.product_id) {
-              const offerView = toOfferView(
-                {
-                  schema_version: "1.0",
-                  offer_id: `off_${p.product_id}`,
-                  product_id: p.product_id,
-                  merchant_id: "mrc_demo_electronics",
-                  unit_price_minor: p.unit_price_minor || 7500000,
-                  currency: p.currency || "INR",
-                  available_quantity: 50,
-                  delivery_days: 2,
-                  return_period_days: 10,
-                  expires_at: "",
-                  offer_version: 1,
-                  pricing_source: "merchant_configured",
-                  status: "active",
-                  specifications: {
-                    memory_gb: null,
-                    storage_gb: null,
-                    weight_grams: null,
-                    length_mm: null,
-                    width_mm: null,
-                    height_mm: null,
-                  },
-                },
-                p
-              );
-              return exploreOfferToProductItem(offerView, "postgresql");
-            }
-
             const lookup = await lookupOfferInCatalog({ productId });
             if (lookup.ok && lookup.data?.found) {
-              return exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource);
+              return {
+                item: exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource),
+                stale: false,
+              };
             }
 
             const fallback = COMBINED_PRODUCTS.find(
               (item) => item.id === productId || item.slug === productId || item.offerId === productId
             );
-            return fallback || null;
+            if (!fallback) return null;
+            return {
+              item: { ...fallback, aiBadge: "Cached — price may be stale" },
+              stale: true,
+            };
           })
         );
 
         if (!cancelled) {
-          setSavedProducts(loaded.filter((p): p is ProductItem => p !== null));
+          const kept = loaded.filter((p): p is { item: ProductItem; stale: boolean } => p !== null);
+          setSavedProducts(kept.map((p) => p.item));
+          setStaleCount(kept.filter((p) => p.stale).length);
         }
       } catch (err) {
         console.warn("Wishlist live fetch note:", err);
@@ -101,7 +82,10 @@ export default function WishlistPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900">Your Saved Wishlist</h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            {savedProducts.length} saved catalog items with live price tracking and policy compliance.
+            {savedProducts.length} saved catalog items
+            {staleCount > 0
+              ? ` (${staleCount} cached — live price unavailable).`
+              : " with live price tracking and policy compliance."}
           </p>
         </div>
 

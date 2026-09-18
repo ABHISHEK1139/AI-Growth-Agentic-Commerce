@@ -7,8 +7,6 @@ import type { ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
 import { apiGet } from "@/lib/api";
 import { Loader2 } from "lucide-react";
-import { runCatalogSearch } from "@/catalog/search";
-import { exploreOfferToProductItem } from "@/catalog/adapt";
 
 interface ServerOrder {
   schema_version: string;
@@ -29,6 +27,16 @@ interface OrderPage {
   total: number;
 }
 
+/** 10-day return window, enforced on the order's own confirmed timestamp. */
+const RETURN_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+
+function isWithinReturnWindow(o: { confirmed_at?: string; status?: string }): boolean {
+  if (o.status !== "confirmed" && o.status !== "completed") return false;
+  const ts = Date.parse(o.confirmed_at || "");
+  if (Number.isNaN(ts)) return false;
+  return Date.now() - ts <= RETURN_WINDOW_MS;
+}
+
 export default function ReturnsWizardPage() {
   const { orders: localOrders, submitReturn } = useStore();
 
@@ -41,6 +49,7 @@ export default function ReturnsWizardPage() {
   const [reason, setReason] = useState<string>("Found a different model with higher RAM");
   const [resolution, setResolution] = useState<"refund" | "replacement">("refund");
   const [completedReturn, setCompletedReturn] = useState<any | null>(null);
+  const [hiddenOutsideWindow, setHiddenOutsideWindow] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,8 +62,8 @@ export default function ReturnsWizardPage() {
           order_id: o.orderId,
           checkout_id: o.orderId.replace("ord_", "chk_"),
           payment_id: o.paymentId,
-          buyer_id: "byr_active_session",
-          merchant_id: "mrc_demo_electronics",
+          buyer_id: "buy_shopper_demo",
+          merchant_id: "merchant_demo",
           amount_minor: o.totalMinor,
           currency: o.currency || "INR",
           status: (o.status as any) || "confirmed",
@@ -72,9 +81,13 @@ export default function ReturnsWizardPage() {
         }
 
         if (!cancelled) {
-          setServerOrders(combined);
-          if (combined.length > 0) {
-            setSelectedOrderId((prev) => prev && combined.some((o) => o.order_id === prev) ? prev : combined[0].order_id);
+          const eligible = combined.filter(isWithinReturnWindow);
+          setHiddenOutsideWindow(combined.length - eligible.length);
+          setServerOrders(eligible);
+          if (eligible.length > 0) {
+            setSelectedOrderId((prev) => prev && eligible.some((o) => o.order_id === prev) ? prev : eligible[0].order_id);
+          } else {
+            setSelectedOrderId("");
           }
         }
       } catch (err) {
@@ -97,27 +110,15 @@ export default function ReturnsWizardPage() {
       const items = selectedLocal.items.map((i) => i.product);
       setSelectableItems(items);
       if (items[0]) setSelectedProductId(items[0].id);
+    } else if (selectedOrderId) {
+      // The gateway order record carries no line items, so there is nothing
+      // factual to list. Say so instead of presenting unrelated catalog
+      // offers as the order's contents.
+      setSelectableItems([]);
+      setSelectedProductId("");
     } else {
-      (async () => {
-        try {
-          const res = await apiGet<any>(`/api/v1/orders/${selectedOrderId}`);
-          if (!cancelled && res.ok && res.data?.items?.length) {
-            const items = res.data.items.map((it: any) => it.product || it);
-            setSelectableItems(items);
-            if (items[0]) setSelectedProductId(items[0].id || items[0].product_id);
-            return;
-          }
-        } catch {}
-
-        const searchRes = await runCatalogSearch({ limit: 4 });
-        if (!cancelled && searchRes.kind === "ok" && searchRes.outcome.offers.length > 0) {
-          const items = searchRes.outcome.offers.map((o) =>
-            exploreOfferToProductItem(o, searchRes.outcome.catalogSource)
-          );
-          setSelectableItems(items);
-          if (items[0]) setSelectedProductId(items[0].id);
-        }
-      })();
+      setSelectableItems([]);
+      setSelectedProductId("");
     }
     return () => {
       cancelled = true;
@@ -247,6 +248,11 @@ export default function ReturnsWizardPage() {
               </button>
             </div>
           )}
+          {hiddenOutsideWindow > 0 && (
+            <p className="text-[11px] text-slate-400">
+              {hiddenOutsideWindow} older {hiddenOutsideWindow === 1 ? "order is" : "orders are"} hidden — outside the 10-day return window.
+            </p>
+          )}
         </div>
       )}
 
@@ -258,7 +264,7 @@ export default function ReturnsWizardPage() {
           <div className="space-y-3">
             {selectableItems.length === 0 ? (
               <div className="p-6 text-center text-slate-500 text-xs">
-                No items available for return in this order.
+                No item details are available for this order, so a return can&apos;t be started from here. Orders placed in this browser carry their items and can be returned.
               </div>
             ) : (
               selectableItems.map((p) => (

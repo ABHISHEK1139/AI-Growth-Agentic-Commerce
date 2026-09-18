@@ -489,8 +489,12 @@ export interface RazorpayCheckoutUrlResult {
 }
 
 /**
- * `GET /api/v1/payments/razorpay/checkout-url` — get a Razorpay checkout URL
+ * `POST /api/v1/payments/razorpay/checkout-url` — get a Razorpay checkout URL
  * for browser-redirect flow.
+ *
+ * POST with a JSON body, never GET: building the URL mints a checkout, an
+ * authorization, and a payment record server-side, which must not be
+ * triggerable by a prefetched link.
  *
  * The browser navigates to `checkout_url` directly instead of opening the Razorpay
  * modal inline. Razorpay redirects back to the `return_url` when the buyer
@@ -504,17 +508,14 @@ export function getRazorpayCheckoutUrl(params: {
   receipt?: string;
   return_url?: string;
 }): Promise<ApiResult<RazorpayCheckoutUrlResult>> {
-  const qp = new URLSearchParams();
-  qp.set("amount", String(params.amount));
-  if (params.currency) qp.set("currency", params.currency);
-  if (params.checkout_id) qp.set("checkout_id", params.checkout_id);
-  if (params.offer_id) qp.set("offer_id", params.offer_id);
-  if (params.receipt) qp.set("receipt", params.receipt);
-  if (params.return_url) qp.set("return_url", params.return_url);
+  const body: Record<string, unknown> = { amount: params.amount };
+  if (params.currency) body.currency = params.currency;
+  if (params.checkout_id) body.checkout_id = params.checkout_id;
+  if (params.offer_id) body.offer_id = params.offer_id;
+  if (params.receipt) body.receipt = params.receipt;
+  if (params.return_url) body.return_url = params.return_url;
 
-  return apiGet<RazorpayCheckoutUrlResult>(
-    `/api/v1/payments/razorpay/checkout-url?${qp.toString()}`
-  );
+  return apiPost<RazorpayCheckoutUrlResult>("/api/v1/payments/razorpay/checkout-url", body);
 }
 
 /** `POST /api/v1/recommendations/cross-sell`. */
@@ -548,7 +549,9 @@ export function composeExplorePrompt(filters: CatalogFilters): string {
   parts.push(text || "Show the available catalog offers");
   if (filters.category) parts.push(`in the ${filters.category} category`);
   if (filters.max_price_minor != null) {
-    parts.push(`with a budget of at most ${Math.floor(filters.max_price_minor / 100)} INR`);
+    // Paise-exact: flooring ₹75,000.50 to "75000 INR" would let the intent
+    // extractor exclude offers the budget actually covers.
+    parts.push(`with a budget of at most ${(filters.max_price_minor / 100).toFixed(2)} INR`);
   }
   if (filters.min_memory_gb != null) parts.push(`with at least ${filters.min_memory_gb} GB of memory`);
   if (filters.min_storage_gb != null) parts.push(`with at least ${filters.min_storage_gb} GB of storage`);

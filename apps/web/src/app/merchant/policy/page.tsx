@@ -51,9 +51,13 @@ export default function MerchantPolicyControlPage() {
   const [rereading, setRereading] = useState(false);
 
   // Editable Policy Bounds Form State
-  const [maxTxRupees, setMaxTxRupees] = useState<number>(100000);
-  const [autoApproveRupees, setAutoApproveRupees] = useState<number>(5000);
-  const [maxDiscountPct, setMaxDiscountPct] = useState<number>(5);
+  // Money state lives in integer minor units end to end. The inputs below
+  // display whole rupees, but the stored minor value is only replaced when
+  // the operator edits the field — otherwise a load/save round-trip would
+  // silently round a paise-exact ceiling set elsewhere.
+  const [maxTxMinor, setMaxTxMinor] = useState<number>(10000000);
+  const [autoApproveMinor, setAutoApproveMinor] = useState<number>(500000);
+  const [maxDiscountBps, setMaxDiscountBps] = useState<number>(500);
   const [allowedCats, setAllowedCats] = useState<string>("laptops, smartphones, audio, accessories");
   const [blockedCats, setBlockedCats] = useState<string>("");
   const [allowOutOfStock, setAllowOutOfStock] = useState<boolean>(false);
@@ -74,9 +78,9 @@ export default function MerchantPolicyControlPage() {
 
     if (rulesRes.ok && rulesRes.data?.rules) {
       const r = rulesRes.data.rules;
-      setMaxTxRupees(Math.round(r.max_transaction_minor / 100));
-      setAutoApproveRupees(Math.round(r.auto_approval_limit_minor / 100));
-      setMaxDiscountPct(Number((r.max_discount_basis_points / 100).toFixed(1)));
+      setMaxTxMinor(r.max_transaction_minor);
+      setAutoApproveMinor(r.auto_approval_limit_minor);
+      setMaxDiscountBps(r.max_discount_basis_points);
       setAllowedCats(r.allowed_categories.join(", "));
       setBlockedCats(r.blocked_categories.join(", "));
       setAllowOutOfStock(r.allow_out_of_stock);
@@ -127,9 +131,9 @@ export default function MerchantPolicyControlPage() {
       .filter(Boolean);
 
     const res = await updateMerchantRules({
-      max_transaction_minor: Math.round(maxTxRupees * 100),
-      auto_approval_limit_minor: Math.round(autoApproveRupees * 100),
-      max_discount_basis_points: Math.round(maxDiscountPct * 100),
+      max_transaction_minor: maxTxMinor,
+      auto_approval_limit_minor: autoApproveMinor,
+      max_discount_basis_points: maxDiscountBps,
       allowed_categories: allowed,
       blocked_categories: blocked,
       allow_out_of_stock: allowOutOfStock,
@@ -229,13 +233,17 @@ export default function MerchantPolicyControlPage() {
                   type="number"
                   min="0"
                   step="100"
-                  value={maxTxRupees}
-                  onChange={(e) => setMaxTxRupees(Number(e.target.value))}
+                  value={Math.round(maxTxMinor / 100)}
+                  onChange={(e) => {
+                    if (e.target.value.trim() === '') return;
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v >= 0) setMaxTxMinor(Math.round(v * 100));
+                  }}
                   className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   required
                 />
                 <span className="text-xs text-slate-400">
-                  Transactions above this amount are hard-blocked ({maxTxRupees * 100} minor units).
+                  Transactions above this amount are hard-blocked ({maxTxMinor.toLocaleString("en-IN")} minor units).
                 </span>
               </div>
 
@@ -247,13 +255,17 @@ export default function MerchantPolicyControlPage() {
                   type="number"
                   min="0"
                   step="50"
-                  value={autoApproveRupees}
-                  onChange={(e) => setAutoApproveRupees(Number(e.target.value))}
+                  value={Math.round(autoApproveMinor / 100)}
+                  onChange={(e) => {
+                    if (e.target.value.trim() === '') return;
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v >= 0) setAutoApproveMinor(Math.round(v * 100));
+                  }}
                   className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   required
                 />
                 <span className="text-xs text-slate-400">
-                  Autonomous orders above this amount require human authorization ({autoApproveRupees * 100} minor units).
+                  Autonomous orders above this amount require human authorization ({autoApproveMinor.toLocaleString("en-IN")} minor units).
                 </span>
               </div>
             </div>
@@ -268,13 +280,17 @@ export default function MerchantPolicyControlPage() {
                   min="0"
                   max="100"
                   step="0.5"
-                  value={maxDiscountPct}
-                  onChange={(e) => setMaxDiscountPct(Number(e.target.value))}
+                  value={maxDiscountBps / 100}
+                  onChange={(e) => {
+                    if (e.target.value.trim() === '') return;
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v >= 0) setMaxDiscountBps(Math.round(v * 100));
+                  }}
                   className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   required
                 />
                 <span className="text-xs text-slate-400">
-                  Discount cap enforced by the policy engine ({Math.round(maxDiscountPct * 100)} basis points).
+                  Discount cap enforced by the policy engine ({maxDiscountBps.toLocaleString("en-IN")} basis points).
                 </span>
               </div>
 

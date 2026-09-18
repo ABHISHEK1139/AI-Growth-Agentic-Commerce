@@ -238,7 +238,9 @@ export default function AuthorizationScreen({ params }: { params?: { id: string 
       }
 
       const updated = result.data?.authorization;
-      if (updated) setAuth(updated);
+      // Merge, never overwrite: the gateway may return a partial record and
+      // the bound checkout, ceiling, and policy fields must survive.
+      if (updated) setAuth((prev) => (prev ? { ...prev, ...updated } : updated));
       setSubmitting(null);
     },
     [auth, submitting, load]
@@ -246,12 +248,30 @@ export default function AuthorizationScreen({ params }: { params?: { id: string 
 
   const startPayment = useCallback(async () => {
     if (!auth || creatingPayment) return;
+    // Charge exactly the itemised checkout total the gate approved — never
+    // the ceiling, and never an absent amount that the backend would read as 0.
+    const totalMinor = checkout?.pricing?.total_minor;
+    const currency = checkout?.pricing?.currency || auth.currency;
+    if (typeof totalMinor !== "number" || !Number.isFinite(totalMinor) || totalMinor <= 0) {
+      setActionError({
+        code: "CLIENT_MALFORMED_RESPONSE",
+        message: "The itemised checkout total is unavailable, so payment cannot start.",
+        retryable: false,
+        details: {},
+        nextActions: [],
+        status: null,
+        requestId: null,
+      });
+      return;
+    }
     setCreatingPayment(true);
     setActionError(null);
 
     const result = await apiPost<{ payment: { payment_id: string } }>("/api/v1/payments", {
       checkout_id: auth.checkout_id,
       authorization_id: auth.authorization_id,
+      amount_minor: totalMinor,
+      currency,
     });
     if (cancelledRef.current) return;
 
@@ -275,7 +295,7 @@ export default function AuthorizationScreen({ params }: { params?: { id: string 
       return;
     }
     router.push(`/payment/${paymentId}`);
-  }, [auth, creatingPayment, router]);
+  }, [auth, checkout, creatingPayment, router]);
 
   // ---- Empty state ---------------------------------------------------------
   if (!authorizationId) {

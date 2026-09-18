@@ -92,7 +92,8 @@ def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
     no ``min_*`` constraint above zero but *would* satisfy one at zero, and more
     importantly it would claim a fact the catalog does not hold.
     """
-    dim = raw.get("dimensions_mm") if isinstance(raw.get("dimensions_mm"), dict) else {}
+    raw_dims = raw.get("dimensions_mm")
+    dim: dict[str, Any] = raw_dims if isinstance(raw_dims, dict) else {}
     return ProductSpecificationsV1(
         memory_gb=_clean_spec_int(raw.get("memory_gb")),
         storage_gb=_clean_spec_int(raw.get("storage_gb")),
@@ -106,7 +107,9 @@ def _specifications_of(raw: dict[str, Any]) -> ProductSpecificationsV1:
 def _primary_image_url(product: dict[str, Any]) -> str | None:
     images = product.get("images") or []
     for image in images:
-        url = image.get("url") or image.get("source_url") or image.get("large") or image.get("thumb")
+        url = (
+            image.get("url") or image.get("source_url") or image.get("large") or image.get("thumb")
+        )
         if url:
             return str(url)
     return None

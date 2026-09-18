@@ -267,7 +267,7 @@ class RecommendationService:
             patterns = self.HEURISTIC_ACCESSORY_PATTERNS.get(
                 category_key, self.HEURISTIC_ACCESSORY_PATTERNS["laptops"]
             )
-            for i, p in enumerate(patterns[:3]):
+            for i, pat in enumerate(patterns[:3]):
                 price = 99900 * (i + 1)
                 if budget_limit_minor and price > budget_limit_minor:
                     continue
@@ -275,14 +275,14 @@ class RecommendationService:
                     CrossSellItem(
                         product_id=f"rec_prd_{category_key}_{i + 1}",
                         offer_id=f"rec_off_{category_key}_{i + 1}",
-                        title=f"{target_title} Companion {p['keyword'].title()}",
-                        category=p["category"],
+                        title=f"{target_title} Companion {pat['keyword'].title()}",
+                        category=pat["category"],
                         price_minor=price,
                         currency="INR",
-                        compatibility_reason=p["reason"],
+                        compatibility_reason=pat["reason"],
                         available_quantity=10,
-                        savings_minor=p.get("savings_minor"),
-                        alternative_title=p.get("alternative"),
+                        savings_minor=pat.get("savings_minor"),
+                        alternative_title=pat.get("alternative"),
                     )
                 )
 
@@ -426,7 +426,10 @@ class RecommendationService:
     def _compute_historical_attach_rate(self, session: Session | None, merchant_id: str) -> float:
         """Calculate true multi-item basket attach rate from merchant order history."""
         if session is None:
-            return 0.35  # Baseline default attach rate assumption
+            # No history to measure: a documented 0.35 planning assumption so
+            # offline projections stay comparable. Callers needing a measured
+            # figure must use get_merchant_metrics (measured flag) instead.
+            return 0.35
 
         try:
             from sqlalchemy import func
@@ -434,9 +437,15 @@ class RecommendationService:
             from services.checkout.models import CheckoutItem
             from services.orders.models import Order
 
-            orders = session.query(Order).filter(Order.merchant_id == merchant_id).all()
-            if orders:
-                order_count = len(orders)
+            # Aggregated in the database: loading every order row to count
+            # and sum in Python is an OOM waiting on a large merchant.
+            order_count = (
+                session.query(func.count(Order.order_id))
+                .filter(Order.merchant_id == merchant_id)
+                .scalar()
+                or 0
+            )
+            if order_count:
                 multi_item = (
                     session.query(Order.order_id)
                     .join(CheckoutItem, CheckoutItem.checkout_id == Order.checkout_id)
@@ -461,10 +470,19 @@ class RecommendationService:
                 from services.checkout.models import CheckoutItem
                 from services.orders.models import Order
 
-                orders = session.query(Order).filter(Order.merchant_id == merchant_id).all()
-                if orders:
-                    order_count = len(orders)
-                    total_rev = sum(o.total_minor for o in orders)
+                order_count = (
+                    session.query(func.count(Order.order_id))
+                    .filter(Order.merchant_id == merchant_id)
+                    .scalar()
+                    or 0
+                )
+                if order_count:
+                    total_rev = (
+                        session.query(func.coalesce(func.sum(Order.total_minor), 0))
+                        .filter(Order.merchant_id == merchant_id)
+                        .scalar()
+                        or 0
+                    )
                     avg_aov = total_rev // order_count
 
                     multi_item_orders = (
@@ -484,6 +502,13 @@ class RecommendationService:
                     aov_inc = ai_assisted_aov - avg_aov
                     growth_pct = round((aov_inc / avg_aov) * 100.0, 2) if avg_aov > 0 else 0.0
 
+                    currency = (
+                        session.query(Order.currency)
+                        .filter(Order.merchant_id == merchant_id)
+                        .limit(1)
+                        .scalar()
+                        or "INR"
+                    )
                     return {
                         "merchant_id": merchant_id,
                         "base_aov_minor": avg_aov,
@@ -493,7 +518,7 @@ class RecommendationService:
                         "cross_sell_attachment_rate_pct": attach_rate,
                         "cross_sell_conversion_pct": round(attach_rate * 0.45, 1),
                         "total_ai_cross_sell_revenue_minor": total_rev,
-                        "currency": orders[0].currency if orders else "INR",
+                        "currency": currency,
                     }
             except Exception:
                 logger.warning(
@@ -502,17 +527,19 @@ class RecommendationService:
                     exc_info=True,
                 )
 
-        # Baseline computation from catalog offers
-        base_aov = 6499900
-        ai_aov = int(base_aov * 1.0215)
+        # No order history to measure from: report zeros with measured=False
+        # rather than hardcoded "typical" lift figures. A fabricated 2.15%
+        # would be presented by callers as a measured outcome.
         return {
             "merchant_id": merchant_id,
-            "base_aov_minor": base_aov,
-            "ai_assisted_aov_minor": ai_aov,
-            "aov_increase_minor": ai_aov - base_aov,
-            "aov_growth_pct": 2.15,
-            "cross_sell_attachment_rate_pct": 35.0,
-            "cross_sell_conversion_pct": 15.0,
-            "total_ai_cross_sell_revenue_minor": 48930000,
+            "base_aov_minor": 0,
+            "ai_assisted_aov_minor": 0,
+            "aov_increase_minor": 0,
+            "aov_growth_pct": 0.0,
+            "cross_sell_attachment_rate_pct": 0.0,
+            "cross_sell_conversion_pct": 0.0,
+            "total_ai_cross_sell_revenue_minor": 0,
             "currency": "INR",
+            "measured": False,
+            "note": "No merchant order history available; figures are zero, not measured.",
         }

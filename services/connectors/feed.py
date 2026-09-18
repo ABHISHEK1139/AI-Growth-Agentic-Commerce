@@ -8,6 +8,8 @@ import json
 import time
 from typing import Any
 
+from packages.errors.exceptions import DomainError
+from packages.errors.registry import ErrorCode
 from services.connectors.base import (
     CanonicalOffer,
     CanonicalProduct,

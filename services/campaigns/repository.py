@@ -146,6 +146,10 @@ class CampaignRepository:
                 logger.warning("Failed saving campaign to Redis; memory copy intact", exc_info=e)
 
     def get(self, merchant_id: str | None, campaign_id: str) -> Campaign | None:
+        # An omitted or mismatched tenant is answered as not-found, never by
+        # falling through to another merchant's campaign.
+        if not merchant_id:
+            return None
         if self._redis_client is not None and merchant_id:
             try:
                 key = f"campaign:{merchant_id}:{campaign_id}"

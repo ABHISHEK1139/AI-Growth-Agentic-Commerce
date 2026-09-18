@@ -63,6 +63,10 @@ CLOCK_SKEW_SECONDS: Final[int] = 60
 #: waiting for a laptop to be stolen.
 MAX_TTL_SECONDS: Final[int] = 30 * 86_400
 
+#: Bearer tokens move money on hosts the merchant does not control, so their
+#: ceiling is a day even though sessions may live longer.
+MAX_ACCESS_TTL_SECONDS: Final[int] = 86_400
+
 _HEADER: Final[Mapping[str, str]] = {"alg": ALGORITHM, "typ": "JWT"}
 
 
@@ -334,6 +338,8 @@ def issue_access_token(
     client_id: str | None = None,
 ) -> IssuedToken:
     """A short-lived scoped bearer token for the public agent surface."""
+    if ttl_seconds > MAX_ACCESS_TTL_SECONDS:
+        raise ValueError(f"access token ttl must not exceed {MAX_ACCESS_TTL_SECONDS} seconds")
     return _issue(
         token_type=TOKEN_TYPE_ACCESS,
         method=AuthMethod.TOKEN,

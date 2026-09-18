@@ -27,7 +27,10 @@ export default function MerchantIntegrationsPage() {
   const [activeMode, setActiveMode] = useState<DeploymentMode>("existing_store");
   const [activePlatform, setActivePlatform] = useState<PlatformTab>("shopify");
   const [storeDomain, setStoreDomain] = useState("mystore.myshopify.com");
-  const [apiKey, setApiKey] = useState("***REMOVED***");
+  // Never pre-filled: a committed sample token with a live prefix would ship
+  // a working-looking credential to every visitor. The operator pastes their
+  // own key, which never touches localStorage and is cleared after the call.
+  const [apiKey, setApiKey] = useState("");
   const [syncStatus, setSyncStatus] = useState<{
     running: boolean;
     result: string | null;
@@ -57,6 +60,9 @@ export default function MerchantIntegrationsPage() {
         }),
       });
       const data = await res.json();
+      // The key fulfilled its single purpose; drop it from memory so a later
+      // screen-share or devtools glance cannot lift it from state.
+      setApiKey("");
       if (res.ok && data.ok && data.sync_result) {
         setSyncStatus({
           running: false,
@@ -319,7 +325,10 @@ export default function MerchantIntegrationsPage() {
                 {activePlatform === "feed" ? "Feed Format" : "Admin API Key / Access Token"}
               </label>
               <input
-                type="text"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={activePlatform === "feed" ? "e.g. products.csv" : "Paste the platform token — never stored"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -421,7 +430,7 @@ export default function MerchantIntegrationsPage() {
             Full suite of endpoints for intent extraction, product catalog search, offer revalidation, and gated checkout.
           </p>
           <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 font-mono text-[10px] text-slate-700">
-            POST /api/v1/checkout/create
+            POST /api/v1/checkout
           </div>
         </div>
 
@@ -436,7 +445,7 @@ export default function MerchantIntegrationsPage() {
             HMAC-SHA256 signature verification, webhook settlement, and automatic inventory decrements upon captured payment.
           </p>
           <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 font-mono text-[10px] text-slate-700">
-            POST /api/verify-payment
+            POST /api/v1/payments/razorpay/verify-signature
           </div>
         </div>
       </div>

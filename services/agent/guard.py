@@ -87,13 +87,19 @@ PROMPT_GUARD_UNSAFE_THRESHOLD = 0.5
 # High-risk prompt injection and jailbreak patterns (Layer 1 Instant Filter)
 _INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(?:all\s+)?(?:previous|above|system)\s+instructions?", re.I),
-    re.compile(r"disregard\s+(?:all\s+)?(?:previous|system)\s+prompts?", re.I),
+    re.compile(
+        r"disregard\s+(?:all\s+)?(?:previous|above|system)\s+(?:instructions?|prompts?)", re.I
+    ),
     re.compile(r"(?:bypass|override|disable)\s+(?:policy|budget|checks|guardrails)", re.I),
     re.compile(r"(?:set|make)\s+price\s+(?:to\s+)?(?:0|zero|free|1\s+rupee)", re.I),
     re.compile(
         r"(?:exfiltrate|leak|print|display|reveal)\s+(?:api_key|token|secret|credential)", re.I
     ),
     re.compile(r"(?:report|mark)\s+payment\s+(?:as\s+)?(?:successful|verified|confirmed)", re.I),
+    re.compile(
+        r"(?:show|reveal|display|print|output)\s+(?:me\s+)?(?:the\s+)?system\s+prompt", re.I
+    ),
+    re.compile(r"(?:developer|admin|god|jailbreak)\s+mode", re.I),
     re.compile(r"<system>|\[INST\]|```system", re.I),
 ]
 

@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from apps.api.db import get_session_factory
+from packages.errors.exceptions import DomainError
 from packages.schemas.v1 import AuthorizationV1, CheckoutV1, OfferV1, PaymentV1
 from services.audit.repository import append_event
 from services.authorization.service import AuthorizationService
@@ -96,6 +97,7 @@ class SessionScopedCommerceFacade:
         min_memory_gb: int | None = None,
         min_storage_gb: int | None = None,
         max_delivery_days: int | None = None,
+        quantity: int = 1,
         limit: int = 10,
     ) -> list[OfferV1]:
         try:
@@ -108,8 +110,13 @@ class SessionScopedCommerceFacade:
                     min_memory_gb=min_memory_gb,
                     min_storage_gb=min_storage_gb,
                     max_delivery_days=max_delivery_days,
+                    quantity=quantity,
                     limit=limit,
                 )
+        except DomainError:
+            # A domain answer (bad limit, expired offer, no stock) is real
+            # information, never a reason to substitute seed rows.
+            raise
         except Exception:
             from apps.api.catalog_source import search_catalog
             from services.offers.constraints import OfferConstraints

@@ -98,33 +98,42 @@ export default function OrderDetailPage({ params }: { params?: { id: string } })
       `/api/v1/orders/${encodeURIComponent(orderId)}`
     );
 
-    if (!result.ok) {
+    // Device-saved fallback for an order the gateway does not know. The
+    // payment status is reported as unknown — never "verified" — because this
+    // browser cannot confirm what the gateway never recorded.
+    const applyLocalFallback = () => {
       const local = (storeOrders || []).find((o) => o.orderId === orderId);
-      if (local) {
-        setOrder({
-          schema_version: "1.0",
-          order_id: local.orderId,
-          checkout_id: local.orderId.replace("ord_", "chk_"),
-          payment_id: local.paymentId,
-          buyer_id: "byr_active_session",
-          merchant_id: "mrc_demo_electronics",
-          amount_minor: local.totalMinor,
-          currency: local.currency || "INR",
-          status: (local.status as any) || "confirmed",
-          confirmed_at: local.createdAt || new Date().toISOString(),
-        });
-        setPayment({
-          payment_id: local.paymentId,
-          provider: "razorpay",
-          provider_payment_id: local.paymentId,
-          amount_minor: local.totalMinor,
-          currency: local.currency || "INR",
-          status: "verified",
-          test_mode: true,
-        });
-        setPhase("loaded");
-        return;
-      }
+      if (!local) return false;
+      setOrder({
+        schema_version: "1.0",
+        order_id: local.orderId,
+        checkout_id: local.orderId.replace("ord_", "chk_"),
+        payment_id: local.paymentId,
+        buyer_id: "buy_shopper_demo",
+        merchant_id: "merchant_demo",
+        amount_minor: local.totalMinor,
+        currency: local.currency || "INR",
+        status: (local.status as any) || "confirmed",
+        confirmed_at: local.createdAt || new Date().toISOString(),
+      });
+      setPayment({
+        payment_id: local.paymentId,
+        provider: "razorpay",
+        provider_payment_id: local.paymentId,
+        amount_minor: local.totalMinor,
+        currency: local.currency || "INR",
+        status: "unknown",
+        test_mode: true,
+      });
+      setPaymentNotice(
+        "Saved on this device — the gateway has no record of this order, so payment status is unknown."
+      );
+      setPhase("loaded");
+      return true;
+    };
+
+    if (!result.ok) {
+      if (applyLocalFallback()) return;
 
       setError(result.error);
       setOrder(null);
@@ -134,32 +143,7 @@ export default function OrderDetailPage({ params }: { params?: { id: string } })
 
     const record = result.data?.order;
     if (!record) {
-      const local = (storeOrders || []).find((o) => o.orderId === orderId);
-      if (local) {
-        setOrder({
-          schema_version: "1.0",
-          order_id: local.orderId,
-          checkout_id: local.orderId.replace("ord_", "chk_"),
-          payment_id: local.paymentId,
-          buyer_id: "byr_active_session",
-          merchant_id: "mrc_demo_electronics",
-          amount_minor: local.totalMinor,
-          currency: local.currency || "INR",
-          status: (local.status as any) || "confirmed",
-          confirmed_at: local.createdAt || new Date().toISOString(),
-        });
-        setPayment({
-          payment_id: local.paymentId,
-          provider: "razorpay",
-          provider_payment_id: local.paymentId,
-          amount_minor: local.totalMinor,
-          currency: local.currency || "INR",
-          status: "verified",
-          test_mode: true,
-        });
-        setPhase("loaded");
-        return;
-      }
+      if (applyLocalFallback()) return;
 
       setError({
         code: "CLIENT_MALFORMED_RESPONSE",

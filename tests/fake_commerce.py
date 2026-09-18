@@ -159,6 +159,7 @@ class FakeCommerceFacade:
         min_memory_gb: int | None = None,
         min_storage_gb: int | None = None,
         max_delivery_days: int | None = None,
+        quantity: int = 1,
         limit: int = 10,
     ) -> list[OfferV1]:
         self._record(
@@ -169,6 +170,7 @@ class FakeCommerceFacade:
             min_memory_gb=min_memory_gb,
             min_storage_gb=min_storage_gb,
             max_delivery_days=max_delivery_days,
+            quantity=quantity,
             limit=limit,
         )
         return list(self.offers[:limit])

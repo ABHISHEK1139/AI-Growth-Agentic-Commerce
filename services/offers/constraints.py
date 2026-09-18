@@ -214,11 +214,10 @@ def offer_matches(
     if offer.available_quantity < constraints.quantity:
         return False
 
-    if constraints.category is not None:
-        target_cat = "computer_accessory" if constraints.category in ("accessory", "computer_accessory") else constraints.category
-        cand_cat = "computer_accessory" if candidate.category_id in ("accessory", "computer_accessory") else candidate.category_id
-        if cand_cat != target_cat:
-            return False
+    if constraints.category is not None and normalize_category(
+        candidate.category_id
+    ) != normalize_category(constraints.category):
+        return False
     if (
         constraints.max_price_minor is not None
         and offer.unit_price_minor > constraints.max_price_minor
@@ -242,6 +241,18 @@ def offer_matches(
             return False
 
     return True
+
+
+def normalize_category(category: str | None) -> str | None:
+    """One spelling for the accessory bucket, shared by every evaluator.
+
+    The catalog stores both "accessory" and "computer_accessory" for the same
+    bucket. Normalizing in exactly one place keeps the Python matcher, the
+    SQL predicates, and the equivalence-test predicates answering identically.
+    """
+    if category in ("accessory", "computer_accessory"):
+        return "computer_accessory"
+    return category
 
 
 def ranking_key(candidate: OfferCandidate) -> tuple[Any, ...]:
@@ -308,7 +319,12 @@ def sql_predicates(
     ]
 
     if constraints.category is not None:
-        clauses.append(product.category_id == constraints.category)
+        # Mirror the Python matcher exactly: the bucket has two spellings in
+        # storage, so match both rather than only the normalized form.
+        if normalize_category(constraints.category) == "computer_accessory":
+            clauses.append(product.category_id.in_(["accessory", "computer_accessory"]))
+        else:
+            clauses.append(product.category_id == constraints.category)
     if constraints.max_price_minor is not None:
         clauses.append(offer.unit_price_minor <= constraints.max_price_minor)
     if constraints.max_delivery_days is not None:
@@ -345,7 +361,8 @@ def sql_ordering(*, offer: Any, product: Any) -> Sequence[Any]:
 #: equivalence test, which needs to switch one filter on at a time and assert
 #: that doing so narrows the result set in both evaluators.
 FILTER_PREDICATES: dict[str, Callable[[OfferCandidate, OfferConstraints], bool]] = {
-    "category": lambda c, k: k.category is None or c.category_id == k.category,
+    "category": lambda c, k: k.category is None
+    or normalize_category(c.category_id) == normalize_category(k.category),
     "max_price_minor": lambda c, k: (
         k.max_price_minor is None or c.offer.unit_price_minor <= k.max_price_minor
     ),

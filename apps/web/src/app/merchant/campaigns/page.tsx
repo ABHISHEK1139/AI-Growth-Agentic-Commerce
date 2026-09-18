@@ -252,23 +252,27 @@ export default function MerchantCampaignsPage() {
               <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
                 <div className="text-xs text-slate-400 font-medium">Average sales lift</div>
                 <div className="text-2xl font-bold text-emerald-400 mt-1">
-                  {analytics ? `+${analytics.average_sales_lift_pct}%` : "+26.8%"}
+                  {analytics && analytics.measured !== false ? `+${analytics.average_sales_lift_pct}%` : "—"}
                 </div>
-                <div className="text-xs text-emerald-400 mt-1">Measured across active runs</div>
+                <div className="text-xs text-emerald-400 mt-1">
+                  {analytics && analytics.measured !== false ? "Measured across active runs" : "Unavailable — analytics unreachable"}
+                </div>
               </div>
               <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
                 <div className="text-xs text-slate-400 font-medium">Incremental revenue</div>
                 <div className="text-2xl font-bold text-white mt-1">
-                  {analytics ? (
+                  {analytics && analytics.measured !== false ? (
                     <Amount
                       minor={analytics.incremental_revenue_minor}
                       currency={analytics.currency}
                     />
                   ) : (
-                    "₹1,45,000"
+                    "—"
                   )}
                 </div>
-                <div className="text-xs text-slate-400 mt-1">Direct agent-driven lift</div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {analytics && analytics.measured !== false ? "Direct agent-driven lift" : "Unavailable — analytics unreachable"}
+                </div>
               </div>
             </div>
 

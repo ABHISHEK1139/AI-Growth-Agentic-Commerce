@@ -191,7 +191,7 @@ def test_write_jsonl_gz_creates_parent_dirs(tmp_path: Path) -> None:
 
 
 def test_generate_sample_data_creates_all_files(tmp_path: Path) -> None:
-    """generate_sample_data should create all 6 expected files."""
+    """generate_sample_data should create all expected files."""
     counts = generate_sample_data(tmp_path, records_per_file=10, reviews_per_file=15, seed=42)
 
     for filename in META_FILES:
@@ -200,7 +200,7 @@ def test_generate_sample_data_creates_all_files(tmp_path: Path) -> None:
         assert (tmp_path / filename).is_file(), f"Missing {filename}"
 
     # Check counts
-    assert len(counts) == 6
+    assert len(counts) == len(META_FILES) + len(REVIEW_FILES)
     for filename in META_FILES:
         assert counts[filename] == 10
     for filename in REVIEW_FILES:

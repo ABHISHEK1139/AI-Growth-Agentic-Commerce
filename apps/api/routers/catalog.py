@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from apps.api.auth import optional_principal
@@ -22,7 +23,7 @@ from services.offers.service import OfferService
 router = APIRouter(prefix="/api/v1", tags=["catalog"])
 
 
-def _get_optional_db():
+def _get_optional_db() -> Any:
     session = None
     try:
         from apps.api.db import get_session_factory
@@ -97,40 +98,50 @@ def get_product(
 
     if session is not None:
         try:
-            product = session.query(Product).filter(Product.product_id == product_id).first()
-            if product is not None:
-                images = (
-                    session.query(ProductImage)
-                    .filter(ProductImage.product_id == product_id)
-                    .order_by(ProductImage.position.asc())
-                    .all()
+            product = (
+                session.query(Product)
+                .filter(
+                    Product.product_id == product_id,
+                    Product.merchant_id == merchant_id,
                 )
-                return success(
-                    {
-                        "product": {
-                            "product_id": product.product_id,
-                            "external_product_id": product.external_product_id,
-                            "category_id": product.category_id,
-                            "title": product.title,
-                            "status": product.status,
-                            "description": product.description,
-                            "specifications": product.specifications,
-                            "average_rating": product.average_rating,
-                            "rating_number": product.rating_number,
-                            "images": [
-                                {
-                                    "source_url": img.source_url,
-                                    "storage_key": img.storage_key,
-                                    "resolution": img.resolution,
-                                    "position": img.position,
-                                }
-                                for img in images
-                            ],
-                        }
+                .first()
+            )
+        except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
+            # The datastore is unreachable: fall through to the seed catalog
+            # below. Anything else (including a found row) is handled
+            # explicitly so programming errors never masquerade as products.
+            product = None
+        if product is not None:
+            images = (
+                session.query(ProductImage)
+                .filter(ProductImage.product_id == product_id)
+                .order_by(ProductImage.position.asc())
+                .all()
+            )
+            return success(
+                {
+                    "product": {
+                        "product_id": product.product_id,
+                        "external_product_id": product.external_product_id,
+                        "category_id": product.category_id,
+                        "title": product.title,
+                        "status": product.status,
+                        "description": product.description,
+                        "specifications": product.specifications,
+                        "average_rating": product.average_rating,
+                        "rating_number": product.rating_number,
+                        "images": [
+                            {
+                                "source_url": img.source_url,
+                                "storage_key": img.storage_key,
+                                "resolution": img.resolution,
+                                "position": img.position,
+                            }
+                            for img in images
+                        ],
                     }
-                )
-        except Exception:
-            pass
+                }
+            )
 
     # Fallback to seed catalog
     candidates = load_seed_candidates(merchant_id)
@@ -178,8 +189,10 @@ def get_offer(
             service = OfferService()
             offer = service.get_offer_by_id(session, merchant_id=merchant_id, offer_id=offer_id)
             return success({"offer": offer.model_dump(mode="json")})
-        except Exception:
-            pass
+        except DomainError:
+            raise
+        except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
+            pass  # Datastore unreachable: fall through to the seed lookup below.
 
     # Seed fallback
     candidates = load_seed_candidates(merchant_id)
@@ -212,8 +225,8 @@ def validate_offer(
             return success({"offer": offer.model_dump(mode="json"), "valid": True})
         except DomainError:
             raise  # PRICE_CHANGED, OFFER_EXPIRED, INVENTORY_UNAVAILABLE must reach the caller
-        except Exception:
-            pass  # Non-domain DB errors fall through to seed lookup
+        except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
+            pass  # Datastore unreachable: fall through to the seed lookup below.
 
     candidates = load_seed_candidates(merchant_id)
     for c in candidates:

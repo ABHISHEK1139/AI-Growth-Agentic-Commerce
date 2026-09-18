@@ -330,7 +330,7 @@ def downgrade() -> None:
     _execute(
         (
             "DROP TRIGGER IF EXISTS audit_event_append_only ON audit_event",
-            "DROP FUNCTION IF EXISTS reject_audit_event_mutation",
+            "DROP FUNCTION IF EXISTS reject_audit_event_mutation()",
             "DROP TABLE IF EXISTS audit_event",
             "DROP TABLE IF EXISTS idempotency_record",
             "DROP TABLE IF EXISTS evidence",

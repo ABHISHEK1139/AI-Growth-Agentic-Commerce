@@ -201,9 +201,28 @@ def test_inventory_audit_events_preserve_merchant_id(monkeypatch):
     reservation = Reservation(reservation_id="rsv_1", offer_id="offer_1", quantity=2, status="held")
     monkeypatch.setattr("services.inventory.service.get_reservation", lambda s, c: reservation)
     monkeypatch.setattr("services.inventory.service.release", lambda s, r: True)
+    # The tenant guard re-reads the checkout row: stage one in the same tenant.
+    mock_chk = MagicMock()
+    mock_chk.merchant_id = "mrc_demo"
+    session.query.return_value.filter.return_value.first.return_value = mock_chk
 
     service.release_stock(session, "checkout_1", merchant_id="mrc_demo")
     call_args_rel = session.execute.call_args
     params_rel = call_args_rel[0][1] if len(call_args_rel[0]) > 1 else call_args_rel[1]
     assert params_rel["merchant_id"] == "mrc_demo"
     assert params_rel["event_type"] == "INVENTORY_CHANGE_DETECTED"
+
+
+def test_release_stock_refuses_foreign_tenant_checkout(monkeypatch):
+    """Releasing a hold bound to another tenant's checkout is FORBIDDEN, not a silent cross-tenant write."""
+    session = MagicMock()
+    reservation = Reservation(reservation_id="rsv_1", offer_id="offer_1", quantity=2, status="held")
+    monkeypatch.setattr("services.inventory.service.get_reservation", lambda s, c: reservation)
+    foreign_chk = MagicMock()
+    foreign_chk.merchant_id = "merchant_victim"
+    session.query.return_value.filter.return_value.first.return_value = foreign_chk
+
+    service = InventoryService()
+    with pytest.raises(DomainError) as exc_info:
+        service.release_stock(session, "checkout_1", merchant_id="merchant_attacker")
+    assert exc_info.value.code == ErrorCode.FORBIDDEN

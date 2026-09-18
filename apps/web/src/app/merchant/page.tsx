@@ -162,6 +162,15 @@ export default function MerchantConsolePage() {
   }, [load]);
 
   const totals: LedgerTotals = ledgerTotals(events);
+  // Measured metrics only: the metrics payload carries measured:false when
+  // the backend (or shim) has no order history, and legacy key spellings
+  // from older payloads are still honoured.
+  const measuredMetrics =
+    crossSellMetrics && crossSellMetrics.measured !== false ? crossSellMetrics : null;
+  const measuredAttachRate =
+    measuredMetrics?.cross_sell_attachment_rate_pct ?? measuredMetrics?.attach_rate_pct ?? null;
+  const measuredAovGrowth =
+    measuredMetrics?.aov_growth_pct ?? null;
   const atLimit = events.length >= LEDGER_WINDOW;
   const stream = events.slice(Math.max(events.length - STREAM_ROWS, 0)).reverse();
   const postgres = datastores?.data?.postgres;
@@ -346,10 +355,12 @@ export default function MerchantConsolePage() {
                     AI Cross-Sell Attach Rate
                   </span>
                   <span className="text-2xl font-black text-[#174c3c]">
-                    {crossSellMetrics ? `${crossSellMetrics.attach_rate_pct}%` : "0.0%"}
+                    {measuredAttachRate !== null ? `${measuredAttachRate}%` : "—"}
                   </span>
                   <span className="text-[11px] text-slate-400 block">
-                    {crossSellMetrics ? `AOV Growth: +${crossSellMetrics.aov_growth_pct}%` : "Measured from basket orders"}
+                    {measuredAttachRate !== null
+                      ? `AOV Growth: +${measuredAovGrowth}%`
+                      : "Unavailable — no measured order history"}
                   </span>
                 </div>
                 <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80">
@@ -357,10 +368,12 @@ export default function MerchantConsolePage() {
                     Catalog Query Volume
                   </span>
                   <span className="text-2xl font-black text-[#174c3c]">
-                    3,840
+                    {totals.checkoutsCreated + totals.ordersConfirmed > 0
+                      ? (totals.checkoutsCreated + totals.ordersConfirmed).toLocaleString("en-IN")
+                      : "—"}
                   </span>
                   <span className="text-[11px] text-slate-400 block">
-                    ACP &amp; UAP semantic discovery queries
+                    Ledger-recorded commerce events this store
                   </span>
                 </div>
               </div>

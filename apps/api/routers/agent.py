@@ -59,6 +59,8 @@ TOOL_REQUIRED_SCOPES: dict[str, Scope] = {
     "check_inventory": Scope.CATALOG_READ,
     "get_delivery_options": Scope.CATALOG_READ,
     "get_return_policy": Scope.CATALOG_READ,
+    "get_payment_status": Scope.PAYMENT_WRITE,
+    "get_order": Scope.CHECKOUT_WRITE,
 }
 
 
@@ -73,7 +75,7 @@ class AgentSearchRequest(BaseModel):
 
 class AgentCheckoutRequest(BaseModel):
     offer_id: str
-    quantity: int = Field(default=1, ge=1)
+    quantity: int = Field(default=1, ge=1, le=10)
     ttl_minutes: int = Field(default=15, ge=1, le=1440)
 
 
@@ -88,7 +90,7 @@ class AgentPaymentRequest(BaseModel):
 
 
 class AgentConverseRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=10000)
     limit: int = Field(default=5, ge=1, le=20)
 
 
@@ -129,7 +131,18 @@ def agent_execute_tool(
 ) -> dict[str, Any]:
     """Execute a validated, allowlisted tool through the bounded agent loop."""
     required_scope = TOOL_REQUIRED_SCOPES.get(request.tool_name)
-    if required_scope and not principal.has_scope(required_scope):
+    # Default-deny: a tool with no mapped scope must not run on any
+    # credential. An allowlist that fails open on unknown names lets a new
+    # tool bypass scope enforcement until someone remembers the map.
+    if required_scope is None:
+        raise ForbiddenError(
+            f"The requested tool '{request.tool_name}' is not available.",
+            details={
+                "reason": "unknown_tool",
+                "tool_name": request.tool_name,
+            },
+        )
+    if not principal.has_scope(required_scope):
         raise ForbiddenError(
             f"Principal lacks required scope '{required_scope.value}' to execute tool '{request.tool_name}'.",
             details={
@@ -293,7 +306,9 @@ def agent_payment(
     principal: PaymentAgent,
     session: DatabaseSession,
     settings: AppSettings,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: Annotated[str | None, Field(max_length=128)] = Header(
+        default=None, alias="Idempotency-Key"
+    ),
 ) -> dict[str, Any]:
     """Agent surface for initiating payment.
 

@@ -50,6 +50,25 @@ def _resolve_merchant_id(
     return None
 
 
+def _assert_checkout_tenant(session: Session, *, checkout_id: str, merchant_id: str | None) -> None:
+    """Refuse to touch a reservation bound to another tenant's checkout.
+
+    Reservations carry no merchant of their own, so without this check any
+    caller holding a checkout identifier — including one from another tenant —
+    could release or commit its hold and corrupt that tenant's counters.
+    """
+    if merchant_id is None:
+        return
+    from services.checkout.models import Checkout
+
+    chk = session.query(Checkout).filter(Checkout.checkout_id == checkout_id).first()
+    if chk is not None and chk.merchant_id != merchant_id:
+        raise DomainError(
+            "You do not have access to this resource.",
+            code=ErrorCode.FORBIDDEN,
+        )
+
+
 class InventoryService:
     """Coordinates inventory reservation lifecycle."""
 
@@ -118,6 +137,7 @@ class InventoryService:
         merchant_id: str | None = None,
     ) -> None:
         """Release reserved inventory. Idempotent."""
+        _assert_checkout_tenant(session, checkout_id=checkout_id, merchant_id=merchant_id)
         reservation = get_reservation(session, checkout_id)
         if not reservation or reservation.status != "held":
             return
@@ -153,6 +173,7 @@ class InventoryService:
         merchant_id: str | None = None,
     ) -> None:
         """Commit reserved inventory after payment (Requirement 10.7, BUG-39)."""
+        _assert_checkout_tenant(session, checkout_id=checkout_id, merchant_id=merchant_id)
         reservation = get_reservation(session, checkout_id)
         if not reservation:
             raise DomainError(

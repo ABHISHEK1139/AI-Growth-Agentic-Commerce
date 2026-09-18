@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
-  Star,
   Truck,
   Undo2,
   Users,
@@ -90,10 +89,10 @@ export default function ConsumerHomePage() {
           );
 
           if (liveItems.length > 0) {
-            const merged = [
-              ...ALL_PRODUCTS,
-              ...liveItems.filter((li) => !ALL_PRODUCTS.some((ap) => ap.id === li.id)),
-            ];
+            const fresh = liveItems.filter((li) => !ALL_PRODUCTS.some((ap) => ap.id === li.id));
+            // Live catalog leads: static entries backfill rather than bury
+            // the live rows a buyer can actually purchase.
+            const merged = [...fresh, ...ALL_PRODUCTS];
             setAllItems(merged);
             setPicks(merged.slice(0, 8));
             const liveDeals = merged.filter(
@@ -213,7 +212,8 @@ export default function ConsumerHomePage() {
                 &ldquo;I need a lightweight laptop for coding, under ₹75,000.&rdquo;
               </div>
               <div className="mt-3 rounded-2xl border border-[#e6e8df] p-4">
-                <p className="text-xs font-bold text-[#174c3c]">I found 8 good matches</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#8a938e]">Example exchange</p>
+                <p className="text-xs font-bold text-[#174c3c] mt-1">I found 8 good matches</p>
                 <p className="mt-1 text-xs leading-5 text-[#68736d]">
                   I will prioritise 16GB RAM, portability and reliable battery life.
                 </p>
@@ -234,23 +234,18 @@ export default function ConsumerHomePage() {
         <section className="flex flex-wrap items-center justify-center gap-6 rounded-2xl bg-white/60 px-6 py-4 shadow-sm backdrop-blur-sm border border-[#e6e8df] sm:gap-10">
           <div className="flex items-center gap-2 text-sm">
             <Users className="h-4 w-4 text-[#174c3c]" />
-            <span className="font-bold text-[#17231e]">10,000+</span>
-            <span className="text-[#68736d]">happy customers</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <Star className="h-4 w-4 fill-[#e8a33e] text-[#e8a33e]" />
-            <span className="font-bold text-[#17231e]">4.8/5</span>
-            <span className="text-[#68736d]">average rating</span>
+            <span className="font-bold text-[#17231e]">Demo storefront</span>
+            <span className="text-[#68736d]">illustrative figures</span>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <ShieldCheck className="h-4 w-4 text-[#174c3c]" />
-            <span className="font-bold text-[#17231e]">100%</span>
-            <span className="text-[#68736d]">secure payments</span>
+            <span className="font-bold text-[#17231e]">HMAC-verified</span>
+            <span className="text-[#68736d]">payments</span>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Truck className="h-4 w-4 text-[#174c3c]" />
-            <span className="font-bold text-[#17231e]">2-day</span>
-            <span className="text-[#68736d]">express delivery</span>
+            <span className="font-bold text-[#17231e]">Per-offer</span>
+            <span className="text-[#68736d]">delivery estimates</span>
           </div>
         </section>
       </ScrollReveal>
@@ -330,7 +325,7 @@ export default function ConsumerHomePage() {
             <div>
               <p className="text-xs font-bold uppercase tracking-[.15em] text-[#174c3c]">Picked with care</p>
               <h2 className="mt-2 text-2xl font-extrabold tracking-tight sm:text-3xl">Popular right now</h2>
-              <p className="mt-1 text-sm text-[#68736d]">Curated electronics, guaranteed 2-day delivery, verified prices.</p>
+              <p className="mt-1 text-sm text-[#68736d]">Curated electronics with per-offer delivery estimates and live prices.</p>
             </div>
             <Link
               href="/search"

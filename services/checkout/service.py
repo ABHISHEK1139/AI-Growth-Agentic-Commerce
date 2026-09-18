@@ -241,7 +241,19 @@ class CheckoutService:
         """Explicitly cancel a checkout and release its inventory hold."""
         scope = TenantScope(merchant_id=merchant_id, buyer_id=buyer_id)
         repo = CheckoutRepository(session, scope)
-        checkout = repo.get_by_id(checkout_id)
+        scoped = repo.get_by_id(checkout_id)
+        if scoped is None:
+            raise DomainError("The requested checkout does not exist.", code=ErrorCode.NOT_FOUND)
+
+        # Re-read under a row lock: without it a concurrent verify_payment can
+        # commit the hold between our read and our release, and the release
+        # below would then free stock backing a confirmed order.
+        checkout = (
+            session.query(Checkout)
+            .filter(Checkout.checkout_id == checkout_id)
+            .with_for_update()
+            .first()
+        )
         if checkout is None:
             raise DomainError("The requested checkout does not exist.", code=ErrorCode.NOT_FOUND)
 
@@ -251,18 +263,20 @@ class CheckoutService:
             )
             return _checkout_to_schema(checkout, item.quantity if item else 1)
 
-        # Release inventory hold
-        self._inventory_service.release_stock(
-            session, checkout_id=checkout_id, merchant_id=merchant_id
-        )
-
-        # Transition checkout to cancelled via state transition engine
+        # Transition first, release second: if the transition is illegal (the
+        # checkout completed concurrently) the hold is left untouched.
         transition(
             CheckoutAggregate(checkout),
             TransitionEvent.CANCEL_CHECKOUT,
             TransitionContext(actor_type="buyer", actor_id=buyer_id, merchant_id=merchant_id),
             session,
         )
+
+        # Release inventory hold
+        self._inventory_service.release_stock(
+            session, checkout_id=checkout_id, merchant_id=merchant_id
+        )
+
         session.flush()
 
         item = session.query(CheckoutItem).filter(CheckoutItem.checkout_id == checkout_id).first()

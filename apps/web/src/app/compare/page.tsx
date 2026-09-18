@@ -12,6 +12,7 @@ import {
   getCatalogProduct,
   isCredentialGap,
   lookupOfferInCatalog,
+  searchCatalogOffers,
 } from "@/catalog/client";
 import { ALL_PRODUCTS } from "@/data/products";
 import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
@@ -223,22 +224,27 @@ function CompareContent() {
   useEffect(() => {
     if (comparedCount === 0 || !primaryCategory) return;
 
-    fetch("/api/v1/catalog/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: primaryCategory, limit: 12 }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        const offers = data?.data?.offers || [];
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await searchCatalogOffers({ category: primaryCategory, limit: 12 });
+        if (cancelled) return;
+        if (!res.ok) return;
+        const offers = res.data?.offers || [];
         const currentOfferIds = new Set(compared.map((c) => c.offer.offer_id));
         const currentProductIds = new Set(compared.map((c) => c.offer.product_id));
         const available = offers.filter(
           (o: any) => !currentOfferIds.has(o.offer_id) && !currentProductIds.has(o.product_id)
         );
         setCategorySuggestions(available.slice(0, 6));
-      })
-      .catch(() => {});
+      } catch {
+        // No suggestions without a live catalog read.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [compared, comparedCount, primaryCategory]);
 
   const addCandidate = (prodId: string) => {
@@ -267,9 +273,13 @@ function CompareContent() {
     }
   };
 
+  // Preserve the incoming identifier style: a ?products= link shared onward
+  // stays a ?products= link, so recipients resolve the same way we did.
   const shareHref =
     compared.length > 0
-      ? `/compare?offers=${encodeURIComponent(compared.map((entry) => entry.offer.offer_id).join(","))}`
+      ? productIdsFromUrl.length > 0 || offerIds.length === 0
+        ? `/compare?products=${encodeURIComponent(compared.map((entry) => entry.offer.product_id).join(","))}`
+        : `/compare?offers=${encodeURIComponent(compared.map((entry) => entry.offer.offer_id).join(","))}`
       : "/compare";
 
   const specValue = (offer: ExploreOffer, key: string): string => {

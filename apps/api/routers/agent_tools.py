@@ -201,7 +201,7 @@ TOOL_CATALOGUE: tuple[Tool, ...] = (
     Tool(
         name="get_order",
         description="Fetch an order by id. Returns the order line items and current state.",
-        scope="payment:write",
+        scope="checkout:write",
         http_method="GET",
         http_path="/api/v1/agent/orders/{order_id}",
         idempotent=True,

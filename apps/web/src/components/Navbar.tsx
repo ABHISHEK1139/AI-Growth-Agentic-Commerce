@@ -12,7 +12,6 @@ const links = [
   ["Audio", "/category/audio"],
   ["Monitors", "/category/monitors"],
   ["Keyboards & Tech", "/category/keyboards"],
-  ["Deals", "/search?deals=true"],
 ] as const;
 
 const trendingSearches = [
@@ -243,9 +242,7 @@ export function Navbar() {
             <Link
               key={label}
               href={href}
-              className={`relative transition-all duration-200 hover:text-[#174c3c] ${
-                label === "Deals" ? "font-semibold text-[#c65027]" : ""
-              }`}
+              className="relative transition-all duration-200 hover:text-[#174c3c]"
             >
               {label}
             </Link>

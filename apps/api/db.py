@@ -81,8 +81,9 @@ def get_engine() -> Engine:
                 conn.execute(text("SELECT 1"))
             test_engine.dispose()
         except Exception:
-            from pathlib import Path
             import logging
+            from pathlib import Path
+
             logging.getLogger("apps.api.db").info(
                 "PostgreSQL unreachable at %s; operating with local SQLite datastore", db_url
             )
@@ -104,7 +105,8 @@ def get_engine() -> Engine:
     if is_sqlite:
         engine = _install_sqlite_compat(engine)
         with engine.connect() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS audit_event (
                     event_id TEXT PRIMARY KEY,
                     merchant_id TEXT,
@@ -125,7 +127,8 @@ def get_engine() -> Engine:
                     metadata TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """))
+            """)
+            )
             conn.commit()
     return engine
 

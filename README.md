@@ -5,8 +5,46 @@
 [![Build](https://img.shields.io/badge/Next.js-14%20(App%20Router)-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Razorpay](https://img.shields.io/badge/Razorpay-Standard%20Checkout%20%26%20Links-0C2340?style=for-the-badge&logo=razorpay)](https://razorpay.com)
-[![Tests](https://img.shields.io/badge/Tests-350%2B%20Passing%20(100%25)-success?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Tests-2229%20Passing%20(100%25)-success?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Ruff](https://img.shields.io/badge/Ruff-clean-46A758?style=for-the-badge)](https://docs.astral.sh/ruff)
+[![mypy](https://img.shields.io/badge/mypy-strict-2A6DB5?style=for-the-badge)](https://mypy-lang.org)
+[![TypeScript](https://img.shields.io/badge/tsc-strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org)
 [![Protocol](https://img.shields.io/badge/Protocol-NPCI%20UAP%20%2F%20ACP%20%2F%20AP2%20Ready-orange?style=for-the-badge)](#)
+
+---
+
+## 📸 Product Tour (real screenshots, local dev server)
+
+| Shopper storefront | AI search | Product page |
+|---|---|---|
+| ![AgentPay storefront home](docs/images/01-home.png) | ![AI-powered catalog search](docs/images/02-search.png) | ![Product detail with live offer](docs/images/03-product.png) |
+
+| Bag & gated checkout | Merchant console | Agent playground |
+|---|---|---|
+| ![Cart](docs/images/04-cart.png) | ![Checkout with policy gate](docs/images/05-checkout.png) | ![Merchant operations console](docs/images/06-merchant.png) |
+
+<p align="center">
+  <img src="docs/images/07-agent-playground.png" alt="External agent playground" width="49%" />
+  <img src="docs/images/08-scenarios.png" alt="Failure-injection scenarios console" width="49%" />
+</p>
+
+---
+
+## 🗺️ How a payment flows
+
+```mermaid
+flowchart LR
+    A[AI buyer / shopper] --> B[FastAPI gateway<br/>auth + scopes + tenancy]
+    B --> C[Catalog & offers<br/>live DB, seed fallback]
+    C --> D[Checkout<br/>price freeze + inventory hold]
+    D --> E[Policy engine<br/>ceilings + approval gate]
+    E --> F[Authorization<br/>human mandate, TTL]
+    F --> G[Payment<br/>idempotent, mandate revalidated]
+    G --> H[Razorpay<br/>HMAC webhooks]
+    H --> I[Order + audit ledger<br/>append-only]
+    B -.-> J[Merchant console<br/>policy, audit, campaigns]
+    B -.-> K[AI playground<br/>capability discovery]
+```
 
 ---
 
@@ -189,7 +227,7 @@ The result is a platform designed around two complementary directions:
 
 ## 🧪 Reliability & Testing
 
-AgentPay includes a comprehensive automated test suite with **350+ tests**, covering:
+AgentPay includes a comprehensive automated test suite with **2229 tests (100% passing)**, covering:
 
 * Agentic commerce integration scenarios
 * Concurrency and inventory races
@@ -405,7 +443,18 @@ The autonomous agent will:
 
 ---
 
-## 🧪 Comprehensive Test Suite (350+ Tests)
+## 🧪 Comprehensive Test Suite (2229 Tests, 100% Passing)
+
+Quality gates (also wired as `make check` / `make check-all`):
+
+```bash
+make lint          # ruff check + ruff format --check + mypy (strict) + lint-imports
+make test          # unit suite
+make test-contract # external-buyer contract suite
+make test-security # adversarial + boundary suites
+make test-e2e      # Tier 1-4 requirement-driven suites
+cd apps/web && npm run lint && npx tsc --noEmit && npm run build
+```
 
 ```bash
 # 1. Run Track 01 20-Scenario Integration Suite
@@ -421,8 +470,18 @@ pytest tests/security/test_adversarial_empirical_challenge.py -v
 pytest tests/security/test_financial_boundary_security.py -v
 
 # 5. Run Next.js Production Build Verification
-cd apps/web && npm run test:e2e && npm run build
+cd apps/web && npm run build
 ```
+
+## 🛡️ Hardening notes
+
+Every money-moving path fails closed and is covered by tests:
+
+- **Verify-before-record** — payment callbacks are HMAC-checked *and* re-fetched from the provider (exact amount/currency/capture) before anything is confirmed; unknown payments 404 instead of minting phantom orders.
+- **Terminal-state discipline** — expired/cancelled/policy-rejected checkouts are refused before the payment transition; order confirmation is idempotent per `(checkout, payment)`.
+- **Tenant isolation** — scoped repositories, mandatory authorization/policy tenancy, cross-tenant inventory guards, buyer-owned reads answered as not-found.
+- **Scope enforcement** — agent tools default-deny unknown names; money routes require `checkout:write`/`payment:write`; bearer lifetimes capped at 24h.
+- **Honest UI** — no invented prices, reviews, ratings, or metrics anywhere: fallbacks are labelled (cached/unavailable/measured:false) or absent.
 
 ---
 
@@ -447,7 +506,7 @@ cd apps/web && npm run test:e2e && npm run build
 │   ├── recommendations/ # Catalog-verified cross-sell recommendation engine
 │   ├── inventory/       # Atomic stock reservations & release on cancellation
 │   └── audit/           # Append-only immutable audit ledger
-└── tests/               # 350+ automated tests (chaos, security, contract, unit)
+└── tests/               # 2229 automated tests (chaos, security, contract, unit, e2e)
 ```
 
 ---

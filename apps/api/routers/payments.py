@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from apps.api.auth import (
     AppSettings,
-    optional_principal,
     require_scopes,
     settings_for,
 )
@@ -28,8 +27,8 @@ PaymentPrincipal = Annotated[Principal, Depends(require_scopes(Scope.PAYMENT_WRI
 
 
 class CreatePaymentRequest(BaseModel):
-    checkout_id: str
-    authorization_id: str
+    checkout_id: str = Field(min_length=1, max_length=128)
+    authorization_id: str = Field(min_length=1, max_length=128)
 
 
 @router.post("/payments")
@@ -38,7 +37,9 @@ def create_payment(
     principal: PaymentPrincipal,
     session: DatabaseSession,
     settings: AppSettings,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: Annotated[str | None, Field(max_length=128)] = Header(
+        default=None, alias="Idempotency-Key"
+    ),
 ) -> dict[str, Any]:
     """Initiate a payment following the 12-step sequence.
 
@@ -68,27 +69,30 @@ def create_payment(
 def get_payment(
     payment_id: str,
     session: DatabaseSession,
-    principal: Principal | None = Depends(optional_principal),
+    principal: PaymentPrincipal,
 ) -> dict[str, Any]:
-    """Fetch payment attempt details."""
-    merchant_id = (principal.merchant_id if principal else None) or "merchant_demo"
+    """Fetch payment attempt details.
+
+    Scoped to the caller's tenant: a payment identifier from another merchant
+    is answered NOT_FOUND, identical to an identifier that never existed.
+    """
+    if principal.buyer_id is None:
+        raise DomainError("Buyer ID required for payment lookup", code=ErrorCode.FORBIDDEN)
     service = PaymentService()
-    try:
-        payment = service.get_payment_by_id(session, payment_id=payment_id, merchant_id=merchant_id)
-        return success({"payment": payment.model_dump(mode="json")})
-    except DomainError:
-        raise
-    except Exception as exc:
-        raise DomainError(
-            f"Payment {payment_id} not found",
-            code=ErrorCode.NOT_FOUND,
-        ) from exc
+    payment = service.get_payment_by_id(
+        session,
+        payment_id=payment_id,
+        merchant_id=principal.merchant_id,
+        buyer_id=principal.buyer_id,
+    )
+    return success({"payment": payment.model_dump(mode="json")})
 
 
 class RefundRequest(BaseModel):
     payment_id: str
     amount_minor: int | None = Field(
         default=None,
+        ge=0,
         description="Partial refund amount in minor units. Omit to refund the full payment.",
     )
     reason: str = Field(default="Customer requested refund")
@@ -109,18 +113,24 @@ def refund_payment(
     principal: PaymentPrincipal,
     settings: AppSettings,
 ) -> dict[str, Any]:
-    """Issue a full or partial refund for a confirmed payment.
+    """Issue a full or partial refund for a verified payment.
 
     The refund is processed by the configured payment provider. Partial refunds
     are supported by passing ``amount_minor``; omit it to refund the full original
     charge.
     """
+    if request.payment_id != payment_id:
+        raise DomainError(
+            "The payment ID in the path and the request body do not match.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
     service = PaymentService(provider_config=settings.payment_provider_config())
     result = service.refund_payment(
         session,
         payment_id=payment_id,
         amount_minor=request.amount_minor,
         reason=request.reason,
+        merchant_id=principal.merchant_id,
     )
     return success({"refund": RefundResponse(**result).model_dump()})
 

@@ -30,7 +30,8 @@ if [[ ! -f "${RESTORE_FILE}" ]]; then
     exit 1
 fi
 
-echo "Restoring ${RESTORE_FILE} into ${DATABASE_URL}"
+REDACTED_URL="$(printf '%s' "${DATABASE_URL}" | sed -E 's|://([^:/?#]+):[^@/?#]+@|://\1:***@|')"
+echo "Restoring ${RESTORE_FILE} into ${REDACTED_URL}"
 gunzip -c "${RESTORE_FILE}" | psql \
     --single-transaction \
     --set ON_ERROR_STOP=on \

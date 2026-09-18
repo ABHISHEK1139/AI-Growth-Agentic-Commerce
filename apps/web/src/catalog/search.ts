@@ -116,9 +116,10 @@ export async function runCatalogSearch(filters: CatalogFilters): Promise<Catalog
           count: typeof result.data.count === "number" ? result.data.count : offers.length,
           answeredBy: "deterministic",
           appliedFilters: statedFilters(filters),
-          // A success here means the query ran against the published catalog: this
-          // endpoint has no offline fallback, it uses the request's own session.
-          catalogSource: "postgresql",
+          // The deterministic endpoint reports no source marker, and it can
+          // serve seed rows when the datastore is unreachable — so null
+          // (no provenance claim) rather than a hardcoded "postgresql".
+          catalogSource: null,
           warnings: result.warnings.map((warning) => warning.message),
           intent: null,
           productJoinFailures: joined.filter((entry) => entry.failed).length,

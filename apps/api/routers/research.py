@@ -17,7 +17,9 @@ router = APIRouter(prefix="/api/v1/research", tags=["research-qa"])
 
 class ProductQuestionRequest(BaseModel):
     product_id: str = Field(..., description="ID of product being queried")
-    question: str = Field(..., description="User's technical or factual question")
+    question: str = Field(
+        ..., min_length=1, max_length=10000, description="User's technical or factual question"
+    )
     product_title: str | None = Field(default=None, description="Title/model of the product")
     catalog_specs: dict[str, Any] | None = Field(
         default=None, description="Known catalog specifications"
@@ -56,6 +58,7 @@ def ask_product_question(
         force_refresh=request.force_refresh,
         search_provider_name=settings.search_provider,
         searxng_base_url=settings.searxng_base_url,
+        merchant_id=principal.merchant_id,
     )
 
     with contextlib.suppress(Exception):

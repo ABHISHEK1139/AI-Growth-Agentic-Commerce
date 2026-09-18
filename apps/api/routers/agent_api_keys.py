@@ -25,20 +25,25 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.api.auth import AppSettings, require_roles, settings_for
+from apps.api.auth import AppSettings, registry_for, require_roles, settings_for
 from apps.api.envelope import success
 from apps.api.routers.capability import build_capability_document
+from packages.observability.context import new_id
+from packages.observability.logging import get_logger
 from packages.security.apikeys import (
-    ApiClient,
-    ApiClientRegistry,
-    generate_api_key,
     hash_api_key,
 )
 from packages.security.principals import Principal, Role, Scope
-from services.catalog.models import ApiClientRecord
+
+try:
+    from services.catalog.models import ApiClientRecord  # type: ignore[attr-defined]
+except Exception:  # table does not exist yet; DB persistence is best-effort
+    ApiClientRecord = None
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/agent/keys", tags=["agent-keys"])
 
@@ -159,59 +164,58 @@ def register_agent_key(
     body: RegisterKeyRequest,
     principal: MerchantAdminPrincipal,
     settings: AppSettings,
+    request: Request,
 ) -> dict[str, Any]:
     """Register a new external agent API key for this merchant.
 
     The plaintext key is returned once in the response. Store it in the
     agent's configuration; the gateway cannot retrieve it later.
     """
-    registry: ApiClientRegistry = ApiClientRegistry()
-    # The in-memory registry is the process singleton in tests; the on-disk
-    # ``ApiClientRecord`` table is the durable copy. Both are written here so
-    # that an issuance survives a process restart.
-    plaintext = generate_api_key()
-    digest = hash_api_key(plaintext)
+    # The shared application registry — the same object the token-exchange
+    # endpoint resolves keys against. A throwaway registry here would issue
+    # keys that can never authenticate.
+    registry = registry_for(request)
     narrowed = _narrow_scopes(body.requested_scopes)
-    key_id = f"akc_{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
+    # Unpredictable identifiers: timestamp names are enumerable and can
+    # collide within one microsecond.
+    key_id = new_id("akc")
+    buyer_id = f"buyer_{key_id}"
 
-    client = ApiClient(
-        client_id=key_id,
-        key_digest=digest,
-        role=Role.BUYER_AGENT,
-        scopes=frozenset(narrowed),
+    plaintext, _client = registry.issue(
         merchant_id=principal.merchant_id,
+        role=Role.BUYER,
+        buyer_id=buyer_id,
+        scopes=narrowed,
         label=body.label,
+        client_id=key_id,
     )
-    registry.add(client)
+    digest = hash_api_key(plaintext)
 
     # Persist a non-sensitive record for the audit trail. Plaintext is *not*
     # stored — the digest is sufficient to identify the key in logs and
     # support tickets without making a database dump exploitable.
-    try:
-        from apps.api.db import get_session_factory
+    if ApiClientRecord is not None:
+        try:
+            from apps.api.db import get_session_factory
 
-        factory = get_session_factory()
-        with factory() as session:
-            record = ApiClientRecord(
-                client_id=key_id,
-                merchant_id=principal.merchant_id,
-                key_digest=digest,
-                label=body.label,
-                scopes=[s.value for s in narrowed],
-                intended_use=body.intended_use,
-                issued_by=principal.subject,
-                issued_at=datetime.now(UTC),
-                revoked_at=None,
-            )
-            session.add(record)
-            session.commit()
-    except Exception:
-        # Issuance must not fail just because the audit log write failed —
-        # but the operator needs to know. The on-disk record is best-effort;
-        # the in-memory registry is the authoritative source for token
-        # exchange. A failed write surfaces as a 500 from this endpoint
-        # only if both layers are unavailable.
-        pass
+            factory = get_session_factory()
+            with factory() as session:
+                record = ApiClientRecord(
+                    client_id=key_id,
+                    merchant_id=principal.merchant_id,
+                    key_digest=digest,
+                    label=body.label,
+                    scopes=[s.value for s in narrowed],
+                    intended_use=body.intended_use,
+                    issued_by=principal.subject,
+                    issued_at=datetime.now(UTC),
+                    revoked_at=None,
+                )
+                session.add(record)
+                session.commit()
+        except Exception as exc:
+            # Issuance must not fail just because the audit log write failed.
+            logger.warning("agent key audit write failed", extra={"error": str(exc)})
 
     response = IssuedKeyResponse(
         key_id=key_id,
@@ -232,6 +236,7 @@ def register_agent_key(
 )
 def list_agent_keys(
     principal: MerchantAdminPrincipal,
+    request: Request,
 ) -> dict[str, Any]:
     """Return non-sensitive summaries of every active and revoked key.
 
@@ -240,44 +245,47 @@ def list_agent_keys(
     is a documentation problem, not a credential leak.
     """
     summaries: list[KeySummary] = []
-    try:
-        from apps.api.db import get_session_factory
+    if ApiClientRecord is not None:
+        try:
+            from apps.api.db import get_session_factory
 
-        factory = get_session_factory()
-        with factory() as session:
-            records = (
-                session.query(ApiClientRecord)
-                .filter(ApiClientRecord.merchant_id == principal.merchant_id)
-                .order_by(ApiClientRecord.issued_at.desc())
-                .all()
-            )
-            for r in records:
-                summaries.append(
-                    KeySummary(
-                        key_id=r.client_id,
-                        label=r.label,
-                        scopes=list(r.scopes or []),
-                        issued_at=r.issued_at.isoformat() if r.issued_at else "",
-                        issued_by=r.issued_by,
-                        intended_use=r.intended_use or "",
-                        revoked_at=r.revoked_at.isoformat() if r.revoked_at else None,
+            factory = get_session_factory()
+            with factory() as session:
+                records = (
+                    session.query(ApiClientRecord)
+                    .filter(ApiClientRecord.merchant_id == principal.merchant_id)
+                    .order_by(ApiClientRecord.issued_at.desc())
+                    .all()
+                )
+                for r in records:
+                    summaries.append(
+                        KeySummary(
+                            key_id=r.client_id,
+                            label=r.label,
+                            scopes=list(r.scopes or []),
+                            issued_at=r.issued_at.isoformat() if r.issued_at else "",
+                            issued_by=r.issued_by,
+                            intended_use=r.intended_use or "",
+                            revoked_at=r.revoked_at.isoformat() if r.revoked_at else None,
+                        )
                     )
-                )
-    except Exception:
-        # If the DB is unreachable, return whatever the in-memory registry has
-        registry = ApiClientRegistry()
-        for client in registry.list_for_merchant(principal.merchant_id):
-            summaries.append(
-                KeySummary(
-                    key_id=client.client_id,
-                    label=client.label or "",
-                    scopes=[s.value for s in client.scopes],
-                    issued_at="",
-                    issued_by="",
-                    intended_use="",
-                    revoked_at=None,
-                )
+                return success({"keys": [s.model_dump(mode="json") for s in summaries]})
+        except Exception as exc:
+            logger.warning("agent key list DB read failed", extra={"error": str(exc)})
+    # Fallback to the shared in-memory registry (or when DB model is unavailable)
+    registry = registry_for(request)
+    for client in registry.list_for_merchant(principal.merchant_id):
+        summaries.append(
+            KeySummary(
+                key_id=client.client_id,
+                label=client.label or "",
+                scopes=[s.value for s in client.scopes],
+                issued_at="",
+                issued_by="",
+                intended_use="",
+                revoked_at=None,
             )
+        )
     return success({"keys": [s.model_dump(mode="json") for s in summaries]})
 
 
@@ -289,30 +297,32 @@ def list_agent_keys(
 def revoke_agent_key(
     key_id: str,
     principal: MerchantAdminPrincipal,
+    request: Request,
 ) -> dict[str, Any]:
     """Revoke an external agent API key. Existing bearer tokens keep working
     until they expire; the exchange endpoint will reject the key."""
-    registry = ApiClientRegistry()
+    registry = registry_for(request)
     registry.revoke(key_id)
 
-    try:
-        from apps.api.db import get_session_factory
+    if ApiClientRecord is not None:
+        try:
+            from apps.api.db import get_session_factory
 
-        factory = get_session_factory()
-        with factory() as session:
-            record = (
-                session.query(ApiClientRecord)
-                .filter(
-                    ApiClientRecord.client_id == key_id,
-                    ApiClientRecord.merchant_id == principal.merchant_id,
+            factory = get_session_factory()
+            with factory() as session:
+                record = (
+                    session.query(ApiClientRecord)
+                    .filter(
+                        ApiClientRecord.client_id == key_id,
+                        ApiClientRecord.merchant_id == principal.merchant_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if record is not None:
-                record.revoked_at = datetime.now(UTC)
-                session.commit()
-    except Exception:
-        pass
+                if record is not None:
+                    record.revoked_at = datetime.now(UTC)
+                    session.commit()
+        except Exception as exc:
+            logger.warning("agent key revoke DB write failed", extra={"error": str(exc)})
 
     return success({"key_id": key_id, "revoked": True})
 
@@ -322,7 +332,7 @@ def revoke_agent_key(
     summary="Fetch the complete onboarding bundle for an external agent",
 )
 def onboarding_bundle(
-    request: Request,  # type: ignore[name-defined]  # noqa: F821
+    request: Request,
     principal: MerchantAdminPrincipal,
 ) -> dict[str, Any]:
     """Return the discovery, capability, and tool bundle in one response.

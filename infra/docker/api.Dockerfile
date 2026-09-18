@@ -40,4 +40,7 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# No --reload: the file watcher restarts the process on any bind-mounted file
+# change, dropping in-flight payment and checkout requests. Local development
+# keeps --reload via `make dev`; the image runs the steady state.
+CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

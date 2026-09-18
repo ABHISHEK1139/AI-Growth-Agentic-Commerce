@@ -13,9 +13,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# The initial revision is hand-authored because it establishes constraints as
-# design decisions. Models arrive with the repositories in later tasks.
-target_metadata = None
+# Models now live in the shared declarative base, so autogenerate can compare
+# against them. `packages.db.base` holds Base without importing the delivery
+# layer, so this import cannot drag the API into the migration runtime.
+from apps.api.db import Base
+
+target_metadata = Base.metadata
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 

@@ -38,18 +38,22 @@ DEFAULT_REVIEWS_PER_FILE = 120
 #: Random seed for deterministic output.
 DEFAULT_SEED = 42
 
-#: Metadata files the pipeline reads in stage 1.
+#: Metadata files the pipeline reads in stage 1. Mirrors META_SOURCES in
+#: build_catalog (all four), so a demo run never reports a permanent
+#: shortfall for a source that was simply never generated.
 META_FILES: tuple[str, ...] = (
     "meta_Electronics.jsonl.gz",
     "meta_Cell_Phones_and_Accessories.jsonl.gz",
     "meta_Appliances.jsonl.gz",
+    "meta_Home_and_Kitchen.jsonl.gz",
 )
 
-#: Review files the pipeline reads in stage 5.
+#: Review files the pipeline reads in stage 5. Mirrors REVIEW_SOURCES.
 REVIEW_FILES: tuple[str, ...] = (
     "Electronics.jsonl.gz",
     "Cell_Phones_and_Accessories.jsonl.gz",
     "Appliances.jsonl.gz",
+    "Home_and_Kitchen.jsonl.gz",
 )
 
 #: Product title templates per category.
@@ -105,6 +109,24 @@ APPLIANCE_TITLES: tuple[str, ...] = (
     "Handheld Vacuum Cordless Lightweight",
     "Ice Maker Machine Countertop Portable",
     "Food Processor 13 Cup Work Bowl",
+)
+
+HOME_KITCHEN_TITLES: tuple[str, ...] = (
+    "Stainless Steel Cookware Set 10 Piece",
+    "Robot Vacuum with Mapping Technology",
+    "Air Fryer Digital Touchscreen 5 Quart",
+    "Memory Foam Mattress Topper King",
+    "Smart LED Table Lamp with App Control",
+    "Electric Kettle Gooseneck Precision Pour",
+    "Cast Iron Skillet Pre-Seasoned 12 inch",
+    "Cordless Stick Vacuum HEPA Filtration",
+    "Bamboo Cutting Board Set with Grooves",
+    "Blackout Curtains Thermal Insulated Pair",
+    "Espresso Machine with Milk Frother",
+    "Hybrid Mattress Cooling Gel Infused",
+    "Food Storage Container Set Airtight",
+    "Standing Desk Electric Height Adjustable",
+    "Ceramic Dinnerware Set Service for 4",
 )
 
 BRANDS: tuple[str, ...] = (
@@ -265,6 +287,7 @@ def generate_sample_data(
         ("meta_Electronics.jsonl.gz", ELECTRONICS_TITLES, "All Electronics"),
         ("meta_Cell_Phones_and_Accessories.jsonl.gz", PHONE_TITLES, "Cell Phones & Accessories"),
         ("meta_Appliances.jsonl.gz", APPLIANCE_TITLES, "Appliances"),
+        ("meta_Home_and_Kitchen.jsonl.gz", HOME_KITCHEN_TITLES, "Home & Kitchen"),
     ]
 
     counts: dict[str, int] = {}
@@ -283,6 +306,7 @@ def generate_sample_data(
         ("Electronics.jsonl.gz", "meta_Electronics.jsonl.gz"),
         ("Cell_Phones_and_Accessories.jsonl.gz", "meta_Cell_Phones_and_Accessories.jsonl.gz"),
         ("Appliances.jsonl.gz", "meta_Appliances.jsonl.gz"),
+        ("Home_and_Kitchen.jsonl.gz", "meta_Home_and_Kitchen.jsonl.gz"),
     ]
 
     for review_filename, meta_filename in review_configs:

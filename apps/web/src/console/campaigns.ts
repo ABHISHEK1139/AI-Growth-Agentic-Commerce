@@ -75,12 +75,13 @@ export interface CampaignAnalytics {
   /** Counted from the store. */
   active_campaigns: number;
   completed_campaigns: number;
-  /** Literals in the router, not measurements. Rendered as such. */
+  /** Zero with measured:false when no order history exists — never render as measured lift. */
   average_sales_lift_pct: number;
   incremental_revenue_minor: number;
   discount_spent_minor: number;
   net_roi_multiplier: number;
   currency: string;
+  measured?: boolean;
 }
 
 /** Bounds from `ProposeCampaignRequest`. Controls must not offer more. */

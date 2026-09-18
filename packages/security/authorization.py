@@ -132,4 +132,6 @@ def require_all(
     if merchant_id is not None:
         require_same_tenant(principal, merchant_id)
     if owner_buyer_id is not None:
-        require_ownership(principal, owner_buyer_id=owner_buyer_id)
+        # Forward the tenant: ownership without the tenant check would let a
+        # reused buyer identifier read across merchants.
+        require_ownership(principal, owner_buyer_id=owner_buyer_id, owner_merchant_id=merchant_id)

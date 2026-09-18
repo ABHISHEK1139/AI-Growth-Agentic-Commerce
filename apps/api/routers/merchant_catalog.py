@@ -108,11 +108,31 @@ def _parse_csv(file_content: bytes) -> list[dict[str, str]]:
     return list(reader)
 
 
-def _require_import_in_status(session: Session, import_id: str, allowed: set[str]) -> Any:
-    """Load a CatalogImport and verify its status is in the allowed set."""
+#: Largest single upload accepted by POST /imports (request #4).
+MAX_CSV_BYTES = 5 * 1024 * 1024
+#: Most rows accepted from one upload; staging is one transaction.
+MAX_CSV_ROWS = 10_000
+
+
+def _require_import_in_status(
+    session: Session, import_id: str, allowed: set[str], merchant_id: str
+) -> Any:
+    """Load a CatalogImport for this merchant and verify its status.
+
+    Both predicates matter: the merchant check turns a cross-tenant probe
+    into a 404 identical to a missing import, so identifiers cannot be
+    enumerated across tenants.
+    """
     from services.catalog.models import CatalogImport
 
-    imp = session.query(CatalogImport).filter(CatalogImport.import_id == import_id).first()
+    imp = (
+        session.query(CatalogImport)
+        .filter(
+            CatalogImport.import_id == import_id,
+            CatalogImport.merchant_id == merchant_id,
+        )
+        .first()
+    )
     if not imp:
         raise HTTPException(status_code=404, detail=f"Import {import_id} not found")
     if imp.status not in allowed:
@@ -138,6 +158,8 @@ def create_import(
         sku, title, description, price_minor, currency, inventory, status, image_url, category
 
     Rows are staged immediately and can be previewed before validation.
+    Uploads are capped at 5 MB / 10,000 rows: an unbounded read would let
+    one upload exhaust the worker's memory.
     """
     merchant_id = principal.merchant_id or "default"
 
@@ -147,7 +169,12 @@ def create_import(
             detail="Only .csv files are accepted",
         )
 
-    content = file.file.read()
+    content = file.file.read(MAX_CSV_BYTES + 1)
+    if len(content) > MAX_CSV_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"CSV file is too large (limit {MAX_CSV_BYTES // (1024 * 1024)} MB)",
+        )
     rows = _parse_csv(content)
 
     if not rows:
@@ -155,9 +182,14 @@ def create_import(
             status_code=400,
             detail="CSV file is empty",
         )
+    if len(rows) > MAX_CSV_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"CSV has too many rows (limit {MAX_CSV_ROWS})",
+        )
 
     # Check required columns (case-insensitive)
-    normalized_keys = {k.lower().strip() for k in rows[0].keys()}
+    normalized_keys = {k.lower().strip() for k in rows[0]}
     missing = CatalogService.REQUIRED_COLUMNS - normalized_keys
     if missing:
         raise HTTPException(
@@ -168,7 +200,7 @@ def create_import(
     service = _catalog_service()
     imp = service.create_import(session, merchant_id=merchant_id, filename=file.filename)
     total, _invalid, _row_errors = service.stage_csv_rows(
-        session, import_id=imp.import_id, rows=rows
+        session, merchant_id=merchant_id, import_id=imp.import_id, rows=rows
     )
     session.commit()
 
@@ -184,12 +216,20 @@ def create_import(
 def get_import(
     import_id: str,
     session: DatabaseSession,
-    _principal: MerchantPrincipal,
+    principal: MerchantPrincipal,
 ) -> ImportStatusResponse:
     """Get the current status of a catalog import."""
     from services.catalog.models import CatalogImport
 
-    imp = session.query(CatalogImport).filter(CatalogImport.import_id == import_id).first()
+    merchant_id = principal.merchant_id or "default"
+    imp = (
+        session.query(CatalogImport)
+        .filter(
+            CatalogImport.import_id == import_id,
+            CatalogImport.merchant_id == merchant_id,
+        )
+        .first()
+    )
     if not imp:
         raise HTTPException(status_code=404, detail=f"Import {import_id} not found")
 
@@ -220,17 +260,25 @@ def validate_import(
     Checks required fields, price/inventory ranges, currency codes, status values,
     and title length. Updates each row's is_valid flag and validation_errors.
     """
-    imp = _require_import_in_status(session, import_id, {"pending"})
+    merchant_id = principal.merchant_id or "default"
+    imp = _require_import_in_status(session, import_id, {"pending"}, merchant_id)
     service = _catalog_service()
     valid_count, invalid_count, error_summary = service.validate_import(
-        session, import_id=import_id
+        session, merchant_id=merchant_id, import_id=import_id
     )
     session.commit()
 
     # Re-fetch to get updated counts
     from services.catalog.models import CatalogImport
 
-    imp = session.query(CatalogImport).filter(CatalogImport.import_id == import_id).first()
+    imp = (
+        session.query(CatalogImport)
+        .filter(
+            CatalogImport.import_id == import_id,
+            CatalogImport.merchant_id == merchant_id,
+        )
+        .first()
+    )
 
     return ValidationResultResponse(
         import_id=import_id,
@@ -246,7 +294,7 @@ def validate_import(
 def list_import_rows(
     import_id: str,
     session: DatabaseSession,
-    _principal: MerchantPrincipal,
+    principal: MerchantPrincipal,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     valid_only: bool = Query(default=False),
@@ -257,9 +305,15 @@ def list_import_rows(
     """
     from services.catalog.models import CatalogImportRow
 
+    # Tenant check first: rows inherit tenancy from their import, so prove
+    # the import is ours before listing anything under it.
+    _require_import_in_status(
+        session, import_id, {"pending", "valid", "invalid"}, principal.merchant_id or "default"
+    )
+
     query = session.query(CatalogImportRow).filter(CatalogImportRow.import_id == import_id)
     if valid_only:
-        query = query.filter(CatalogImportRow.is_valid == True)
+        query = query.filter(CatalogImportRow.is_valid)
 
     total = query.count()
     offset = (page - 1) * page_size
@@ -301,7 +355,7 @@ def publish_import(
     rows, and atomically publishes the new version (superseding any active version).
     """
     merchant_id = principal.merchant_id or "default"
-    imp = _require_import_in_status(session, import_id, {"valid"})
+    _require_import_in_status(session, import_id, {"valid"}, merchant_id)
     service = _catalog_service()
 
     catalog_version_id, products, offers = service.publish_import(
@@ -322,14 +376,15 @@ def publish_import(
 def rollback_import(
     import_id: str,
     session: DatabaseSession,
-    _principal: MerchantPrincipal,
+    principal: MerchantPrincipal,
 ) -> dict[str, str]:
     """Delete a pending/validated import and all its staged rows.
 
     Only imports that have not been published can be rolled back.
     """
-    imp = _require_import_in_status(session, import_id, {"pending", "valid", "invalid"})
+    merchant_id = principal.merchant_id or "default"
+    _require_import_in_status(session, import_id, {"pending", "valid", "invalid"}, merchant_id)
     service = _catalog_service()
-    service.rollback_import(session, import_id=import_id)
+    service.rollback_import(session, merchant_id=merchant_id, import_id=import_id)
     session.commit()
     return {"import_id": import_id, "status": "rolled_back"}

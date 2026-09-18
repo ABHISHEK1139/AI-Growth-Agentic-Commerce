@@ -249,8 +249,11 @@ def test_cross_sell_api_endpoint(client, auth_headers):
     assert body["ok"] is True
     data = body["data"]
     assert "recommendations" in data
+    assert isinstance(data["recommendations"], list)
     assert "metrics" in data
     assert data["metrics"]["projected_aov_minor"] >= data["metrics"]["base_aov_minor"]
+    assert data["metrics"]["base_aov_minor"] >= 0
+    assert data["metrics"]["estimated_attach_rate_pct"] >= 0
 
 
 def test_cross_sell_metrics_endpoint(client, settings):

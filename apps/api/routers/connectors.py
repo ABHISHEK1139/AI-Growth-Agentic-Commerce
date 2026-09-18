@@ -24,25 +24,41 @@ MerchantPrincipal = Annotated[
 
 
 class RegisterConnectorRequest(BaseModel):
-    merchant_id: str = Field(..., description="Merchant tenant ID")
-    platform_type: str = Field(
-        ..., description="shopify, woocommerce, generic_rest, catalog_feed, or internal_seed"
+    merchant_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="Merchant tenant ID",
     )
-    store_url: str | None = Field(default=None, description="Platform API base URL or store domain")
-    api_key: str | None = Field(default=None, description="API Key or Access Token")
+    platform_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+        description="shopify, woocommerce, generic_rest, catalog_feed, or internal_seed",
+    )
+    store_url: str | None = Field(
+        default=None, max_length=512, description="Platform API base URL or store domain"
+    )
+    api_key: str | None = Field(default=None, max_length=512, description="API Key or Access Token")
     feed_content: str | None = Field(
-        default=None, description="CSV or JSONL content for catalog_feed"
+        default=None, max_length=1_000_000, description="CSV or JSONL content for catalog_feed"
     )
     config: dict[str, Any] | None = Field(default=None, description="Optional extra settings")
 
 
 class SyncRequest(BaseModel):
-    merchant_id: str = Field(default="mer_demo_seed", description="Merchant to sync")
+    merchant_id: str = Field(..., min_length=1, max_length=64, description="Merchant to sync")
 
 
 class PlatformWebhookRequest(BaseModel):
-    merchant_id: str
-    event: str = Field(..., description="e.g. inventory.updated, product.created, price.changed")
+    merchant_id: str = Field(..., min_length=1, max_length=64)
+    event: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="e.g. inventory.updated, product.created, price.changed",
+    )
     payload: dict[str, Any]
 
 
@@ -160,9 +176,16 @@ def trigger_sync(
     effective_merchant_id = target_principal.merchant_id or req.merchant_id
 
     sync_res = GLOBAL_CONNECTOR_REGISTRY.sync_merchant(effective_merchant_id)
+    # Report the connector that actually served the sync, not just the
+    # requested tenant: an unregistered merchant falls back to the demo
+    # seed, and the response must say so instead of attributing demo
+    # products to the requester.
+    served_by_fallback = sync_res.merchant_id != effective_merchant_id
     return {
         "ok": True,
-        "merchant_id": effective_merchant_id,
+        "merchant_id": sync_res.merchant_id,
+        "requested_merchant_id": effective_merchant_id,
+        "served_by_fallback": served_by_fallback,
         "platform_type": sync_res.platform_type,
         "products_imported": sync_res.products_imported,
         "offers_updated": sync_res.offers_updated,
@@ -181,9 +204,12 @@ def handle_platform_webhook(
     effective_merchant_id = target_principal.merchant_id or req.merchant_id
 
     conn = GLOBAL_CONNECTOR_REGISTRY.get(effective_merchant_id)
+    served_by_fallback = conn.merchant_id != effective_merchant_id
     return {
         "ok": True,
-        "merchant_id": effective_merchant_id,
+        "merchant_id": conn.merchant_id,
+        "requested_merchant_id": effective_merchant_id,
+        "served_by_fallback": served_by_fallback,
         "platform_type": conn.platform_type,
         "event_received": req.event,
         "action": "catalog_cache_invalidated",

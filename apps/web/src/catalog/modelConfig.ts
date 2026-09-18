@@ -110,6 +110,23 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
 
 const STORAGE_KEY = "agentpay_custom_ai_config";
 
+// Provider keys live in tab memory only, never in localStorage: any script
+// running on the page (or with disk access) could lift a persisted secret.
+// The key is lost on reload by design — the operator re-enters it per visit.
+let sessionApiKey = "";
+
+export function setSessionApiKey(key: string): void {
+  sessionApiKey = key;
+}
+
+export function getSessionApiKey(): string {
+  return sessionApiKey;
+}
+
+export function clearSessionApiKey(): void {
+  sessionApiKey = "";
+}
+
 export function getStoredModelConfig(): CustomModelConfig | null {
   if (typeof window === "undefined") return null;
   try {
@@ -117,7 +134,18 @@ export function getStoredModelConfig(): CustomModelConfig | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed.baseUrl === "string" && typeof parsed.modelName === "string") {
-      return parsed;
+      // One-time migration: a key saved by an older build is lifted into
+      // tab memory and scrubbed from disk immediately.
+      if (typeof parsed.apiKey === "string" && parsed.apiKey && !sessionApiKey) {
+        sessionApiKey = parsed.apiKey;
+      }
+      if (typeof parsed.apiKey === "string" && parsed.apiKey) {
+        const { apiKey, ...rest } = parsed;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+        } catch {}
+      }
+      return { ...parsed, apiKey: sessionApiKey || "" };
     }
   } catch {}
   return null;
@@ -126,7 +154,10 @@ export function getStoredModelConfig(): CustomModelConfig | null {
 export function saveStoredModelConfig(config: CustomModelConfig): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    // Persist everything except the secret.
+    const { apiKey, ...rest } = config;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+    sessionApiKey = apiKey || "";
   } catch {}
 }
 
@@ -135,4 +166,5 @@ export function clearStoredModelConfig(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {}
+  sessionApiKey = "";
 }

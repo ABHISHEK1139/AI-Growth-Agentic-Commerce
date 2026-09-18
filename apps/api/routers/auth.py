@@ -127,6 +127,9 @@ async def create_session(
 )
 async def get_current_session(request: Request) -> dict[str, Any]:
     """Return the authenticated principal or unauthenticated status without raising."""
+    from packages.errors.exceptions import ForbiddenError, UnauthenticatedError
+    from packages.security.tokens import TokenError
+
     try:
         principal = await current_principal(request)
         return success(
@@ -141,7 +144,10 @@ async def get_current_session(request: Request) -> dict[str, Any]:
                 },
             }
         )
-    except Exception:
+    except (UnauthenticatedError, ForbiddenError, TokenError):
+        # Credential problems mean "not signed in". Anything else (a database
+        # outage, a missing registry, a programming error) must propagate
+        # to the error middleware instead of masquerading as anonymous.
         return success({"authenticated": False, "principal": None})
 
 

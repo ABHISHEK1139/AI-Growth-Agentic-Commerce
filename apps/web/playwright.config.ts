@@ -16,10 +16,12 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run start",
+    // Build first: `start` serves the last production build, which may not
+    // exist (or may predate the specs) on a fresh machine or in CI.
+    command: "npm run build && npm run start",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 180 * 1000,
   },
   projects: [
     {

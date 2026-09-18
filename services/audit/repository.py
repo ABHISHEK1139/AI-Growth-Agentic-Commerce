@@ -58,13 +58,18 @@ _SAFE_KEY_EXACT: frozenset[str] = frozenset(
 )
 
 _SENSITIVE = re.compile(
-    r"secret|token|password|authorization|cookie|credential|signature|key_secret|private_key|api_key",
+    r"secret|token|password|passwd|passphrase|authorization|cookie|credential|signature|key_secret|private|api[-_]?key",
     re.I,
 )
 _SECRET_VALUE = re.compile(
     r"(?:sk-|gsk_|Bearer\s+|eyJ|rzp_test_|rzp_live_|rzp_sec_)[A-Za-z0-9._-]{8,}",
     re.I,
 )
+#: Long hex / base64url blobs under an ordinary key name. Credential dumps
+#: (digests pasted as values, opaque session tokens under neutral labels)
+#: look exactly like this; genuine ledger values of this shape live under
+#: _SAFE_KEY_EXACT names and are checked before this pattern runs.
+_ENTROPY_VALUE = re.compile(r"^[A-Za-z0-9+/=_-]{32,}$")
 
 
 def _safe_metadata(value: Any, key: str = "") -> Any:
@@ -72,7 +77,11 @@ def _safe_metadata(value: Any, key: str = "") -> Any:
     if lower_key not in _SAFE_KEY_EXACT and _SENSITIVE.search(key):
         return "***REDACTED***"
     if isinstance(value, str):
-        return "***REDACTED***" if _SECRET_VALUE.search(value) else value
+        if _SECRET_VALUE.search(value):
+            return "***REDACTED***"
+        if lower_key not in _SAFE_KEY_EXACT and _ENTROPY_VALUE.match(value):
+            return "***REDACTED***"
+        return value
     if isinstance(value, dict):
         return {
             str(item_key): _safe_metadata(item_value, str(item_key))

@@ -189,6 +189,11 @@ def stream_import_file(
 
     print(f"\n--- Ingesting {file_path.name} (Category: {category}, Run ID: {run_id}) ---")
 
+    # Fail before recording anything: a missing input must not leave a
+    # "running" run that promotion later mistakes for an empty success.
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Input file does not exist: {file_path}")
+
     tracker = QualityTracker(category=category, source_file=file_path.name)
 
     with SessionLocal() as session:
@@ -209,78 +214,7 @@ def stream_import_file(
     open_fn = gzip.open if file_path.name.endswith(".gz") else open
     mode = "rt" if file_path.name.endswith(".gz") else "r"
 
-    with open_fn(file_path, mode, encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            row_number += 1
-            if max_records and row_number > max_records:
-                break
-
-            try:
-                record = json.loads(stripped)
-                extracted_id, v_status, err_code, err_msg = tracker.observe(record, stripped)
-
-                payload_hash = compute_hash(stripped)
-                stage_row = StagingCatalogRaw(
-                    id=new_id("stg"),
-                    source_category=category,
-                    source_file=file_path.name,
-                    source_row_number=row_number,
-                    source_record_id=extracted_id,
-                    raw_payload=record,
-                    ingestion_run_id=run_id,
-                    payload_hash=payload_hash,
-                    parse_status="parsed",
-                    validation_status=v_status,
-                    error_code=err_code,
-                    error_message=err_msg,
-                    created_at=datetime.now(UTC),
-                )
-                staging_batch.append(stage_row)
-
-                if v_status == "rejected":
-                    rej = StagingRejection(
-                        id=new_id("rej"),
-                        ingestion_run_id=run_id,
-                        source_row_number=row_number,
-                        reason_code=err_code or "UNKNOWN",
-                        reason_details=err_msg,
-                        raw_payload=record,
-                        created_at=datetime.now(UTC),
-                    )
-                    rejection_batch.append(rej)
-
-            except Exception as parse_exc:
-                tracker.records_seen += 1
-                tracker.records_failed += 1
-                rej = StagingRejection(
-                    id=new_id("rej"),
-                    ingestion_run_id=run_id,
-                    source_row_number=row_number,
-                    reason_code="MALFORMED_JSON",
-                    reason_details=str(parse_exc),
-                    raw_payload={"raw_line": stripped[:500]},
-                    created_at=datetime.now(UTC),
-                )
-                rejection_batch.append(rej)
-
-            # Flush batch
-            if len(staging_batch) >= batch_size:
-                with SessionLocal() as session:
-                    session.bulk_save_objects(staging_batch)
-                    if rejection_batch:
-                        session.bulk_save_objects(rejection_batch)
-                    session.commit()
-                print(
-                    f"   * Staged {row_number} rows (Valid: {tracker.records_valid}, Rejected: {tracker.records_rejected})..."
-                )
-                staging_batch.clear()
-                rejection_batch.clear()
-
-        # Flush remaining
+    def _flush_batches() -> None:
         if staging_batch or rejection_batch:
             with SessionLocal() as session:
                 if staging_batch:
@@ -290,6 +224,113 @@ def stream_import_file(
                 session.commit()
             staging_batch.clear()
             rejection_batch.clear()
+
+    try:
+        with open_fn(file_path, mode, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                row_number += 1
+                if max_records and row_number > max_records:
+                    break
+
+                try:
+                    record = json.loads(stripped)
+                except (json.JSONDecodeError, ValueError) as parse_exc:
+                    # Malformed line: observe() never ran, so count it here
+                    # exactly once.
+                    tracker.records_seen += 1
+                    tracker.records_failed += 1
+                    rej = StagingRejection(
+                        id=new_id("rej"),
+                        ingestion_run_id=run_id,
+                        source_row_number=row_number,
+                        reason_code="MALFORMED_JSON",
+                        reason_details=str(parse_exc),
+                        raw_payload={"raw_line": stripped[:500]},
+                        created_at=datetime.now(UTC),
+                    )
+                    rejection_batch.append(rej)
+                else:
+                    try:
+                        extracted_id, v_status, err_code, err_msg = tracker.observe(
+                            record, stripped
+                        )
+                    except Exception as observe_exc:
+                        # observe() increments records_seen first, so the
+                        # row is already counted; quarantine without
+                        # double-counting.
+                        tracker.records_failed += 1
+                        rej = StagingRejection(
+                            id=new_id("rej"),
+                            ingestion_run_id=run_id,
+                            source_row_number=row_number,
+                            reason_code="ROW_ERROR",
+                            reason_details=f"{type(observe_exc).__name__}: {observe_exc}",
+                            raw_payload={"raw_line": stripped[:500]},
+                            created_at=datetime.now(UTC),
+                        )
+                        rejection_batch.append(rej)
+                    else:
+                        payload_hash = compute_hash(stripped)
+                        stage_row = StagingCatalogRaw(
+                            id=new_id("stg"),
+                            source_category=category,
+                            source_file=file_path.name,
+                            source_row_number=row_number,
+                            source_record_id=extracted_id,
+                            raw_payload=record,
+                            ingestion_run_id=run_id,
+                            payload_hash=payload_hash,
+                            parse_status="parsed",
+                            validation_status=v_status,
+                            error_code=err_code,
+                            error_message=err_msg,
+                            created_at=datetime.now(UTC),
+                        )
+                        staging_batch.append(stage_row)
+
+                        if v_status == "rejected":
+                            rej = StagingRejection(
+                                id=new_id("rej"),
+                                ingestion_run_id=run_id,
+                                source_row_number=row_number,
+                                reason_code=err_code or "UNKNOWN",
+                                reason_details=err_msg,
+                                raw_payload=record,
+                                created_at=datetime.now(UTC),
+                            )
+                            rejection_batch.append(rej)
+
+                # Flush batch
+                if len(staging_batch) >= batch_size:
+                    with SessionLocal() as session:
+                        session.bulk_save_objects(staging_batch)
+                        if rejection_batch:
+                            session.bulk_save_objects(rejection_batch)
+                        session.commit()
+                    print(
+                        f"   * Staged {row_number} rows (Valid: {tracker.records_valid}, Rejected: {tracker.records_rejected})..."
+                    )
+                    staging_batch.clear()
+                    rejection_batch.clear()
+
+            # Flush remaining
+            _flush_batches()
+    except Exception:
+        # The run record must never be left "running": promotion picks the
+        # latest run, and a stranded one reads as an empty success.
+        with SessionLocal() as session:
+            run = session.query(IngestionRun).filter(IngestionRun.run_id == run_id).first()
+            if run:
+                run.finished_at = datetime.now(UTC)
+                run.status = "failed"
+                run.records_seen = tracker.records_seen
+                run.records_failed = tracker.records_failed
+                session.commit()
+        raise
 
     duration_ms = int((time.perf_counter() - start_time) * 1000.0)
     finished_dt = datetime.now(UTC)
@@ -326,14 +367,14 @@ def stream_import_file(
         report_csv = report_dir / "ingestion_quality_report.csv"
 
         file_exists = report_csv.exists()
-        with open(report_csv, "a", newline="", encoding="utf-8") as rf:
+        with report_csv.open("a", newline="", encoding="utf-8") as rf:
             writer = csv.DictWriter(rf, fieldnames=list(summary.keys()))
             if not file_exists:
                 writer.writeheader()
             writer.writerow(summary)
 
         field_report_csv = report_dir / f"field_presence_{category}.csv"
-        with open(field_report_csv, "w", newline="", encoding="utf-8") as ff:
+        with field_report_csv.open("w", newline="", encoding="utf-8") as ff:
             fwriter = csv.writer(ff)
             fwriter.writerow(["field_name", "present_count", "missing_count", "percentage_present"])
             for fname, pcount in sorted(

@@ -16,7 +16,7 @@ declare global {
 
 export default function GatedCheckoutPage() {
   const router = useRouter();
-  const { cart, placeOrder, clearCart, userPreferences, failureSimulation, setFailureSimulation } = useStore();
+  const { cart, placeOrder, userPreferences, failureSimulation, setFailureSimulation } = useStore();
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [address, setAddress] = useState({
@@ -39,13 +39,16 @@ export default function GatedCheckoutPage() {
   const [serverAuthorizationId, setServerAuthorizationId] = useState<string | null>(null);
   const [isAuthorizing, setIsAuthorizing] = useState(false);
 
-  // Publishable key from configuration with safe test fallback
+  // Publishable key from configuration. No fallback literal: when no key is
+  // configured the page runs an explicitly labelled test-mode simulation
+  // instead of opening the live Razorpay SDK with a fake key.
   const razorpayKeyId = (
     process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
     process.env.RAZORPAY_KEY_ID ||
-    "***REMOVED***"
+    ""
   ).trim();
-  const providerConfigured = razorpayKeyId.length > 0;
+  const isTestMode = razorpayKeyId.length === 0;
+  const providerConfigured = !isTestMode;
 
   // Check if Razorpay SDK loaded
   useEffect(() => {
@@ -117,7 +120,10 @@ export default function GatedCheckoutPage() {
   const currency = checkoutItems[0]?.product.currency || "INR";
 
   const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 500000; // ₹5,000.00
-  const maxPolicyCeilingMinor = 20000000; // ₹2,00,000.00
+  // Matches the gateway default max_transaction_amount_minor (₹70,000.00 in
+  // apps/api/config.py). The copy below states ₹70,000, so this constant must
+  // stay in sync with it.
+  const maxPolicyCeilingMinor = 7000000; // ₹70,000.00
   const requiresManualApproval = totalMinor > autoApprovalLimitMinor;
 
   /**
@@ -148,8 +154,10 @@ export default function GatedCheckoutPage() {
       }
     }
     if (!currentCheckoutId) {
-      currentCheckoutId = `chk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      setServerCheckoutId(currentCheckoutId);
+      // Never invent a checkout id: authorizing a fabricated id would bind a
+      // policy decision to a checkout the gateway never froze a price for.
+      setError("The gateway could not create a checkout, so authorization cannot proceed.");
+      return false;
     }
     if (serverAuthorizationId) return true; // already granted for this checkout
 
@@ -224,8 +232,10 @@ export default function GatedCheckoutPage() {
       return;
     }
 
-    // 2. Create order on backend with real server checkout binding
-    let backendOrderId = `chk_${Date.now().toString(36)}`;
+    // 2. Create order on backend with real server checkout binding.
+    // Fail closed: without a backend order id there is nothing Razorpay can
+    // charge against, so never fall through to the modal with a fake id.
+    let backendOrderId: string;
     try {
       const orderRes = await fetch(resolveApiUrl("/api/create-order"), {
         method: "POST",
@@ -240,15 +250,22 @@ export default function GatedCheckoutPage() {
       });
       if (orderRes.ok) {
         const orderData = await orderRes.json();
-        backendOrderId = orderData.data?.order_id || orderData.order_id || orderData.data?.id || backendOrderId;
+        backendOrderId = orderData.data?.order_id || orderData.order_id || orderData.data?.id;
       } else {
         const errData = await orderRes.json().catch(() => ({}));
         setIsPaying(false);
         setError(errData?.error?.message || errData?.detail || "Order creation failed on backend.");
         return;
       }
+      if (!backendOrderId) {
+        setIsPaying(false);
+        setError("Order creation failed on backend.");
+        return;
+      }
     } catch {
-      console.warn("Backend create-order note");
+      setIsPaying(false);
+      setError("Could not reach the backend to create an order. Check your connection and try again.");
+      return;
     }
 
     const options = {
@@ -265,8 +282,10 @@ export default function GatedCheckoutPage() {
       },
       theme: { color: "#174c3c" },
       handler: async function (response: any) {
-        // Verify payment signature
-        let confirmedOrderId = `ord_${Date.now().toString(36)}`;
+        // Verify the payment signature with the backend before recording
+        // anything locally. Fail closed: an unverified callback never becomes
+        // an order, even if the modal reported success.
+        let confirmedOrderId: string | null = null;
         try {
           const verifyRes = await fetch(resolveApiUrl("/api/verify-payment"), {
             method: "POST",
@@ -278,19 +297,30 @@ export default function GatedCheckoutPage() {
               razorpay_signature: response.razorpay_signature,
             }),
           });
-          if (!verifyRes.ok) {
-            const errData = await verifyRes.json().catch(() => ({}));
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          const verified =
+            verifyRes.ok &&
+            (verifyData.data?.verified === true || verifyData.verified === true);
+          if (!verified) {
             setIsPaying(false);
-            setError(errData?.error?.message || "Payment verification failed. Please try again or contact support.");
+            setError(
+              verifyData?.error?.message ||
+                "Payment verification failed. No charge was recorded — please try again or contact support."
+            );
             return;
           }
-          const verifyData = await verifyRes.json();
           confirmedOrderId =
-            verifyData.data?.confirmed_order_id ||
-            verifyData.confirmed_order_id ||
-            confirmedOrderId;
+            verifyData.data?.confirmed_order_id || verifyData.confirmed_order_id || null;
+          if (!confirmedOrderId) {
+            setIsPaying(false);
+            setError("Payment verification failed. No charge was recorded — please try again or contact support.");
+            return;
+          }
         } catch (e) {
           console.warn("Verify payment call note:", e);
+          setIsPaying(false);
+          setError("Could not verify the payment with the backend. No order was recorded — please try again.");
+          return;
         }
 
         const newOrder = placeOrder({
@@ -302,7 +332,6 @@ export default function GatedCheckoutPage() {
           policySummary: `Approved under standard AI Spending Policy (Auto-threshold: ${formatMinorToMajor(autoApprovalLimitMinor, currency)})`,
         });
 
-        clearCart();
         router.push(`/orders/${newOrder.orderId}`);
       },
       modal: {
@@ -320,6 +349,53 @@ export default function GatedCheckoutPage() {
       setIsPaying(false);
       setError("Razorpay checkout SDK is initializing or blocked by adblocker. Please refresh or disable content blockers to proceed with live payment.");
     }
+  };
+
+  /**
+   * Test-mode simulated payment (no provider keys configured).
+   *
+   * Goes through the same server-side verify-and-record path as a live
+   * payment — `POST /api/v1/payments/razorpay/simulate` mints, signs, and
+   * verifies server-side — so the order below is a gateway-confirmed record,
+   * not a client-side invention. The endpoint refuses to run when live
+   * provider keys are configured.
+   */
+  const handleSimulateTestPayment = async () => {
+    setIsPaying(true);
+    setError(null);
+
+    const authorized = await grantServerAuthorization();
+    if (!authorized) {
+      setIsPaying(false);
+      return;
+    }
+
+    const res = await apiPost<{
+      verified: boolean;
+      confirmed_order_id: string;
+      payment_id: string;
+      test_mode?: boolean;
+    }>("/api/v1/payments/razorpay/simulate", {
+      amount: totalMinor,
+      currency,
+      checkout_id: serverCheckoutId || undefined,
+    });
+    if (!res.ok || !res.data?.verified || !res.data?.confirmed_order_id) {
+      setIsPaying(false);
+      setError(res.ok ? "Simulated payment failed." : res.error.message || "Simulated payment failed.");
+      return;
+    }
+
+    const newOrder = placeOrder({
+      orderId: res.data.confirmed_order_id,
+      paymentId: res.data.payment_id,
+      items: checkoutItems,
+      totalMinor,
+      currency,
+      policySummary: `Test-mode simulated payment (no real charge). Auto-threshold: ${formatMinorToMajor(autoApprovalLimitMinor, currency)}`,
+    });
+
+    router.push(`/orders/${newOrder.orderId}`);
   };
 
   /**
@@ -1000,12 +1076,12 @@ export default function GatedCheckoutPage() {
               >
                 &larr; Back to Authorization
               </button>
-              {/* Primary: Razorpay Standard Modal (instant in-browser secure payment) */}
+              {/* Primary: Razorpay Standard Modal (live keys) or simulated test payment */}
               <button
                 type="button"
-                disabled={isPaying || !providerConfigured}
-                onClick={handleLaunchRazorpayModal}
-                aria-label={`Pay ${formatMinorToMajor(totalMinor, currency)} via Razorpay`}
+                disabled={isPaying}
+                onClick={isTestMode ? handleSimulateTestPayment : handleLaunchRazorpayModal}
+                aria-label={isTestMode ? `Simulate test payment of ${formatMinorToMajor(totalMinor, currency)}` : `Pay ${formatMinorToMajor(totalMinor, currency)} via Razorpay`}
                 className="px-6 py-4 bg-[#174c3c] hover:bg-[#103c2f] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-2xl shadow-lg transition-all flex items-center gap-2 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
               >
                 {isPaying ? (
@@ -1016,12 +1092,12 @@ export default function GatedCheckoutPage() {
                 ) : (
                   <>
                     <span>🔒</span>
-                    <span>Pay {formatMinorToMajor(totalMinor, currency)}</span>
-                    <span className="text-xs bg-emerald-500 px-2 py-0.5 rounded-full font-bold">Pay Now &rarr;</span>
+                    <span>{isTestMode ? `Simulate Test Payment ${formatMinorToMajor(totalMinor, currency)}` : `Pay ${formatMinorToMajor(totalMinor, currency)}`}</span>
+                    <span className="text-xs bg-emerald-500 px-2 py-0.5 rounded-full font-bold">{isTestMode ? "Test Mode — No Charge" : "Pay Now →"}</span>
                   </>
                 )}
               </button>
-              {/* Alternative: Browser redirect flow */}
+              {/* Alternative: Browser redirect flow (requires provider keys) */}
               <button
                 type="button"
                 disabled={isPaying || !providerConfigured}

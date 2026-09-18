@@ -99,8 +99,6 @@ def validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> ToolAr
             "checkout_id and authorization_id are required for create_payment",
             code=ErrorCode.VALIDATION_ERROR,
         )
-    if tool_name == "calculate" and not validated.expression:
-        raise DomainError("expression is required for calculate", code=ErrorCode.VALIDATION_ERROR)
 
     # 4. Anti-SSRF URL validation on external network tools (Requirement 27.2)
     if tool_name in ("open_url", "extract_page"):

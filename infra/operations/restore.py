@@ -109,7 +109,16 @@ def restore_snapshot(snapshot: os.PathLike[str] | str) -> int:
         file=sys.stderr,
     )
 
-    cmd = ["psql", "--no-password", "--no-psqlrc", "--set", "ON_ERROR_STOP=1"]
+    # --single-transaction like restore.sh: a mid-file failure rolls the
+    # whole restore back instead of leaving a half-restored money database.
+    cmd = [
+        "psql",
+        "--no-password",
+        "--no-psqlrc",
+        "--single-transaction",
+        "--set",
+        "ON_ERROR_STOP=1",
+    ]
     with open(snap_path, "rb") as raw_fp:
         if snap_path.endswith(".gz"):
             sql_fp = gzip.GzipFile(fileobj=raw_fp, mode="rb")

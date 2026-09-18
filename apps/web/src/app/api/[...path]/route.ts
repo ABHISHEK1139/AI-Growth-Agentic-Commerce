@@ -6,6 +6,8 @@ import {
   searchCatalog as searchDbCatalog,
   getProductById as getDbProductById,
   getOfferById as getDbOfferById,
+  getCheckoutById as getDbCheckoutById,
+  getAuthorizationById as getDbAuthorizationById,
   saveOrder as saveDbOrder,
   listOrders as listDbOrders,
   getOrderById as getDbOrderById,
@@ -14,6 +16,7 @@ import {
   saveCheckout as saveDbCheckout,
   saveAuthorization as saveDbAuthorization,
   approveAuthorization as approveDbAuthorization,
+  rejectAuthorization as rejectDbAuthorization,
   saveAuditEvent,
   getAuditEventsByAggregate,
   listAuditEvents,
@@ -51,8 +54,55 @@ function errorEnvelope(code: string, message: string, status = 400, details = {}
   );
 }
 
-function findProduct(idOrOffer: string) {
-  const clean = (idOrOffer || "").trim();
+/**
+ * Signing secret for simulated (`pay_sim_*`) test-mode payments.
+ * Single source of truth: minting (checkout-url, simulate) and verification
+ * must use the same secret or every simulated payment fails closed.
+ */
+function simSigningSecret(): string {
+  return process.env.RAZORPAY_KEY_SECRET || "sim_secret";
+}
+
+function signSimPayment(orderId: string, paymentId: string): string {
+  return crypto.createHmac("sha256", simSigningSecret()).update(`${orderId}|${paymentId}`).digest("hex");
+}
+
+/**
+ * Verify a presented Razorpay signature, fail-closed.
+ *
+ * - Simulated `pay_sim_*` payments are verified against the sim secret.
+ * - Live payments are verified against RAZORPAY_KEY_SECRET when configured.
+ * - When no secret is configured (pure offline demo), non-sim payments are
+ *   accepted but recorded as test_mode so the audit trail stays honest.
+ */
+function verifyPaymentSignature(
+  orderId: string,
+  paymentId: string,
+  signature: unknown
+): { ok: true } | { ok: false; code: string; message: string } {
+  if (!paymentId || typeof signature !== "string" || signature.length === 0) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "razorpay_payment_id and razorpay_signature are required." };
+  }
+  const presented = Buffer.from(signature);
+  if (paymentId.startsWith("pay_sim_")) {
+    const expected = Buffer.from(signSimPayment(orderId, paymentId));
+    if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
+      return { ok: false, code: "WEBHOOK_SIGNATURE_INVALID", message: "The payment signature did not verify." };
+    }
+    return { ok: true };
+  }
+  if (process.env.RAZORPAY_KEY_SECRET) {
+    const expected = Buffer.from(
+      crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(`${orderId}|${paymentId}`).digest("hex")
+    );
+    if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
+      return { ok: false, code: "WEBHOOK_SIGNATURE_INVALID", message: "The payment signature did not verify." };
+    }
+  }
+  return { ok: true };
+}
+
+function findProduct(idOrOffer: string) {  const clean = (idOrOffer || "").trim();
   if (!clean) return undefined;
   return COMBINED_PRODUCTS.find(
     (p) =>
@@ -62,6 +112,39 @@ function findProduct(idOrOffer: string) {
       (clean.startsWith("off_") && (p.id === clean.replace("off_", "prd_") || p.id === clean.replace("off_", ""))) ||
       (clean.startsWith("prd_") && (p.offerId === clean.replace("prd_", "off_") || p.id === clean))
   );
+}
+
+/**
+ * Full authorization view for the human approval screen: the stored record
+ * plus the policy decision and category the screen renders. Category is read
+ * through checkout -> offer, never guessed, so the gate always shows the
+ * bound values.
+ */
+function authorizationView(authId: string) {
+  const record = getDbAuthorizationById(authId);
+  if (!record) return null;
+  let category = "general";
+  try {
+    const checkout = record.checkout_id ? getDbCheckoutById(record.checkout_id) : null;
+    const offerId = (checkout as any)?.offer_id;
+    const offer = offerId ? getDbOfferById(offerId) : null;
+    if (offer?.category) category = offer.category;
+  } catch {
+    // Category stays general; the bound amounts below are unaffected.
+  }
+  const status = record.status;
+  return {
+    schema_version: "1.0",
+    ...record,
+    category,
+    policy: {
+      decision:
+        status === "approved" ? "ALLOW" : status === "pending" ? "REQUIRE_APPROVAL" : "BLOCK",
+      reason_code:
+        status === "approved" ? "BOUNDED_CEILING_CHECK_PASSED" : status === "pending" ? "AWAITING_HUMAN_DECISION" : "POLICY_DECISION_FINAL",
+      policy_version: record.policy_version || "pol_v2_agentic_commerce",
+    },
+  };
 }
 
 function extractMemoryGb(p: ProductItem): number {
@@ -666,8 +749,37 @@ let merchantRules = {
   acp_manifest_active: true,
 };
 
-async function createRazorpayOrderRemote(amountMinor: number, currency = "INR", receipt = "") {
-  const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+async function buildRazorpayCheckoutUrl(params: {
+  amount: number;
+  currency: string;
+  checkoutId: string;
+  returnUrl: string;
+  receipt: string;
+}) {
+  const { amount, currency, checkoutId, returnUrl, receipt } = params;
+  const keyId = (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").trim();
+
+  const orderId = await createRazorpayOrderRemote(amount, currency, receipt);
+  const mockPaymentId = `pay_sim_${Date.now().toString(36)}`;
+  const mockSig = signSimPayment(orderId, mockPaymentId);
+
+  // Build return redirect URL with success params
+  const dest = returnUrl
+    ? `${returnUrl}success&razorpay_order_id=${encodeURIComponent(orderId)}&razorpay_payment_id=${encodeURIComponent(mockPaymentId)}&razorpay_signature=${encodeURIComponent(mockSig)}`
+    : `/checkout/razorpay-return?status=success&razorpay_order_id=${orderId}&razorpay_payment_id=${mockPaymentId}&razorpay_signature=${mockSig}`;
+
+  return envelope({
+    checkout_url: dest,
+    order_id: orderId,
+    checkout_id: checkoutId,
+    key_id: keyId,
+    amount,
+    currency,
+    redirect_mode: true,
+  });
+}
+
+async function createRazorpayOrderRemote(amountMinor: number, currency = "INR", receipt = "") {  const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (keyId && keySecret) {
@@ -802,35 +914,14 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     return envelope({ offer: productToCatalogOffer(product) });
   }
 
-  // GET /api/v1/payments/razorpay/checkout-url
+  // GET /api/v1/payments/razorpay/checkout-url (legacy query form; prefer POST)
   if (pathStr === "v1/payments/razorpay/checkout-url") {
-    const amount = Number(url.searchParams.get("amount") || "10000");
-    const currency = url.searchParams.get("currency") || "INR";
-    const checkoutId = url.searchParams.get("checkout_id") || `chk_${Date.now().toString(36)}`;
-    const returnUrl = url.searchParams.get("return_url") || "";
-    const receipt = url.searchParams.get("receipt") || `rcpt_${Date.now()}`;
-    const keyId = (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "***REMOVED***").trim();
-
-    const orderId = await createRazorpayOrderRemote(amount, currency, receipt);
-    const mockPaymentId = `pay_sim_${Date.now().toString(36)}`;
-    const mockSig = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "sim_secret")
-      .update(`${orderId}|${mockPaymentId}`)
-      .digest("hex");
-
-    // Build return redirect URL with success params
-    const dest = returnUrl
-      ? `${returnUrl}success&razorpay_order_id=${encodeURIComponent(orderId)}&razorpay_payment_id=${encodeURIComponent(mockPaymentId)}&razorpay_signature=${encodeURIComponent(mockSig)}`
-      : `/checkout/razorpay-return?status=success&razorpay_order_id=${orderId}&razorpay_payment_id=${mockPaymentId}&razorpay_signature=${mockSig}`;
-
-    return envelope({
-      checkout_url: dest,
-      order_id: orderId,
-      checkout_id: checkoutId,
-      key_id: keyId,
-      amount,
-      currency,
-      redirect_mode: true,
+    return await buildRazorpayCheckoutUrl({
+      amount: Number(url.searchParams.get("amount") || "10000"),
+      currency: url.searchParams.get("currency") || "INR",
+      checkoutId: url.searchParams.get("checkout_id") || `chk_${Date.now().toString(36)}`,
+      returnUrl: url.searchParams.get("return_url") || "",
+      receipt: url.searchParams.get("receipt") || `rcpt_${Date.now()}`,
     });
   }
 
@@ -915,16 +1006,23 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     });
   }
 
-  // GET /api/v1/recommendations/metrics
+  // GET /api/v1/recommendations/metrics — same shape as the live gateway
+  // (get_merchant_metrics). Zeros with measured:false: this shim keeps no
+  // order history, and invented lift figures would be displayed as measured.
   if (pathStr === "v1/recommendations/metrics") {
     return envelope({
       metrics: {
-        total_impressions: 48200,
-        click_through_rate: 0.142,
-        conversion_rate: 0.068,
-        average_order_value_minor: 4850000,
-        top_performing_categories: ["Laptops", "Audio", "Monitors"],
-        agent_conversion_lift_pct: 28.5,
+        merchant_id: "merchant_demo",
+        base_aov_minor: 0,
+        ai_assisted_aov_minor: 0,
+        aov_increase_minor: 0,
+        aov_growth_pct: 0.0,
+        cross_sell_attachment_rate_pct: 0.0,
+        cross_sell_conversion_pct: 0.0,
+        total_ai_cross_sell_revenue_minor: 0,
+        currency: "INR",
+        measured: false,
+        note: "No merchant order history available; figures are zero, not measured.",
       },
     });
   }
@@ -934,7 +1032,9 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     return envelope({ campaigns });
   }
 
-  // GET /api/v1/campaigns/analytics
+  // GET /api/v1/campaigns/analytics — counts are live (in-memory store);
+  // lift and revenue need order history this shim does not keep, so they
+  // are zero with measured:false rather than hardcoded marketing figures.
   if (pathStr === "v1/campaigns/analytics") {
     const activeCount = campaigns.filter((c) => c.status === "active").length;
     const completedCount = campaigns.filter((c) => c.status === "completed").length;
@@ -942,17 +1042,18 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
       merchant_id: "mer_agentpay_flagship",
       active_campaigns: activeCount,
       completed_campaigns: completedCount,
-      average_sales_lift_pct: 26.8,
-      incremental_revenue_minor: 14500000,
-      discount_spent_minor: 2130000,
-      net_roi_multiplier: 6.8,
+      average_sales_lift_pct: 0.0,
+      incremental_revenue_minor: 0,
+      discount_spent_minor: 0,
+      net_roi_multiplier: 0.0,
       currency: "INR",
+      measured: false,
       // Legacy aliases
-      total_spend_minor: 2130000,
-      total_revenue_minor: 14500000,
-      roas: 6.8,
+      total_spend_minor: 0,
+      total_revenue_minor: 0,
+      roas: 0.0,
       active_campaigns_count: activeCount,
-      top_performing_campaign: "cmp_back_to_college_2026",
+      top_performing_campaign: null,
     });
   }
 
@@ -1336,6 +1437,30 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     ].slice(0, limit);
 
     return envelope({ events: combinedEvents });
+  }
+
+  // GET /api/v1/authorization/:id — single authorization record for the
+  // human approval screen. Reads the same table the POST handler writes, so
+  // an approval issued in one step is visible in the next.
+  if (pathStr.startsWith("v1/authorization/")) {
+    const authId = decodeURIComponent(pathStr.replace("v1/authorization/", "").split("/")[0]);
+    const view = authorizationView(authId);
+    if (!view) {
+      return errorEnvelope("NOT_FOUND", "The requested authorization does not exist.", 404);
+    }
+    return envelope({ authorization: view });
+  }
+
+  // GET /api/v1/checkout/:id — single checkout record for the approval screen
+  // breakdown. Checkouts are persisted by POST v1/checkout, so this reads the
+  // same table rather than a separate in-memory copy.
+  if (pathStr.startsWith("v1/checkout/")) {
+    const checkoutId = decodeURIComponent(pathStr.replace("v1/checkout/", "").split("/")[0]);
+    const dbCheckout = getDbCheckoutById(checkoutId);
+    if (dbCheckout) {
+      return envelope({ checkout: dbCheckout });
+    }
+    return errorEnvelope("NOT_FOUND", "The requested checkout does not exist.", 404);
   }
 
   return envelope({ message: `API GET endpoint '${pathStr}' ok` });
@@ -1885,16 +2010,28 @@ Buyer Question / Research Inquiry: "${question}"`,
     return envelope({ authorization: record });
   }
 
-  // POST /api/v1/authorization/:id/approve
+  // POST /api/v1/authorization/:id/approve — grant a pending authorization.
+  // Returns the full stored record so callers never lose the bound
+  // checkout, ceiling, or policy fields by overwriting with a stub.
   if (pathStr.startsWith("v1/authorization/") && pathStr.endsWith("/approve")) {
-    const authId = pathStr.replace("v1/authorization/", "").replace("/approve", "");
+    const authId = decodeURIComponent(pathStr.replace("v1/authorization/", "").replace("/approve", "").split("/")[0]);
     approveDbAuthorization(authId);
-    return envelope({
-      authorization: {
-        authorization_id: authId,
-        status: "approved",
-      },
-    });
+    const view = authorizationView(authId);
+    if (!view) {
+      return errorEnvelope("NOT_FOUND", "The requested authorization does not exist.", 404);
+    }
+    return envelope({ authorization: view });
+  }
+
+  // POST /api/v1/authorization/:id/reject — refuse a pending authorization.
+  if (pathStr.startsWith("v1/authorization/") && pathStr.endsWith("/reject")) {
+    const authId = decodeURIComponent(pathStr.replace("v1/authorization/", "").replace("/reject", "").split("/")[0]);
+    rejectDbAuthorization(authId);
+    const view = authorizationView(authId);
+    if (!view) {
+      return errorEnvelope("NOT_FOUND", "The requested authorization does not exist.", 404);
+    }
+    return envelope({ authorization: view });
   }
 
   // POST /api/v1/payments
@@ -1964,6 +2101,10 @@ Buyer Question / Research Inquiry: "${question}"`,
   if (pathStr === "v1/payments/razorpay/verify-signature") {
     const razorpayOrderId = body.razorpay_order_id || `order_${Date.now()}`;
     const razorpayPaymentId = body.razorpay_payment_id || `pay_${Date.now()}`;
+    const check = verifyPaymentSignature(razorpayOrderId, body.razorpay_payment_id, body.razorpay_signature);
+    if (!check.ok) {
+      return errorEnvelope(check.code, check.message, 400);
+    }
     const confirmedOrderId = body.confirmed_order_id || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const checkoutId = body.checkout_id || `chk_${Date.now().toString(36)}`;
     const amountMinor = body.amount || body.amount_minor || 4999900;
@@ -2051,6 +2192,8 @@ Buyer Question / Research Inquiry: "${question}"`,
         payment_id: razorpayPaymentId,
         confirmed_order_id: confirmedOrderId,
         status: "paid", // Matches checkout/razorpay-return page
+        amount_minor: amountMinor,
+        currency,
       },
     });
   }
@@ -2452,6 +2595,109 @@ Buyer Question / Research Inquiry: "${question}"`,
     });
   }
 
+  // POST /api/v1/payments/razorpay/simulate — test-mode only simulated payment.
+  //
+  // Mints a simulated Razorpay payment and immediately verifies it, so the
+  // storefront demo can complete a payment without provider keys. All signing
+  // stays server-side; the browser never sees the sim secret. Refused with
+  // 403 whenever live provider keys are configured, so simulation can never
+  // stand in for a real charge in a live deployment.
+  if (pathStr === "v1/payments/razorpay/simulate") {
+    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      return errorEnvelope(
+        "FORBIDDEN",
+        "Simulated payments are disabled while live provider keys are configured.",
+        403
+      );
+    }
+    const amountMinor = body.amount || body.amount_minor;
+    if (typeof amountMinor !== "number" || !Number.isFinite(amountMinor) || amountMinor <= 0) {
+      return errorEnvelope("VALIDATION_ERROR", "A positive integer amount (minor units) is required.", 400);
+    }
+    const currency = body.currency || "INR";
+    const checkoutId = body.checkout_id;
+    if (!checkoutId) {
+      return errorEnvelope("VALIDATION_ERROR", "checkout_id is required.", 400);
+    }
+    const orderId = `order_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const paymentId = `pay_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const signature = signSimPayment(orderId, paymentId);
+    const confirmedOrderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
+    saveDbPayment({
+      payment_id: paymentId,
+      checkout_id: checkoutId,
+      status: "verified",
+      amount_minor: amountMinor,
+      currency,
+      provider: "razorpay",
+      provider_order_id: orderId,
+      provider_payment_id: paymentId,
+      provider_signature: signature,
+      test_mode: true,
+    });
+
+    const newOrder = saveDbOrder({
+      order_id: confirmedOrderId,
+      checkout_id: checkoutId,
+      payment_id: paymentId,
+      status: "confirmed",
+      total_minor: amountMinor,
+      amount_minor: amountMinor,
+      currency,
+      shipping_address: body.shipping_address || { city: "Bengaluru", street: "Cyber Hub" },
+    });
+    storedOrders.unshift(newOrder);
+
+    saveAuditEvent({
+      event_type: "PAYMENT_VERIFIED",
+      aggregate_type: "payment",
+      aggregate_id: paymentId,
+      actor_type: "system",
+      actor_id: "test_mode_simulator",
+      decision: "allow",
+      reason_code: "SIMULATED_TEST_PAYMENT",
+      policy_version: "pol_v2_agentic_commerce",
+      amount_minor: amountMinor,
+      metadata: { razorpay_order_id: orderId, confirmed_order_id: confirmedOrderId, currency, test_mode: true },
+    });
+
+    saveAuditEvent({
+      event_type: "ORDER_CONFIRMED",
+      aggregate_type: "order",
+      aggregate_id: confirmedOrderId,
+      actor_type: "merchant_admin",
+      actor_id: "order_fulfillment",
+      decision: "allow",
+      reason_code: "ORDER_LOCKED_STOCK_ALLOCATED",
+      policy_version: "pol_v2_agentic_commerce",
+      amount_minor: amountMinor,
+      metadata: { checkout_id: checkoutId, payment_id: paymentId, currency, test_mode: true },
+    });
+
+    return envelope({
+      verified: true,
+      order_id: orderId,
+      payment_id: paymentId,
+      confirmed_order_id: confirmedOrderId,
+      status: "paid",
+      test_mode: true,
+    });
+  }
+
+  // POST /api/v1/payments/razorpay/checkout-url (canonical; mirrors the live
+  // gateway, which only accepts POST because building the URL mints records)
+  if (pathStr === "v1/payments/razorpay/checkout-url") {
+    const amount = typeof body.amount === "number" ? body.amount : 10000;
+    return await buildRazorpayCheckoutUrl({
+      amount,
+      currency: body.currency || "INR",
+      checkoutId: body.checkout_id || `chk_${Date.now().toString(36)}`,
+      returnUrl: body.return_url || "",
+      receipt: body.receipt || `rcpt_${Date.now()}`,
+    });
+  }
+
   // POST /api/create-order or /api/v1/payments/razorpay/create-order (Razorpay standard modal)
   if (pathStr === "create-order" || pathStr === "v1/payments/razorpay/create-order") {
     const amount = body.amount || body.amount_minor || 10000;
@@ -2478,6 +2724,10 @@ Buyer Question / Research Inquiry: "${question}"`,
   ) {
     const paymentId = body.razorpay_payment_id || `pay_${Date.now().toString(36)}`;
     const orderId = body.razorpay_order_id || `order_${Date.now().toString(36)}`;
+    const sigCheck = verifyPaymentSignature(orderId, body.razorpay_payment_id, body.razorpay_signature);
+    if (!sigCheck.ok) {
+      return errorEnvelope(sigCheck.code, sigCheck.message, 400);
+    }
     const confirmedOrderId = body.confirmed_order_id || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const checkoutId = body.checkout_id || `chk_${Date.now().toString(36)}`;
     const amountMinor = body.amount || body.amount_minor || 4999900;

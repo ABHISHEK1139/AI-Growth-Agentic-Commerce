@@ -12,7 +12,13 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
   const { addToCart, wishlist, toggleWishlist, compareList, toggleCompare, openAiDrawer } = useStore();
   const saved = wishlist.includes(product.id);
   const compared = compareList.includes(product.id);
-  const discount = product.originalPriceMinor > product.priceMinor ? Math.round((1 - product.priceMinor / product.originalPriceMinor) * 100) : 0;
+  const outOfStock = (product.stock ?? 0) <= 0;
+  // Integer-only discount: inputs are minor units, so (a - b) * 100 / b is
+  // exact when it divides evenly; guard the zero/negative denominator that
+  // would otherwise render Save Infinity%.
+  const discount = product.originalPriceMinor > 0 && product.originalPriceMinor > product.priceMinor
+    ? Math.round(((product.originalPriceMinor - product.priceMinor) * 100) / product.originalPriceMinor)
+    : 0;
   const [addedToCart, setAddedToCart] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
 
@@ -50,7 +56,8 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
       <div className="absolute left-3 top-3 flex flex-col items-start gap-1.5">
         {isBestMatch && <span className="rounded-full bg-[#174c3c] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm animate-fade-in">Best match</span>}
-        {discount > 0 && <span className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#c65027] shadow-sm backdrop-blur-sm">Save {discount}%</span>}
+        {outOfStock && <span className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#c65027] shadow-sm backdrop-blur-sm">Out of stock</span>}
+        {!outOfStock && discount > 0 && <span className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#c65027] shadow-sm backdrop-blur-sm">Save {discount}%</span>}
       </div>
       <button onClick={() => toggleWishlist(product.id)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow-sm backdrop-blur-sm transition-all duration-200 hover:scale-110 active:scale-90 ${saved ? "text-[#c65027]" : "text-[#526058] hover:text-[#c65027]"}`} aria-label={saved ? "Remove from saved products" : "Save product"}><Heart className={`h-4 w-4 transition-transform duration-200 ${saved ? "fill-current scale-110" : ""}`} /></button>
       {/* Quick view and Ask AI overlay on hover */}
@@ -81,7 +88,7 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
       <div className="mt-4 flex items-end justify-between border-t border-[#edf0ea] pt-4"><div><p className="text-lg font-extrabold tracking-tight text-[#17231e]">{formatMinorToMajor(product.priceMinor, product.currency)}</p>{discount > 0 && <p className="text-[11px] text-[#8a938e] line-through">{formatMinorToMajor(product.originalPriceMinor, product.currency)}</p>}</div><span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#526058]"><Truck className="h-3.5 w-3.5" /> {product.deliveryDays} {product.deliveryDays === 1 ? "day" : "days"}</span></div>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button onClick={() => toggleCompare(product.id)} className={`inline-flex h-9 items-center justify-center gap-1 rounded-xl border text-xs font-bold transition-all duration-200 active:scale-95 ${compared ? "border-[#174c3c] bg-[#e5f0e9] text-[#174c3c]" : "border-[#dfe4dd] text-[#526058] hover:border-[#174c3c] hover:bg-[#f0f7f3]"}`}><Scale className="h-3.5 w-3.5" />{compared ? "Added" : "Compare"}</button>
-        <button onClick={handleAddToCart} className={`inline-flex h-9 items-center justify-center gap-1 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${addedToCart ? "bg-[#1d8c5c] text-white" : "bg-[#174c3c] text-white hover:bg-[#103c2f] hover:shadow-md"}`}><ShoppingBag className="h-3.5 w-3.5" />{addedToCart ? "Added!" : "Add"}</button>
+        <button onClick={handleAddToCart} disabled={outOfStock} className={`inline-flex h-9 items-center justify-center gap-1 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${addedToCart ? "bg-[#1d8c5c] text-white" : outOfStock ? "bg-slate-200 text-slate-500 cursor-not-allowed" : "bg-[#174c3c] text-white hover:bg-[#103c2f] hover:shadow-md"}`}><ShoppingBag className="h-3.5 w-3.5" />{outOfStock ? "Unavailable" : addedToCart ? "Added!" : "Add"}</button>
       </div>
     </div>
   </article>;

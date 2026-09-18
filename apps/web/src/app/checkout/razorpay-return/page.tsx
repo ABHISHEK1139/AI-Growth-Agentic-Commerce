@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { formatMinorToMajor } from "@/lib/money";
-import { apiPost, resolveApiUrl, type ApiError } from "@/lib/api";
+import { apiPost, type ApiError } from "@/lib/api";
 import { useStore } from "@/context/StoreContext";
 
 /**
@@ -30,11 +29,31 @@ interface VerifyResult {
   payment_id: string;
   confirmed_order_id: string;
   status: string;
+  amount_minor?: number;
+  currency?: string;
 }
 
 type Phase = "verifying" | "success" | "failed" | "error";
 
 export default function RazorpayReturnPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center space-y-4">
+            <div className="text-5xl">⏳</div>
+            <h1 className="text-2xl font-black text-slate-900">Confirming your payment…</h1>
+            <p className="text-sm text-slate-500">Verifying with the gateway, please wait.</p>
+          </div>
+        </div>
+      }
+    >
+      <RazorpayReturnBody />
+    </Suspense>
+  );
+}
+
+function RazorpayReturnBody() {
   const searchParams = useSearchParams();
   const { cart, placeOrder, clearCart } = useStore();
   const [phase, setPhase] = useState<Phase>("verifying");
@@ -42,6 +61,9 @@ export default function RazorpayReturnPage() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
+  // Verify exactly once: without this guard the cart-clear below re-triggers
+  // the callback (cart is a dependency) and the verification POST fires twice.
+  const verifiedOnceRef = useRef(false);
 
   const razorpayOrderId = searchParams.get("razorpay_order_id");
   const razorpayPaymentId = searchParams.get("razorpay_payment_id");
@@ -50,6 +72,9 @@ export default function RazorpayReturnPage() {
   const status = searchParams.get("status");
 
   const verifyAndConfirm = useCallback(async () => {
+    if (verifiedOnceRef.current) return;
+    verifiedOnceRef.current = true;
+
     // Buyer abandoned — show retry screen
     if (!razorpayPaymentId || status === "failed") {
       setPhase("failed");
@@ -62,13 +87,21 @@ export default function RazorpayReturnPage() {
       return;
     }
 
+    // A return URL without a signature proves nothing. Refuse to verify
+    // rather than letting the backend decide what an empty string means.
+    if (!razorpaySignature) {
+      setPhase("failed");
+      return;
+    }
+
     try {
       const res = await apiPost<VerifyResult>(
         "/api/v1/payments/razorpay/verify-signature",
         {
           razorpay_order_id: razorpayOrderId,
           razorpay_payment_id: razorpayPaymentId,
-          razorpay_signature: razorpaySignature || "",
+          razorpay_signature: razorpaySignature,
+          checkout_id: checkoutId || undefined,
         }
       );
 
@@ -77,6 +110,14 @@ export default function RazorpayReturnPage() {
         setOrderId(order_id);
         setPaymentId(payment_id);
         setConfirmedOrderId(confirmed_order_id);
+        const localTotal = cart.reduce((acc, i) => acc + i.product.priceMinor * i.quantity, 0);
+        if (typeof res.data.amount_minor === "number" && res.data.amount_minor !== localTotal) {
+          setError(
+            `The confirmed amount does not match your cart total. No local order was recorded — please contact support.`
+          );
+          setPhase("error");
+          return;
+        }
         const isSuccess = verifiedStatus === "paid" || verifiedStatus === "confirmed" || verified;
         if (isSuccess) {
           if (confirmed_order_id && cart.length > 0) {
@@ -100,7 +141,7 @@ export default function RazorpayReturnPage() {
       setError(e?.message || "An unexpected error occurred during verification.");
       setPhase("error");
     }
-  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status, cart, placeOrder, clearCart]);
+  }, [razorpayOrderId, razorpayPaymentId, razorpaySignature, status, checkoutId, cart, placeOrder, clearCart]);
 
   useEffect(() => {
     verifyAndConfirm();

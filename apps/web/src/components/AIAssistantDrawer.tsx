@@ -8,7 +8,8 @@ import { useStore } from "@/context/StoreContext";
 import { getStoredModelConfig, type CustomModelConfig } from "@/catalog/modelConfig";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import { formatMinorToMajor } from "@/lib/money";
-import { exploreCatalog, askProductQuestion } from "@/catalog/client";
+import { apiPost } from "@/lib/api";
+import { createCheckout, exploreCatalog, askProductQuestion } from "@/catalog/client";
 import { exploreOfferToProductItem } from "@/catalog/adapt";
 import {
   sendGrokChatMessage,
@@ -53,6 +54,7 @@ interface Message {
     product: ProductItem;
     quantity: number;
     priceHash: string;
+    checkoutId?: string;
     totalMinor: number;
     currency: string;
     policyStatus: "AUTO_APPROVED" | "SUPERVISOR_REQUIRED" | "POLICY_BLOCKED";
@@ -71,7 +73,6 @@ export function AIAssistantDrawer() {
   const {
     cart,
     placeOrder,
-    removeFromCart,
     userPreferences,
     isAiDrawerOpen,
     openAiDrawer,
@@ -82,7 +83,6 @@ export function AIAssistantDrawer() {
     removeIntentConstraint,
     setSortBy,
     setHighlightedProductId,
-    addToCart,
     getProductById,
   } = useStore();
 
@@ -160,153 +160,25 @@ export function AIAssistantDrawer() {
   }, [messages, loading]);
 
   const handleInAppRazorpayPayment = async (msgId: string, checkoutData: any) => {
-    try {
-      // 1. Create order on backend with real test mode binding
-      const orderRes = await fetch("/api/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: checkoutData.totalMinor,
-          currency: checkoutData.currency || "INR",
-          receipt: `rcpt_ai_${Date.now()}`,
-        }),
+    const fail = (message: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? { ...m, conversationalCheckout: { ...m.conversationalCheckout!, error: message } }
+            : m
+        )
+      );
+    };
+
+    const recordVerifiedOrder = (paymentId: string, confirmedOrderId: string) => {
+      const orderRecord = placeOrder({
+        orderId: confirmedOrderId,
+        paymentId,
+        items: [{ product: checkoutData.product, quantity: checkoutData.quantity || 1 }],
+        totalMinor: checkoutData.totalMinor,
+        currency: checkoutData.currency,
+        policySummary: "Conversational in-app checkout verified by the payment backend",
       });
-
-      let razorpayOrderId = `order_test_${Date.now().toString(36)}`;
-      if (orderRes.ok) {
-        const orderJson = await orderRes.json();
-        razorpayOrderId = orderJson.data?.order_id || orderJson.order_id || razorpayOrderId;
-      }
-
-      const keyId = (
-        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
-        process.env.RAZORPAY_KEY_ID ||
-        "***REMOVED***"
-      ).trim();
-
-      if (typeof window !== "undefined" && window.Razorpay) {
-        const rzp = new window.Razorpay({
-          key: keyId,
-          amount: checkoutData.totalMinor,
-          currency: checkoutData.currency || "INR",
-          name: "AgentPay AI Commerce",
-          description: `Conversational In-App Checkout: ${checkoutData.product.title.slice(0, 35)}`,
-          order_id: razorpayOrderId,
-          handler: async function (response: any) {
-            const paymentId = response.razorpay_payment_id || `pay_${Date.now().toString(36)}`;
-            const orderRecord = placeOrder({
-              paymentId,
-              items: [{ product: checkoutData.product, quantity: checkoutData.quantity || 1 }],
-              totalMinor: checkoutData.totalMinor,
-              currency: checkoutData.currency,
-              policySummary: "Autonomous conversational in-app checkout authorized via Razorpay Test Mode",
-            });
-            removeFromCart(checkoutData.product.id);
-
-            // Verify payment signature & record order in server DB
-            try {
-              await fetch("/api/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  razorpay_order_id: response.razorpay_order_id || razorpayOrderId,
-                  razorpay_payment_id: paymentId,
-                  razorpay_signature: response.razorpay_signature || "sim_sig",
-                  confirmed_order_id: orderRecord.orderId,
-                  amount_minor: checkoutData.totalMinor,
-                  currency: checkoutData.currency || "INR",
-                }),
-              });
-            } catch (err) {
-              console.warn("Verify payment call note:", err);
-            }
-
-            // Post audit event
-            try {
-              await fetch("/api/v1/audit/events", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  event_type: "IN_APP_PAYMENT_COMPLETED",
-                  aggregate_type: "order",
-                  aggregate_id: orderRecord.orderId,
-                  amount_minor: checkoutData.totalMinor,
-                  decision: "allow",
-                  reason_code: "IN_APP_RAZORPAY_TEST_PAID",
-                  metadata: {
-                    payment_id: paymentId,
-                    price_hash: checkoutData.priceHash,
-                    product_id: checkoutData.product.id,
-                  },
-                }),
-              });
-            } catch {}
-
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === msgId
-                  ? {
-                      ...m,
-                      conversationalCheckout: {
-                        ...m.conversationalCheckout!,
-                        completed: true,
-                        paymentId,
-                        orderId: orderRecord.orderId,
-                        error: undefined,
-                      },
-                    }
-                  : m
-              )
-            );
-          },
-          modal: {
-            ondismiss: function () {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === msgId
-                    ? {
-                        ...m,
-                        conversationalCheckout: {
-                          ...m.conversationalCheckout!,
-                          error: "Payment modal was dismissed. Your price lock remains held for 15 minutes.",
-                        },
-                      }
-                    : m
-                )
-              );
-            },
-          },
-          theme: { color: "#174c3c" },
-        });
-        rzp.open();
-      } else {
-        // Fallback simulated payment
-        const paymentId = `pay_sim_${Date.now().toString(36)}`;
-        const orderRecord = placeOrder({
-          paymentId,
-          items: [{ product: checkoutData.product, quantity: checkoutData.quantity || 1 }],
-          totalMinor: checkoutData.totalMinor,
-          currency: checkoutData.currency,
-          policySummary: "Simulated test-mode in-app payment verified",
-        });
-        removeFromCart(checkoutData.product.id);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msgId
-              ? {
-                  ...m,
-                  conversationalCheckout: {
-                    ...m.conversationalCheckout!,
-                    completed: true,
-                    paymentId,
-                    orderId: orderRecord.orderId,
-                  },
-                }
-              : m
-          )
-        );
-      }
-    } catch (err: any) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
@@ -314,12 +186,123 @@ export function AIAssistantDrawer() {
                 ...m,
                 conversationalCheckout: {
                   ...m.conversationalCheckout!,
-                  error: err?.message || "Failed to initiate payment. Please try again.",
+                  completed: true,
+                  paymentId,
+                  orderId: orderRecord.orderId,
+                  error: undefined,
                 },
               }
             : m
         )
       );
+    };
+
+    const verifyAndRecord = async (
+      razorpayOrderId: string,
+      razorpayPaymentId: string,
+      razorpaySignature: string
+    ): Promise<boolean> => {
+      // Verify first, record after: an unverified callback never becomes an order.
+      const verifyRes = await apiPost<{
+        verified: boolean;
+        confirmed_order_id: string;
+        payment_id: string;
+      }>("/api/verify-payment", {
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+        razorpay_signature: razorpaySignature,
+        checkout_id: checkoutData.checkoutId || undefined,
+        amount_minor: checkoutData.totalMinor,
+        currency: checkoutData.currency || "INR",
+      });
+      if (!verifyRes.ok || !verifyRes.data?.verified || !verifyRes.data?.confirmed_order_id) {
+        fail(
+          !verifyRes.ok
+            ? verifyRes.error.message || "Payment verification failed."
+            : "Payment verification failed. No order was recorded."
+        );
+        return false;
+      }
+      recordVerifiedOrder(verifyRes.data.payment_id || razorpayPaymentId, verifyRes.data.confirmed_order_id);
+      return true;
+    };
+
+    try {
+      const liveKeyId = (
+        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+        process.env.RAZORPAY_KEY_ID ||
+        ""
+      ).trim();
+
+      // No provider keys: run the server-side test-mode simulation, which
+      // mints, signs, and verifies server-side. Refused when live keys exist.
+      if (!liveKeyId) {
+        const simRes = await apiPost<{
+          verified: boolean;
+          confirmed_order_id: string;
+          payment_id: string;
+        }>("/api/v1/payments/razorpay/simulate", {
+          amount: checkoutData.totalMinor,
+          currency: checkoutData.currency || "INR",
+          checkout_id: checkoutData.checkoutId || undefined,
+        });
+        if (!simRes.ok || !simRes.data?.verified || !simRes.data?.confirmed_order_id) {
+          fail(!simRes.ok ? simRes.error.message || "Simulated payment failed." : "Simulated payment failed. No order was recorded.");
+          return;
+        }
+        recordVerifiedOrder(simRes.data.payment_id, simRes.data.confirmed_order_id);
+        return;
+      }
+
+      // Live keys: create a real provider order, then open the Razorpay modal.
+      const orderRes = await apiPost<{ order_id: string; amount: number; currency: string }>(
+        "/api/create-order",
+        {
+          amount: checkoutData.totalMinor,
+          currency: checkoutData.currency || "INR",
+          receipt: `rcpt_ai_${Date.now()}`,
+          checkout_id: checkoutData.checkoutId || undefined,
+        }
+      );
+      if (!orderRes.ok || !orderRes.data?.order_id) {
+        fail(!orderRes.ok ? orderRes.error.message : "Failed to create Razorpay order.");
+        return;
+      }
+      const razorpayOrderId = orderRes.data.order_id;
+      const { amount, currency } = orderRes.data;
+
+      if (typeof window !== "undefined" && window.Razorpay) {
+        const rzp = new window.Razorpay({
+          key: liveKeyId,
+          amount,
+          currency,
+          name: "AgentPay AI Commerce",
+          description: `Conversational In-App Checkout: ${checkoutData.product.title.slice(0, 35)}`,
+          order_id: razorpayOrderId,
+          handler: async function (response: any) {
+            if (!response?.razorpay_payment_id || !response?.razorpay_signature) {
+              fail("The payment callback was incomplete. No order was recorded.");
+              return;
+            }
+            await verifyAndRecord(
+              response.razorpay_order_id || razorpayOrderId,
+              response.razorpay_payment_id,
+              response.razorpay_signature
+            );
+          },
+          modal: {
+            ondismiss: function () {
+              fail("Payment modal was dismissed. Your price lock remains held for 15 minutes.");
+            },
+          },
+          theme: { color: "#174c3c" },
+        });
+        rzp.open();
+      } else {
+        fail("Razorpay SDK not loaded. Please refresh and try again.");
+      }
+    } catch (err: any) {
+      fail(err?.message || "Failed to initiate payment. Please try again.");
     }
   };
 
@@ -451,37 +434,57 @@ export function AIAssistantDrawer() {
     ) {
       const targetProd = aiDrawerContext.product || activeProductsInView[0] || (cart.length > 0 ? cart[0].product : null);
       if (targetProd) {
-        addToCart(targetProd, 1, false);
-
-        const autoLimit = userPreferences.autoApprovalLimitMinor || 500000;
-        const total = targetProd.priceMinor;
-        const isApproved = total <= autoLimit;
-        const priceHash = `sha256_${Date.now().toString(16)}_${Math.random().toString(36).slice(2, 8)}`;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `agt_chk_${Date.now()}`,
-            sender: "agent",
-            text: `I've prepared an instant **Conversational In-App Checkout** for the **${targetProd.title}**.\n\n` +
-              `• **Price Locked**: ${formatMinorToMajor(total, targetProd.currency)} (held for 15 mins)\n` +
-              `• **Delivery**: Free 2-Day Express Guaranteed\n` +
-              `• **Policy Gate**: ${isApproved ? "✓ Within autonomous spending ceiling (Auto-Approved)" : "⚠ Requires 1-click supervisor sign-off"}\n\n` +
-              `You can complete payment directly in this conversation using **Razorpay Test Mode** below:`,
-            conversationalCheckout: {
-              product: targetProd,
-              quantity: 1,
-              priceHash,
-              totalMinor: total,
-              currency: targetProd.currency || "INR",
-              policyStatus: isApproved ? "AUTO_APPROVED" : "SUPERVISOR_REQUIRED",
-              policyExplanation: isApproved
-                ? `Conforms to autonomous purchasing policy (< ${formatMinorToMajor(autoLimit, targetProd.currency)} threshold).`
-                : `Transaction exceeds ${formatMinorToMajor(autoLimit, targetProd.currency)} auto-approval threshold. One-click step-up authorization required.`,
+        // Freeze a real server checkout before promising anything. The card
+        // below quotes the gateway's frozen total and hash — never a
+        // client-side invention — and nothing is added to the bag yet.
+        const freezeRes = await createCheckout({
+          offer_id: targetProd.offerId || targetProd.id,
+          quantity: 1,
+        });
+        if (!freezeRes.ok || !freezeRes.data?.checkout) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `agt_${Date.now()}`,
+              sender: "agent",
+              text: `I couldn't freeze a price for **${targetProd.title}** right now (${!freezeRes.ok ? freezeRes.error.message : "empty response"}). Your bag is unchanged — please try again in a moment.`,
+              isError: true,
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             },
-            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          },
-        ]);
+          ]);
+        } else {
+          const frozen = freezeRes.data.checkout;
+          const total = frozen.pricing?.total_minor ?? targetProd.priceMinor;
+          const currency = frozen.pricing?.currency || targetProd.currency || "INR";
+          const autoLimit = userPreferences.autoApprovalLimitMinor || 500000;
+          const isApproved = total <= autoLimit;
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `agt_chk_${Date.now()}`,
+              sender: "agent",
+              text: `I've prepared an instant **Conversational In-App Checkout** for the **${targetProd.title}**.\n\n` +
+                `• **Price Locked**: ${formatMinorToMajor(total, currency)} (held for 15 mins)\n` +
+                `• **Delivery**: Free 2-Day Express Guaranteed\n` +
+                `• **Policy Gate**: ${isApproved ? "✓ Within autonomous spending ceiling (Auto-Approved)" : "⚠ Requires 1-click supervisor sign-off"}\n\n` +
+                `You can complete payment directly in this conversation using **Razorpay Test Mode** below:`,
+              conversationalCheckout: {
+                product: targetProd,
+                quantity: frozen.pricing?.quantity || 1,
+                priceHash: frozen.price_hash,
+                checkoutId: frozen.checkout_id,
+                totalMinor: total,
+                currency,
+                policyStatus: isApproved ? "AUTO_APPROVED" : "SUPERVISOR_REQUIRED",
+                policyExplanation: isApproved
+                  ? `Conforms to autonomous purchasing policy (< ${formatMinorToMajor(autoLimit, currency)} threshold).`
+                  : `Transaction exceeds ${formatMinorToMajor(autoLimit, currency)} auto-approval threshold. One-click step-up authorization required.`,
+              },
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            },
+          ]);
+        }
       } else {
         setMessages((prev) => [
           ...prev,
@@ -626,16 +629,30 @@ export function AIAssistantDrawer() {
       qLower.includes("feedback") ||
       qLower.includes("battery life");
 
+    // Never answer about an unrelated product: without a match there is no
+    // factual basis, so ask which product the question is about.
     const matchedCatalogProduct =
       ALL_PRODUCTS.find(
         (p) =>
           qLower.includes(p.title.toLowerCase().slice(0, 15)) ||
           qLower.includes(p.brand.toLowerCase())
-      ) ||
-      activeProductsInView[0] ||
-      ALL_PRODUCTS[0];
+      ) || activeProductsInView[0] || null;
 
     const targetProductForQA = aiDrawerContext.product || matchedCatalogProduct;
+
+    if (isProductSpecQuestion && !targetProductForQA) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `agt_${Date.now()}`,
+          sender: "agent",
+          text: "Which product is that question about? Open a product page or name it (brand or model) and I'll answer from its verified specifications.",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+      setLoading(false);
+      return;
+    }
 
     if (isProductSpecQuestion && targetProductForQA) {
       try {
@@ -1021,11 +1038,11 @@ export function AIAssistantDrawer() {
                           <span>Laptops</span>
                         </Link>
                         <Link
-                          href="/search?deals=true"
+                          href="/category/audio"
                           onClick={closeAiDrawer}
                           className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
                         >
-                          <span>Deals</span>
+                          <span>Audio</span>
                         </Link>
                       </div>
                     </div>

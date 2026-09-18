@@ -49,6 +49,11 @@ def test_sweep_expired_checkouts_releases_inventory():
     mock_session.query.return_value.filter.return_value.with_for_update.return_value.all.return_value = [
         expired_chk
     ]
+    # The sweep orders and bounds the batch: filter -> order_by ->
+    # with_for_update -> limit -> all.
+    (
+        mock_session.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.limit.return_value.all.return_value
+    ) = [expired_chk]
     mock_factory = MagicMock(
         return_value=MagicMock(__enter__=MagicMock(return_value=mock_session), __exit__=MagicMock())
     )

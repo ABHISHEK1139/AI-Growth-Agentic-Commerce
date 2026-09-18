@@ -9,23 +9,23 @@ test.describe("Shopper Journey & AI Exploration", () => {
     const header = page.locator("header");
     await expect(header).toBeVisible();
 
-    // Verify product listings are rendered
+    // Verify product listings are rendered. Strictly greater than zero:
+    // a catalog page with no products is a failure, not a pass.
     const productCards = page.locator("[data-product-id]");
     const count = await productCards.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("interacts with AI shopping assistant drawer", async ({ page }) => {
     await page.goto("/");
 
-    // Locate AI Assistant trigger button
+    // Locate AI Assistant trigger button (no conditional: absence is a failure)
     const aiButton = page.locator("button:has-text('AI Assistant'), button:has-text('Chat'), button[aria-label*='AI']").first();
-    if (await aiButton.isVisible()) {
-      await aiButton.click();
-      // Verify drawer or chat input opens
-      const chatInput = page.locator("input[placeholder*='Ask'], input[placeholder*='Search'], textarea").first();
-      await expect(chatInput).toBeVisible();
-    }
+    await expect(aiButton).toBeVisible();
+    await aiButton.click();
+    // Verify drawer or chat input opens
+    const chatInput = page.locator("input[placeholder*='Ask'], input[placeholder*='Search'], textarea").first();
+    await expect(chatInput).toBeVisible();
   });
 
   test("views cart and checkout page", async ({ page }) => {

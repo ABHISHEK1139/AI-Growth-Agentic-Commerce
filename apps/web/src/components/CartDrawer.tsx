@@ -16,8 +16,17 @@ import {
 } from "lucide-react";
 import { useStore } from "@/context/StoreContext";
 import { formatMinorToMajor } from "@/lib/money";
+import { apiGet, apiPost } from "@/lib/api";
+import { getCatalogOffer } from "@/catalog/client";
 import { categoryTitleForSlug } from "@/catalog/present";
-import { defaultImageForCategory } from "@/catalog/adapt";
+import { catalogOfferToProductItem, defaultImageForCategory } from "@/catalog/adapt";
+import type { ProductItem } from "@/data/products";
+
+interface CompanionCard {
+  item: ProductItem;
+  compatibility_reason: string;
+  savings_minor: number;
+}
 
 export function CartDrawer() {
   const router = useRouter();
@@ -32,10 +41,13 @@ export function CartDrawer() {
   } = useStore();
 
   const drawerRef = useRef<HTMLDivElement>(null);
-  const [companion, setCompanion] = useState<any>(null);
+  const [companion, setCompanion] = useState<CompanionCard | null>(null);
   const [companionLoading, setCompanionLoading] = useState(false);
 
-  // Fetch AI cross-sell companion recommendation for latest cart item
+  // Fetch AI cross-sell companion recommendation for latest cart item.
+  // The card is built from the live offer + catalog facts only: if the
+  // recommendation cannot be resolved to a real offer, no card is shown
+  // rather than a card with invented ratings, stock, or merchant.
   useEffect(() => {
     if (!isCartDrawerOpen || cart.length === 0) {
       setCompanion(null);
@@ -48,26 +60,42 @@ export function CartDrawer() {
     let cancelled = false;
     setCompanionLoading(true);
 
-    fetch("/api/v1/recommendations/cross-sell", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_product_id: latest.id }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return;
-        const recs = data?.data?.recommendations || [];
-        const candidate = recs.find(
-          (r: any) => !cart.some((ci) => ci.product.id === r.id || ci.product.id === r.product_id)
+    (async () => {
+      try {
+        const recRes = await apiPost<{ recommendations: Array<{ product_id: string; compatibility_reason?: string; savings_minor?: number }> }>(
+          "/api/v1/recommendations/cross-sell",
+          { target_product_id: latest.id }
         );
-        setCompanion(candidate || null);
-      })
-      .catch(() => {
+        if (cancelled) return;
+        const recs = recRes.ok ? recRes.data?.recommendations || [] : [];
+        const candidate = recs.find(
+          (r) => r?.product_id && !cart.some((ci) => ci.product.id === r.product_id)
+        );
+        if (!candidate) {
+          setCompanion(null);
+          return;
+        }
+        const offerRes = await getCatalogOffer(candidate.product_id);
+        if (cancelled) return;
+        if (!offerRes.ok || !offerRes.data?.offer) {
+          setCompanion(null);
+          return;
+        }
+        const item = catalogOfferToProductItem(offerRes.data.offer, {});
+        item.aiBadge = "✦ AI Cross-Sell";
+        setCompanion({
+          item,
+          compatibility_reason:
+            candidate.compatibility_reason || "Frequently bought with items in your bag.",
+          savings_minor:
+            typeof candidate.savings_minor === "number" ? candidate.savings_minor : 0,
+        });
+      } catch {
         if (!cancelled) setCompanion(null);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setCompanionLoading(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -118,50 +146,7 @@ export function CartDrawer() {
 
   const handleAddCompanion = () => {
     if (!companion) return;
-    const companionProduct: any = {
-      id: companion.id || companion.product_id,
-      slug: companion.id || companion.product_id,
-      title: companion.title,
-      priceMinor: companion.price_minor,
-      originalPriceMinor: companion.original_price_minor || companion.price_minor + (companion.savings_minor || 30000),
-      currency: "INR",
-      rating: 4.8,
-      reviewCount: 320,
-      stock: 15,
-      deliveryDays: 1,
-      returnDays: 14,
-      imageUrl: companion.image_url,
-      category: companion.category || "accessory",
-      categoryLabel: "Accessories",
-      brand: "Certified Companion",
-      aiBadge: "✦ AI Cross-Sell",
-      shortSpecs: companion.compatibility_reason || "Compatible accessory",
-      whyFitsYou: {
-        summary: companion.compatibility_reason || "Engineered to complement your setup.",
-        pros: ["100% verified compatibility", "Exclusive bundle discount applied"],
-        warnings: [],
-      },
-      specsGrouped: {
-        performance: { "Type": "Accessory", "Compatibility": "Certified" },
-      },
-      sentiment: {
-        performancePct: 96,
-        batteryPct: 92,
-        buildQualityPct: 95,
-        valuePct: 98,
-        customerLikes: ["High quality", "Great bundle price"],
-        customerConcerns: [],
-      },
-      reviews: [],
-      qa: [],
-      merchant: {
-        id: "mer_agentpay_flagship",
-        name: "AgentPay Verified",
-        verified: true,
-        rating: 4.9,
-      },
-    };
-    addToCart(companionProduct, 1, false);
+    addToCart(companion.item, 1, false);
   };
 
   return (
@@ -323,17 +308,17 @@ export function CartDrawer() {
               <div className="flex items-center gap-3">
                 <div className="w-14 h-14 rounded-xl bg-white border border-emerald-100 overflow-hidden shrink-0 shadow-2xs">
                   <img
-                    src={companion.image_url}
-                    alt={companion.title}
+                    src={companion.item.imageUrl}
+                    alt={companion.item.title}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = defaultImageForCategory("accessories", companion.title, "Certified Partner");
+                      (e.currentTarget as HTMLImageElement).src = defaultImageForCategory("accessories", companion.item.title, companion.item.brand);
                     }}
                   />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h4 className="text-xs font-black text-slate-900 truncate leading-snug">
-                    {companion.title}
+                    {companion.item.title}
                   </h4>
                   <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-tight font-medium">
                     {companion.compatibility_reason}
@@ -341,11 +326,11 @@ export function CartDrawer() {
                   <div className="mt-1.5 flex items-center justify-between">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-xs font-black text-slate-900">
-                        {formatMinorToMajor(companion.price_minor, currency)}
+                        {formatMinorToMajor(companion.item.priceMinor, currency)}
                       </span>
-                      {companion.original_price_minor && (
+                      {companion.item.originalPriceMinor > companion.item.priceMinor && (
                         <span className="text-[10px] text-slate-400 line-through">
-                          {formatMinorToMajor(companion.original_price_minor, currency)}
+                          {formatMinorToMajor(companion.item.originalPriceMinor, currency)}
                         </span>
                       )}
                     </div>

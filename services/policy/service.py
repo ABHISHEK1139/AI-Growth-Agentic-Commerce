@@ -37,25 +37,34 @@ class PolicyService:
         session: Session,
         *,
         checkout_id: str,
-        merchant_id: str | None = None,
-        buyer_id: str | None = None,
+        merchant_id: str,
+        buyer_id: str,
         now: datetime | None = None,
     ) -> PolicyDecisionV1:
         """Load checkout, rules, evaluate policy, persist decision, and record audit event."""
         current_time = now or datetime.now(UTC)
 
-        # 1. Load checkout
-        query = session.query(Checkout).filter(Checkout.checkout_id == checkout_id)
-        if merchant_id is not None:
-            query = query.filter(Checkout.merchant_id == merchant_id)
-        if buyer_id is not None:
-            query = query.filter(Checkout.buyer_id == buyer_id)
+        # 1. Load checkout — always within the caller's tenant. An unscopped
+        # read here would evaluate (and persist a decision for) another
+        # tenant's checkout.
+        query = (
+            session.query(Checkout)
+            .filter(Checkout.checkout_id == checkout_id)
+            .filter(Checkout.merchant_id == merchant_id)
+            .filter(Checkout.buyer_id == buyer_id)
+        )
         checkout = query.first()
         if checkout is None:
             raise DomainError("The requested checkout does not exist.", code=ErrorCode.NOT_FOUND)
 
-        # 2. Load offer & product
-        offer = session.query(Offer).filter(Offer.offer_id == checkout.offer_id).first()
+        # 2. Load offer & product — pinned to the checkout's own merchant so a
+        # cross-merchant offer can never be mixed into this evaluation.
+        offer = (
+            session.query(Offer)
+            .filter(Offer.offer_id == checkout.offer_id)
+            .filter(Offer.merchant_id == checkout.merchant_id)
+            .first()
+        )
         product = (
             session.query(Product).filter(Product.product_id == offer.product_id).first()
             if offer

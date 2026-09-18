@@ -175,6 +175,6 @@ def revoke_api_key(
     registry = _registry(request)
     for client in _clients_for_tenant(registry, principal.merchant_id):
         if client.client_id == client_id:
-            client.active = False
+            registry.revoke(client_id)
             return success({"revoked": True, "client_id": client_id})
     return success({"revoked": False, "reason": "not_found"})

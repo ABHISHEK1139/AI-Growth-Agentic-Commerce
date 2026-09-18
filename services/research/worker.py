@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import ipaddress
 import re
 import urllib.parse
 from dataclasses import dataclass
@@ -14,30 +13,17 @@ import httpx
 MAX_SEARCH_STEPS = 5
 MAX_PAGE_FETCHES = 3
 
-_BLOCKED_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"})  # noqa: S104
-
 
 def is_safe_public_url(url: str) -> bool:
-    """Validate that a URL uses http(s) and does not point to private or loopback IP ranges."""
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        hostname = parsed.hostname
-        if not hostname or hostname.lower() in _BLOCKED_HOSTNAMES:
-            return False
+    """Validate that a URL uses http(s) and does not point to private or loopback IP ranges.
 
-        try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
-                return False
-        except ValueError:
-            # Hostname is a domain name, not an IP literal
-            pass
+    Single implementation lives in :mod:`services.research.safety.url_policy`
+    (integer/hex IP spellings, local-domain suffixes, reserved ranges). This
+    alias exists so existing imports keep working; do not fork the logic.
+    """
+    from services.research.safety.url_policy import is_safe_public_url as _canonical
 
-        return True
-    except Exception:
-        return False
+    return _canonical(url)
 
 
 def _clean_html_text(raw_html: str) -> str:
@@ -143,7 +129,11 @@ class ResearchWorker:
                     )
                 )
 
-        # 2. Process caller-supplied external references with strict SSRF validation
+        # 2. Process caller-supplied external references with strict SSRF validation.
+        # NOTE: these URLs are never fetched here, so they must never wear
+        # a trust label. An unfetched reference is recorded as unresolved at
+        # low confidence; only retrieved + sanitized content earns
+        # "official_doc".
         for url in urls[:MAX_PAGE_FETCHES]:
             step_count += 1
             if step_count > MAX_SEARCH_STEPS:
@@ -156,10 +146,10 @@ class ResearchWorker:
             page_fetches += 1
             evidence.append(
                 ResearchEvidence(
-                    claim=f"Information regarding {query} from {url}",
-                    citation_type="official_doc",
+                    claim=f"Unverified reference regarding {query}: {url} (content not retrieved)",
+                    citation_type="unresolved",
                     source_url=url,
-                    confidence=0.9,
+                    confidence=0.3,
                 )
             )
 

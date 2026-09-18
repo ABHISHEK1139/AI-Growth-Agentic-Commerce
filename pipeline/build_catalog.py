@@ -2642,6 +2642,15 @@ def _seeded_int(parent_asin: str, salt: str, minimum: int, maximum: int) -> int:
     return minimum + int.from_bytes(digest[:8], "big") % (maximum - minimum + 1)
 
 
+class OfferPriceMissing(ValueError):
+    """A product is fine but carries no usable price, so no offer can be made.
+
+    Distinct from malformed lines: counted separately so catalog shrinkage
+    from missing prices is visible instead of hiding inside a parse-error
+    bucket.
+    """
+
+
 def build_offer(product: Mapping[str, Any]) -> JsonDict:
     """Create an INR offer from the recorded USD price at the fixed demo rate."""
     provenance = product.get("provenance")
@@ -2651,12 +2660,12 @@ def build_offer(product: Mapping[str, Any]) -> JsonDict:
     subcategory = str(product.get("category_id", UNCATEGORIZED))
     source_price = product.get("source_price")
     if not isinstance(source_price, Mapping):
-        raise ValueError("product lacks a usable source_price")
+        raise OfferPriceMissing("product lacks a usable source_price")
     if source_price.get("currency") != "USD":
-        raise ValueError("product source_price currency must be USD")
+        raise OfferPriceMissing("product source_price currency must be USD")
     amount_minor = source_price.get("amount_minor")
     if not isinstance(amount_minor, int) or isinstance(amount_minor, bool) or amount_minor <= 0:
-        raise ValueError("product source_price.amount_minor must be a positive integer")
+        raise OfferPriceMissing("product source_price.amount_minor must be a positive integer")
     product_id = str(product["product_id"])
     return {
         "offer_id": "off_" + hashlib.sha256(parent_asin.encode("utf-8")).hexdigest()[:20],
@@ -2684,6 +2693,10 @@ class OfferGenerationResult:
     products_read: int = 0
     offers_written: int = 0
     malformed_lines: int = 0
+    #: Products skipped because no usable price could be determined. Counted
+    #: separately from malformed lines: the product record is fine, the offer
+    #: cannot be priced, and conflating the two hides catalog shrinkage.
+    offers_skipped_no_price: int = 0
     already_complete: bool = False
 
 
@@ -2716,12 +2729,21 @@ def stage_offers(
                     if not isinstance(product, dict):
                         raise ValueError("product must be an object")
                     offer = build_offer(product)
+                except OfferPriceMissing:
+                    result.products_read += 1
+                    result.offers_skipped_no_price += 1
+                    continue
                 except (json.JSONDecodeError, ValueError):
                     result.malformed_lines += 1
                     continue
                 result.products_read += 1
                 destination.write(_dump(offer) + "\n")
                 result.offers_written += 1
+        if result.offers_skipped_no_price:
+            print(
+                f"stage 4 (offers): {result.offers_skipped_no_price:,} products skipped "
+                "with no usable price (counted separately from malformed lines)"
+            )
         write_stage_state(connection, STAGE_OFFERS, "complete", cap, records=result.offers_written)
         return result
     finally:
@@ -2797,6 +2819,9 @@ def stage_reviews(
     selected = _selected_products(config.products_jsonl)
     result = ReviewLinkResult()
     state_connection = connect(config.candidates_db)
+    # reviews.sqlite lives under the output dir, which may not exist yet on a
+    # fresh machine (unlike candidates.sqlite, which connect() creates for).
+    config.reviews_db.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(config.reviews_db)
     try:
         ensure_schema(state_connection)
@@ -2823,6 +2848,7 @@ def stage_reviews(
             if not source_path.is_file():
                 continue
             stats = ScanStats()
+            pending = 0
             for record in iter_jsonl_gz(source_path, max_lines=cap, stats=stats):
                 result.reviews_seen += 1
                 parent_asin = record.get("parent_asin")
@@ -2851,6 +2877,14 @@ def stage_reviews(
                     ),
                 )
                 result.reviews_linked += cursor.rowcount
+                pending += 1
+                # Commit in batches like stage 1: a kill or OOM late in a
+                # multi-million-row source must not discard the whole pass.
+                if pending >= BATCH_SIZE:
+                    connection.commit()
+                    pending = 0
+            if pending:
+                connection.commit()
             result.malformed_lines += stats.malformed
         connection.commit()
         write_stage_state(
@@ -2937,56 +2971,65 @@ StageHandler = Callable[[PipelineConfig, argparse.Namespace], int]
 
 
 def _run_products(config: PipelineConfig, args: argparse.Namespace) -> int:
-    stage_products(
+    result = stage_products(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = not result.already_complete
     return 0
 
 
 def _run_select(config: PipelineConfig, args: argparse.Namespace) -> int:
-    stage_select(
+    result = stage_select(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = not result.already_complete
     return 0
 
 
 def _run_images(config: PipelineConfig, args: argparse.Namespace) -> int:
-    stage_images(
+    result = stage_images(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = not result.already_complete
     return 0
 
 
 def _run_offers(config: PipelineConfig, args: argparse.Namespace) -> int:
-    stage_offers(
+    result = stage_offers(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = not result.already_complete
     return 0
 
 
 def _run_reviews(config: PipelineConfig, args: argparse.Namespace) -> int:
-    stage_reviews(
+    result = stage_reviews(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = not result.already_complete
     return 0
 
 
 def _run_report(config: PipelineConfig, args: argparse.Namespace) -> int:
+    # stage_report returns a plain dict either way (rebuilt or cached), so
+    # there is no already_complete flag to read. It is the last stage, so
+    # the flag is never consumed downstream regardless.
     stage_report(
         config,
         force=bool(getattr(args, "force", False)),
         max_lines=getattr(args, "max_lines", None),
     )
+    args.last_stage_rebuilt = False
     return 0
 
 
@@ -3039,6 +3082,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     exit_code = 0
     for stage in stages:
+        # In a full run, a stage that actually rebuilt invalidates everything
+        # downstream: without this, `all` after `select --force` would reuse
+        # a stale manifest, offers, and reviews while reporting success.
+        if args.stage == "all" and bool(getattr(args, "_downstream_dirty", False)):
+            args.force = True
         handler = STAGE_HANDLERS.get(stage)
         if handler is None:
             message = f"stage '{stage}' is not implemented"
@@ -3048,6 +3096,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(message, file=sys.stderr)
             return 2
         exit_code = handler(config, args) or exit_code
+        if args.stage == "all" and bool(getattr(args, "last_stage_rebuilt", False)):
+            args._downstream_dirty = True
     return exit_code
 
 

@@ -126,23 +126,37 @@ def _sweep_expired_checkouts() -> None:
                     Checkout.status.in_(["created", "policy_checked", "authorization_pending"]),
                     Checkout.expires_at <= now,
                 )
+                .order_by(Checkout.expires_at)
                 .with_for_update(skip_locked=True)
+                .limit(200)
                 .all()
             )
             for chk in expired_checkouts:
-                transition(
-                    chk,
-                    TransitionEvent.EXPIRE_CHECKOUT,
-                    TransitionContext(
-                        actor_type="system",
-                        actor_id="worker_sweep",
-                        merchant_id=chk.merchant_id,
-                    ),
-                    session,
-                )
-                inv_service.release_stock(
-                    session, checkout_id=chk.checkout_id, merchant_id=chk.merchant_id
-                )
+                # One poison row must not abort the whole sweep: each item
+                # gets its own savepoint inside the batch transaction.
+                nested = session.begin_nested()
+                try:
+                    transition(
+                        chk,
+                        TransitionEvent.EXPIRE_CHECKOUT,
+                        TransitionContext(
+                            actor_type="system",
+                            actor_id="worker_sweep",
+                            merchant_id=chk.merchant_id,
+                        ),
+                        session,
+                    )
+                    inv_service.release_stock(
+                        session, checkout_id=chk.checkout_id, merchant_id=chk.merchant_id
+                    )
+                    session.flush()
+                except Exception as item_exc:
+                    nested.rollback()
+                    logger.warning(
+                        "Checkout sweep item skipped",
+                        extra={"error": str(item_exc), "checkout_id": chk.checkout_id},
+                    )
+                    continue
             session.commit()
     except Exception as exc:
         logger.warning(
@@ -175,56 +189,73 @@ def _reconcile_stale_webhooks() -> None:
                 .all()
             )
             for entry in stale:
-                # Re-dispatch the stored payload through the normal processor
-                result = processor.process_webhook(
-                    session,
-                    provider=entry.provider,
-                    payload=entry.payload,
-                    signature=entry.signature,
-                )
-                entry.attempt_count += 1
-                entry.last_attempt_at = now
-                if result.get("ok"):
-                    entry.status = "resolved"
-                    entry.resolved_at = now
-                    entry.resolution_note = "Retry succeeded via reconcile_stale_webhooks"
-                else:
-                    # Exponential backoff: 5, 10, 20, 40, 80 minutes
-                    backoff = 5 * (2 ** (entry.attempt_count - 1))
-                    entry.next_retry_at = now + td(minutes=backoff)
-                    entry.last_error = str(result.get("error", "unknown"))[:500]
-                session.flush()
+                nested = session.begin_nested()
+                try:
+                    # Re-dispatch the stored payload through the normal processor.
+                    # process_webhook verifies HMAC over raw bytes, so re-serialize
+                    # the stored payload deterministically.
+                    import json as _json
+
+                    _raw = _json.dumps(entry.payload or {}, separators=(",", ":")).encode("utf-8")
+                    result = processor.process_webhook(
+                        session,
+                        raw_body=_raw,
+                        signature=entry.signature or "",
+                        provider_name=entry.provider or "fake",
+                    )
+                    entry.attempt_count += 1
+                    entry.last_attempt_at = now
+                    if result.get("ok"):
+                        entry.status = "resolved"
+                        entry.resolved_at = now
+                        entry.resolution_note = "Retry succeeded via reconcile_stale_webhooks"
+                    else:
+                        # Exponential backoff: 5, 10, 20, 40, 80 minutes
+                        backoff = 5 * (2 ** (entry.attempt_count - 1))
+                        entry.next_retry_at = now + td(minutes=backoff)
+                        entry.last_error = str(result.get("error", "unknown"))[:500]
+                    session.flush()
+                except Exception as item_exc:
+                    nested.rollback()
+                    logger.warning(
+                        "Webhook reconcile item skipped",
+                        extra={
+                            "error": str(item_exc),
+                            "failed_webhook_id": entry.failed_webhook_id,
+                        },
+                    )
+                    continue
 
             # Alert on entries that have reached their retry cap. These are
-            # the ones that need a human, not another worker tick.
+            # the ones that need a human, not another worker tick. Same
+            # session (after flush): a second session opened before the
+            # commit below cannot see the rows this tick just exhausted.
             from services.operations.alerts import Alert, AlertKind, AlertSeverity, alerts
 
-            factory_inner = get_session_factory()
-            with factory_inner() as alert_session:
-                exhausted = (
-                    alert_session.query(FailedWebhook)
-                    .filter(
-                        FailedWebhook.status == "pending",
-                        FailedWebhook.attempt_count >= FailedWebhook.max_attempts,
-                    )
-                    .all()
+            exhausted = (
+                session.query(FailedWebhook)
+                .filter(
+                    FailedWebhook.status == "pending",
+                    FailedWebhook.attempt_count >= FailedWebhook.max_attempts,
                 )
-                for entry in exhausted:
-                    alerts().fire(
-                        Alert(
-                            kind=AlertKind.WEBHOOK_RETRY_EXHAUSTED,
-                            severity=AlertSeverity.CRITICAL,
-                            message="Webhook retry budget exhausted; manual replay required",
-                            context={
-                                "failed_webhook_id": entry.failed_webhook_id,
-                                "provider": entry.provider,
-                                "event_type": entry.event_type,
-                                "attempt_count": entry.attempt_count,
-                                "max_attempts": entry.max_attempts,
-                                "last_error": (entry.last_error or "")[:200],
-                            },
-                        )
+                .all()
+            )
+            for entry in exhausted:
+                alerts().fire(
+                    Alert(
+                        kind=AlertKind.WEBHOOK_RETRY_EXHAUSTED,
+                        severity=AlertSeverity.CRITICAL,
+                        message="Webhook retry budget exhausted; manual replay required",
+                        context={
+                            "failed_webhook_id": entry.failed_webhook_id,
+                            "provider": entry.provider,
+                            "event_type": entry.event_type,
+                            "attempt_count": entry.attempt_count,
+                            "max_attempts": entry.max_attempts,
+                            "last_error": (entry.last_error or "")[:200],
+                        },
                     )
+                )
             session.commit()
     except Exception as exc:
         logger.warning(
@@ -248,16 +279,32 @@ def _poll_unknown_payments() -> None:
         provider = get_payment_provider(get_settings().payment_provider_config())
         pay_service = PaymentService(provider=provider)
         factory = get_session_factory()
+        # Collect ids first, then release the transaction: provider fetches
+        # are network I/O and must never run while holding row locks.
         with factory() as session:
-            unknown_payments = (
-                session.query(Payment)
+            unknown_ids = [
+                row[0]
+                for row in session.query(Payment.payment_id)
                 .filter(Payment.status == "unknown")
-                .with_for_update(skip_locked=True)
+                .limit(50)
                 .all()
-            )
-            for pay in unknown_payments:
-                if pay.provider_order_id:
-                    order = provider.fetch_order(pay.provider_order_id)
+            ]
+            session.commit()
+        for payment_id in unknown_ids:
+            with factory() as session:
+                pay = (
+                    session.query(Payment)
+                    .filter(Payment.payment_id == payment_id)
+                    .with_for_update()
+                    .first()
+                )
+                if pay is None or pay.status != "unknown":
+                    continue
+                if not pay.provider_order_id:
+                    continue
+                order = provider.fetch_order(pay.provider_order_id)
+                nested = session.begin_nested()
+                try:
                     if order.status == "paid":
                         pay_service.verify_payment(session, payment_id=pay.payment_id)
                     elif order.status in ("failed", "cancelled"):
@@ -290,7 +337,14 @@ def _poll_unknown_payments() -> None:
                                 },
                             )
                         )
-            session.commit()
+                    session.commit()
+                except Exception as item_exc:
+                    nested.rollback()
+                    logger.warning(
+                        "Unknown payment poll item skipped",
+                        extra={"error": str(item_exc), "payment_id": payment_id},
+                    )
+                    continue
     except Exception as exc:
         logger.warning(
             "Unknown payment poll skipped (DB unavailable in test mode)", extra={"error": str(exc)}

@@ -30,7 +30,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 
 from packages.observability.context import new_id
@@ -218,6 +218,14 @@ class ApiClientRegistry:
     def clients(self) -> Mapping[str, ApiClient]:
         """Read-only view keyed by digest, for administrative listing."""
         return dict(self._by_hash)
+
+    def __iter__(self) -> Iterator[ApiClient]:
+        """Iterate over registered clients (tenant filtering is done by callers)."""
+        return iter(list(self._by_hash.values()))
+
+    def list_for_merchant(self, merchant_id: str) -> list[ApiClient]:
+        """Every client registered for ``merchant_id``."""
+        return [c for c in self._by_hash.values() if c.merchant_id == merchant_id]
 
     def __len__(self) -> int:
         return len(self._by_hash)

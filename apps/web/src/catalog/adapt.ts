@@ -266,11 +266,11 @@ export function exploreOfferToProductItem(
     catalogSource: catalogSource ?? undefined,
     offerExpiresAt: offer.expires_at || new Date(Date.now() + 86400000 * 365).toISOString(),
     fromCatalog: true,
-    hasCatalogImage: true,
+    hasCatalogImage: rawImage.length > 0,
     catalogSpecs: specs,
 
-    aiBadge: "Verified Catalog",
-    whyFitsYou: { summary: "Verified catalog match conforming to spending rules and authenticated merchant warranty.", pros: ["100% Genuine Item", "2-Day Guaranteed Delivery"], warnings: [] },
+    aiBadge: "Catalog",
+    whyFitsYou: { summary: "Catalog match — price and stock are the merchant's live values.", pros: [], warnings: [] },
     specsGrouped: {
       performance: {
         ...(specs.brand ? { Brand: String(specs.brand) } : {}),
@@ -360,10 +360,10 @@ export function catalogOfferToProductItem(
     pricingSource: offer.pricing_source || "merchant_configured",
     offerExpiresAt: offer.expires_at || new Date(Date.now() + 86400000 * 365).toISOString(),
     fromCatalog: true,
-    hasCatalogImage: true,
+    hasCatalogImage: rawImage.length > 0,
     catalogSpecs: specs,
-    aiBadge: "Verified Catalog",
-    whyFitsYou: { summary: "Verified catalog match conforming to spending rules and authenticated merchant warranty.", pros: ["100% Genuine Item", "2-Day Guaranteed Delivery"], warnings: [] },
+    aiBadge: "Catalog",
+    whyFitsYou: { summary: "Catalog match — price and stock are the merchant's live values.", pros: [], warnings: [] },
     specsGrouped: {
       performance: {
         ...(specs.brand ? { Brand: String(specs.brand) } : {}),

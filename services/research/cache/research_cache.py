@@ -38,13 +38,16 @@ class ResearchCache:
         self._store: dict[str, CachedResearchEntry] = {}
 
     @staticmethod
-    def compute_key(product_id: str, question: str) -> str:
+    def compute_key(product_id: str, question: str, merchant_id: str | None = None) -> str:
         norm_q = " ".join(question.lower().strip().split())
-        raw_key = f"{product_id.strip()}:{norm_q}"
+        namespace = (merchant_id or "").strip() or "default"
+        raw_key = f"{namespace}:{product_id.strip()}:{norm_q}"
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
-    def get(self, product_id: str, question: str) -> CachedResearchEntry | None:
-        key = self.compute_key(product_id, question)
+    def get(
+        self, product_id: str, question: str, merchant_id: str | None = None
+    ) -> CachedResearchEntry | None:
+        key = self.compute_key(product_id, question, merchant_id)
         entry = self._store.get(key)
         if entry is None:
             return None
@@ -67,8 +70,9 @@ class ResearchCache:
         confidence_score: float = 1.0,
         confidence_level: str = "HIGH",
         ttl_seconds: int = TTL_STATIC_SPECS,
+        merchant_id: str | None = None,
     ) -> CachedResearchEntry:
-        key = self.compute_key(product_id, question)
+        key = self.compute_key(product_id, question, merchant_id)
         now = time.time()
         entry = CachedResearchEntry(
             query_hash=key,

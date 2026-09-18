@@ -12,11 +12,13 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.auth import AppSettings, current_principal
+from apps.api.auth import AppSettings, require_scopes
 from apps.api.db import get_db
+from apps.api.envelope import success
 from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
-from packages.security.principals import Principal
+from packages.schemas.v1 import CurrencyCode
+from packages.security.principals import Principal, Scope
 from services.authorization.service import AuthorizationService
 from services.checkout.service import CheckoutService
 from services.inventory.models import Inventory
@@ -27,6 +29,10 @@ from services.payments.service import PaymentService
 router = APIRouter(tags=["razorpay-standard-checkout"])
 
 DatabaseSession = Annotated[Session, Depends(get_db)]
+CheckoutMoneyPrincipal = Annotated[
+    Principal, Depends(require_scopes(Scope.CHECKOUT_WRITE, Scope.PAYMENT_WRITE))
+]
+PaymentMoneyPrincipal = Annotated[Principal, Depends(require_scopes(Scope.PAYMENT_WRITE))]
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +41,10 @@ class CreateOrderRequest(BaseModel):
     amount: int = Field(
         ..., ge=100, description="Amount in minor units / paise (minimum 100 paise = 1 INR)"
     )
-    currency: str = Field(default="INR", min_length=3, max_length=3)
+    currency: CurrencyCode = Field(default="INR")
     receipt: str | None = Field(default=None)
     checkout_id: str | None = None
     offer_id: str | None = None
-    buyer_id: str | None = None
-    merchant_id: str | None = None
     notes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -50,13 +54,22 @@ class VerifyPaymentRequest(BaseModel):
     razorpay_signature: str
 
 
+class RazorpayCheckoutUrlRequest(BaseModel):
+    amount: int = Field(..., ge=100, description="Amount in minor units / paise")
+    currency: CurrencyCode = Field(default="INR")
+    checkout_id: str | None = None
+    offer_id: str | None = None
+    receipt: str | None = None
+    return_url: str | None = None
+
+
 @router.post("/api/create-order")
 @router.post("/api/v1/payments/razorpay/create-order")
 def create_razorpay_order(
     request: CreateOrderRequest,
     settings: AppSettings,
     session: DatabaseSession,
-    principal: Principal = Depends(current_principal),
+    principal: CheckoutMoneyPrincipal,
 ) -> dict[str, Any]:
     """Create a Razorpay order routed through the commerce core."""
     key_id = settings.razorpay_key_id
@@ -68,8 +81,12 @@ def create_razorpay_order(
             code=ErrorCode.INTERNAL_ERROR,
         )
 
-    merchant_id = (principal.merchant_id if principal else None) or settings.default_merchant_id
-    buyer_id = (principal.buyer_id if principal else None) or "buy_shopper_demo"
+    # Identity comes from the credential, never the body: a scoped token for
+    # one buyer must not be able to open a checkout as another.
+    if principal.buyer_id is None:
+        raise DomainError("Buyer ID required for payment", code=ErrorCode.FORBIDDEN)
+    merchant_id = principal.merchant_id
+    buyer_id = principal.buyer_id
 
     if session is None:
         import httpx
@@ -86,8 +103,8 @@ def create_razorpay_order(
         )
         res.raise_for_status()
         rzp_order = res.json()
-        return {
-            "data": {
+        return success(
+            {
                 "id": rzp_order["id"],
                 "order_id": rzp_order["id"],
                 "payment_id": f"pay_{rzp_order['id'].replace('order_', '')}",
@@ -98,7 +115,7 @@ def create_razorpay_order(
                 "key_id": key_id,
                 "status": "created",
             }
-        }
+        )
 
     try:
         from services.catalog.models import Buyer, Merchant
@@ -235,8 +252,8 @@ def create_razorpay_order(
 
         session.commit()
 
-        return {
-            "data": {
+        return success(
+            {
                 "id": payment_schema.provider_order_id,
                 "order_id": payment_schema.provider_order_id,
                 "payment_id": payment_schema.payment_id,
@@ -246,7 +263,7 @@ def create_razorpay_order(
                 "key_id": key_id,
                 "status": payment_schema.status,
             }
-        }
+        )
     except DomainError:
         raise
     except Exception as exc:
@@ -267,9 +284,11 @@ def verify_razorpay_payment(
     request: VerifyPaymentRequest,
     settings: AppSettings,
     session: DatabaseSession,
-    principal: Principal = Depends(current_principal),
+    principal: PaymentMoneyPrincipal,
 ) -> dict[str, Any]:
     """Verify HMAC-SHA256 signature and finalize order in the commerce core."""
+    if principal.buyer_id is None:
+        raise DomainError("Buyer ID required for payment", code=ErrorCode.FORBIDDEN)
     key_secret = settings.razorpay_key_secret
 
     if not key_secret:
@@ -298,50 +317,53 @@ def verify_razorpay_payment(
             .filter(Payment.provider_order_id == request.razorpay_order_id)
             .first()
         )
-        if payment is not None:
-            payment_service = PaymentService(provider_config=settings.payment_provider_config())
-            _, order_res = payment_service.verify_payment(
-                session,
-                payment_id=payment.payment_id,
-                provider_payment_id=request.razorpay_payment_id,
-                provider_signature=request.razorpay_signature,
+        # A valid signature proves the provider signed these identifiers, not
+        # that they name a payment this gateway created. Confirming an unknown
+        # payment would mint an order with no checkout, no authorization, no
+        # inventory hold, and no amount binding.
+        if payment is None:
+            raise DomainError(
+                "The payment does not exist.",
+                code=ErrorCode.NOT_FOUND,
             )
-            session.commit()
-            return {
-                "data": {
-                    "verified": True,
-                    "order_id": request.razorpay_order_id,
-                    "payment_id": request.razorpay_payment_id,
-                    "confirmed_order_id": order_res.order_id,
-                    "status": "paid",
-                }
+        payment_service = PaymentService(provider_config=settings.payment_provider_config())
+        _, order_res = payment_service.verify_payment(
+            session,
+            payment_id=payment.payment_id,
+            provider_payment_id=request.razorpay_payment_id,
+            provider_signature=request.razorpay_signature,
+        )
+        session.commit()
+        return success(
+            {
+                "verified": True,
+                "order_id": request.razorpay_order_id,
+                "payment_id": request.razorpay_payment_id,
+                "confirmed_order_id": order_res.order_id,
+                "status": "paid",
             }
+        )
 
-    return {
-        "data": {
-            "verified": True,
-            "order_id": request.razorpay_order_id,
-            "payment_id": request.razorpay_payment_id,
-            "confirmed_order_id": f"ord_{request.razorpay_order_id.replace('order_', '')}",
-            "status": "paid",
-        }
-    }
+    raise DomainError(
+        "The payment service is unavailable.",
+        code=ErrorCode.SERVICE_UNAVAILABLE,
+    )
 
 
-@router.get("/api/v1/payments/razorpay/checkout-url")
+@router.post("/api/v1/payments/razorpay/checkout-url")
 def get_razorpay_checkout_url(
-    amount: int,
-    currency: str = "INR",
-    checkout_id: str | None = None,
-    offer_id: str | None = None,
-    receipt: str | None = None,
-    return_url: str | None = None,
-    principal: Principal = Depends(current_principal),
-    settings: AppSettings = None,  # FastAPI injects via Annotated; None placeholder for Python
-    session: Session = Depends(get_db),
+    request: RazorpayCheckoutUrlRequest,
+    principal: PaymentMoneyPrincipal,
+    settings: AppSettings,
+    session: DatabaseSession,
 ) -> dict[str, Any]:
     """
     Return a Razorpay payment URL for browser-redirect checkout.
+
+    POST with a JSON body, never GET: building the URL mints a checkout,
+    an authorization, and a payment record, and a GET endpoint would let a
+    prefetched link or an ``<img>`` tag burn inventory holds with the
+    browser's ambient session cookie.
 
     Instead of opening the Razorpay modal inline via JS, the browser navigates
     directly to this URL. Razorpay redirects back to ``return_url`` when the
@@ -351,10 +373,8 @@ def get_razorpay_checkout_url(
 
     If ``return_url`` is omitted, a default gateway return page is used.
     """
-    # FastAPI injects the real AppSettings via the Annotated dependency; the
-    # None default is only to satisfy Python's non-defaults-before-defaults rule.
-    if settings is None:
-        raise DomainError("Settings not configured.", code=ErrorCode.INTERNAL_ERROR)
+    if principal.buyer_id is None:
+        raise DomainError("Buyer ID required for payment", code=ErrorCode.FORBIDDEN)
     key_id = settings.razorpay_key_id
     key_secret = settings.razorpay_key_secret
 
@@ -364,11 +384,14 @@ def get_razorpay_checkout_url(
             code=ErrorCode.INTERNAL_ERROR,
         )
 
-    merchant_id = (principal.merchant_id if principal else None) or settings.default_merchant_id
-    buyer_id = (principal.buyer_id if principal else None) or "buy_shopper_demo"
-
+    merchant_id = principal.merchant_id
+    buyer_id = principal.buyer_id
+    amount = request.amount
+    currency = request.currency
+    offer_id = request.offer_id
+    return_url = request.return_url
     # Resolve checkout / offer like create_razorpay_order does
-    resolved_checkout_id = checkout_id
+    resolved_checkout_id = request.checkout_id
     if not resolved_checkout_id:
         if offer_id:
             from services.offers.models import Offer
@@ -498,8 +521,8 @@ def get_razorpay_checkout_url(
             else f"/checkout/razorpay-return?checkout_id={resolved_checkout_id}"
         )
 
-    return {
-        "data": {
+    return success(
+        {
             "checkout_url": checkout_url,
             "order_id": backend_order_id,
             "checkout_id": resolved_checkout_id,
@@ -508,13 +531,14 @@ def get_razorpay_checkout_url(
             "currency": currency,
             "redirect_mode": True,
         }
-    }
+    )
 
 
 @router.post("/api/v1/payments/razorpay/webhook")
 async def razorpay_webhook(
     request: Request,
-    settings: AppSettings = None,  # FastAPI injects via Annotated; None placeholder for Python
+    settings: AppSettings
+    | None = None,  # FastAPI injects via Annotated; None placeholder for Python
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """

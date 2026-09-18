@@ -16,6 +16,7 @@ from apps.api.config import Settings, get_settings
 from apps.api.middleware import install_middleware
 from apps.api.routers import (
     agent,
+    agent_api_keys,
     agent_tools,
     alerts,
     api_keys,
@@ -107,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # application can read it; the agent surface keeps its own token-only route.
     app.include_router(orders.router)
     app.include_router(agent.router)
+    app.include_router(agent_api_keys.router)
     app.include_router(agent_tools.router)
     app.include_router(api_keys.router)
     app.include_router(explore.router)

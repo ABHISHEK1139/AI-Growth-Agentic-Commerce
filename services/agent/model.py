@@ -157,21 +157,66 @@ class MockModelProvider:
         # Category extraction in mock intent
         p_lower = prompt.lower()
         category = None
-        if any(k in p_lower for k in ["laptop", "ultrabook", "notebook", "macbook", "computer", "pc"]):
+        if any(
+            k in p_lower for k in ["laptop", "ultrabook", "notebook", "macbook", "computer", "pc"]
+        ):
             category = "laptop"
         elif any(k in p_lower for k in ["monitor", "display", "screen", "4k", "uhd"]):
             category = "monitor"
-        elif any(k in p_lower for k in ["audio", "headphone", "earphone", "earbud", "sound", "anc", "music", "speaker"]):
+        elif any(
+            k in p_lower
+            for k in [
+                "audio",
+                "headphone",
+                "earphone",
+                "earbud",
+                "sound",
+                "anc",
+                "music",
+                "speaker",
+            ]
+        ):
             category = "audio"
-        elif any(k in p_lower for k in ["camera", "dslr", "lens", "optics", "cam", "gopro", "photo", "video"]):
+        elif any(
+            k in p_lower
+            for k in ["camera", "dslr", "lens", "optics", "cam", "gopro", "photo", "video"]
+        ):
             category = "camera"
-        elif any(k in p_lower for k in ["appliance", "kitchen", "cooker", "blender", "fridge", "vacuum", "purifier", "heater"]):
+        elif any(
+            k in p_lower
+            for k in [
+                "appliance",
+                "kitchen",
+                "cooker",
+                "blender",
+                "fridge",
+                "vacuum",
+                "purifier",
+                "heater",
+            ]
+        ):
             category = "appliance"
-        elif any(k in p_lower for k in ["charger", "cable", "case", "cover", "magsafe", "adapter", "power bank"]):
+        elif any(
+            k in p_lower
+            for k in ["charger", "cable", "case", "cover", "magsafe", "adapter", "power bank"]
+        ):
             category = "phone_accessory"
         elif any(k in p_lower for k in ["keyboard", "mouse", "trackpad", "dock"]):
             category = "computer_accessory"
-        elif any(k in p_lower for k in ["phone", "smartphone", "mobile", "pixel", "iphone", "samsung", "galaxy", "tablet", "ipad"]):
+        elif any(
+            k in p_lower
+            for k in [
+                "phone",
+                "smartphone",
+                "mobile",
+                "pixel",
+                "iphone",
+                "samsung",
+                "galaxy",
+                "tablet",
+                "ipad",
+            ]
+        ):
             category = "smartphone"
         elif any(k in p_lower for k in ["tv", "television", "home theater"]):
             category = "home_electronics"
@@ -179,7 +224,9 @@ class MockModelProvider:
         # Budget extraction: apply ceiling when budget specified, otherwise allow broad catalog
         budget_minor = (
             7000000
-            if ("70000" in prompt or "70,000" in prompt or "under" in p_lower or "budget" in p_lower)
+            if (
+                "70000" in prompt or "70,000" in prompt or "under" in p_lower or "budget" in p_lower
+            )
             else 25000000
         )
 

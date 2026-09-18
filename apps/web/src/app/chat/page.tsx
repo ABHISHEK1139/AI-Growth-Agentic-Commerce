@@ -432,11 +432,15 @@ export default function AIChatPage() {
                     </label>
                     <textarea
                       value={customSystemInstruction}
-                      onChange={(e) => setCustomSystemInstruction(e.target.value)}
+                      onChange={(e) => setCustomSystemInstruction(e.target.value.slice(0, 500))}
                       rows={6}
+                      maxLength={500}
                       className="w-full text-xs font-mono p-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#174c3c]"
-                      placeholder="Enter custom prompt instructions..."
+                      placeholder="Tone hint for replies (500 chars max, never instructions)..."
                     />
+                    <p className="text-[10px] text-slate-500">
+                      Style hint only — it cannot override safety, pricing, or policy behavior.
+                    </p>
                   </div>
                 ) : (
                   <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">

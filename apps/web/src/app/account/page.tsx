@@ -30,11 +30,35 @@ export default function AccountPage() {
   const { userPreferences, updateUserPreferences, orders: storeOrders } = useStore();
 
   const [activeTab, setActiveTab] = useState<"profile" | "ai_prefs" | "orders" | "addresses" | "security">("ai_prefs");
-  const [autoLimit, setAutoLimit] = useState(userPreferences.autoApprovalLimitMinor / 100);
+  const [autoLimit, setAutoLimit] = useState(() =>
+    Math.round(userPreferences.autoApprovalLimitMinor / 100)
+  );
+  const [autoLimitError, setAutoLimitError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [sessionName, setSessionName] = useState<string | null>(null);
 
   const [serverOrders, setServerOrders] = useState<OrderRecord[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+
+  // Who is signed in, per the gateway — never a hardcoded persona.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiGet<{ authenticated: boolean; principal: { subject?: string; role?: string } | null }>(
+          "/api/v1/auth/me"
+        );
+        if (!cancelled && res.ok && res.data?.authenticated && res.data?.principal) {
+          setSessionName(res.data.principal.subject || res.data.principal.role || null);
+        }
+      } catch {
+        // Unauthenticated: the page still works as a demo profile.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,8 +71,8 @@ export default function AccountPage() {
           order_id: o.orderId,
           checkout_id: o.orderId.replace("ord_", "chk_"),
           payment_id: o.paymentId,
-          buyer_id: "byr_active_session",
-          merchant_id: "mrc_demo_electronics",
+          buyer_id: "buy_shopper_demo",
+          merchant_id: "merchant_demo",
           amount_minor: o.totalMinor,
           currency: o.currency || "INR",
           status: (o.status as any) || "confirmed",
@@ -58,10 +82,12 @@ export default function AccountPage() {
         const res = await apiGet<OrderPage>("/api/v1/orders?limit=20&offset=0");
         const remoteOrders = res.ok && Array.isArray(res.data?.orders) ? res.data.orders : [];
 
+        // Server records first; device-saved orders the gateway does not
+        // know about are appended, never presented as confirmed server rows.
         const combined = [...remoteOrders];
         for (const local of mappedLocalOrders) {
           if (!combined.some((o) => o.order_id === local.order_id)) {
-            combined.unshift(local);
+            combined.push(local);
           }
         }
 
@@ -83,8 +109,15 @@ export default function AccountPage() {
 
   const handleSavePreferences = (e: React.FormEvent) => {
     e.preventDefault();
+    // Integer rupees in, integer minor out: fractional paise can never be
+    // expressed in the input, and an empty/invalid field must not silently
+    // become a ₹0 block-everything limit.
+    if (!Number.isFinite(autoLimit) || autoLimit < 0) {
+      setAutoLimitError("Enter a non-negative whole-rupee amount.");
+      return;
+    }    setAutoLimitError(null);
     updateUserPreferences({
-      autoApprovalLimitMinor: autoLimit * 100,
+      autoApprovalLimitMinor: Math.round(autoLimit) * 100,
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
@@ -99,8 +132,12 @@ export default function AccountPage() {
             AS
           </div>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900">Alex Shopper</h1>
-            <p className="text-xs text-slate-500 font-mono">shopper@agentpay.dev • Verified Account ✓</p>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">
+              {sessionName || "Demo Shopper"}
+            </h1>
+            <p className="text-xs text-slate-500 font-mono">
+              {sessionName ? `Signed in as ${sessionName} • Demo session` : "Demo session • No password"}
+            </p>
           </div>
         </div>
       </div>
@@ -211,12 +248,21 @@ export default function AccountPage() {
                   <input
                     type="number"
                     value={autoLimit}
-                    onChange={(e) => setAutoLimit(Number(e.target.value))}
+                    min={0}
                     step={1000}
+                    onChange={(e) => {
+                      // Clearing the field yields Number("") === 0, which
+                      // would silently become a block-everything limit.
+                      if (e.target.value.trim() === "") return;
+                      setAutoLimit(Number(e.target.value));
+                    }}
                     className="p-3 border border-slate-200 rounded-xl font-mono text-sm w-48 font-bold"
                   />
                   <span className="text-slate-500 text-[11px]">Orders below this threshold can be pre-authorized automatically.</span>
                 </div>
+                {autoLimitError && (
+                  <p className="text-xs text-rose-700 font-bold">{autoLimitError}</p>
+                )}
               </div>
 
               {/* Preferred Brands */}
@@ -260,7 +306,7 @@ export default function AccountPage() {
 
           {activeTab === "orders" && (
             <div className="space-y-4 text-xs animate-in fade-in">
-              <h2 className="text-lg font-black text-slate-900">Your Live Orders</h2>
+              <h2 className="text-lg font-black text-slate-900">Your Orders</h2>
               {ordersLoading ? (
                 <div className="py-8 flex justify-center items-center gap-2 text-slate-500">
                   <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
@@ -289,6 +335,9 @@ export default function AccountPage() {
           {activeTab === "profile" && (
             <div className="space-y-4 text-xs animate-in fade-in">
               <h2 className="text-lg font-black text-slate-900">Personal Profile</h2>
+              <p className="text-[11px] text-slate-500">
+                Demo defaults used to prefill checkout — edit them at checkout time.
+              </p>
               <div className="space-y-3 font-medium text-slate-700">
                 <div>Name: <strong>Alex Shopper</strong></div>
                 <div>Email: <strong>shopper@agentpay.dev</strong></div>
@@ -311,9 +360,9 @@ export default function AccountPage() {
             <div className="space-y-4 text-xs animate-in fade-in">
               <h2 className="text-lg font-black text-slate-900">Security &amp; Gate Limits</h2>
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <div>Hard Transaction Ceiling: <strong>₹2,00,000.00</strong></div>
+                <div>Hard Transaction Ceiling: <strong>₹70,000.00</strong></div>
                 <div>Cryptographic HMAC Verification: <strong>ENABLED</strong></div>
-                <div>Two-Factor Authentication: <strong>ACTIVE</strong></div>
+                <div>Session Cookie: <strong>HttpOnly + SameSite</strong></div>
               </div>
             </div>
           )}

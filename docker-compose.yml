@@ -50,6 +50,10 @@ services:
       # Override the host-side URLs with in-network service names.
       DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
       REDIS_URL: redis://redis:6379/0
+      # Point the pipeline at the container mount below. The compiled-in
+      # default (../datasets) is host-relative and never exists in the image.
+      AGENTPAY_RAW_DIR: /app/data/raw
+      AGENTPAY_OUT_DIR: /app/data/out
     ports:
       - "8000:8000"
     volumes:
@@ -83,6 +87,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
       REDIS_URL: redis://redis:6379/0
+      AGENTPAY_RAW_DIR: /app/data/raw
+      AGENTPAY_OUT_DIR: /app/data/out
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
@@ -99,6 +105,10 @@ services:
     build:
       context: .
       dockerfile: infra/docker/web.Dockerfile
+      args:
+        # Baked into the client bundle at build time (see web.Dockerfile):
+        # without this the app always builds in relative-proxy mode.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       NODE_ENV: production

@@ -19,6 +19,7 @@ import {
   type AIProviderId,
   type CustomModelConfig,
   PROVIDER_PRESETS,
+  clearSessionApiKey,
   getStoredModelConfig,
   saveStoredModelConfig,
   clearStoredModelConfig,
@@ -268,8 +269,18 @@ export function AIModelConfigModal({
               </button>
             </div>
             <p className="text-[10px] text-slate-500">
-              Keys are kept in your local browser storage and sent directly to your configured endpoint.
+              The key stays in this tab&apos;s memory only — it is never written to browser storage — and is sent directly to your configured endpoint.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                setApiKey("");
+                clearSessionApiKey();
+              }}
+              className="text-[10px] font-bold text-rose-600 hover:underline"
+            >
+              Forget key for this visit
+            </button>
           </div>
 
           {/* Test Connection Results */}

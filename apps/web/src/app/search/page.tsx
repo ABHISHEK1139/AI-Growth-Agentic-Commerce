@@ -99,7 +99,9 @@ function SearchAndFilterContent() {
       const raw = searchParams.get(key);
       if (raw === null) return null;
       const parsed = Number(raw);
-      return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+      // Integer minor units: fractional paise are meaningless, but flooring
+      // here would silently narrow the caller's stated budget.
+      return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
     };
     return {
       query: q,

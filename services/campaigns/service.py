@@ -66,14 +66,17 @@ class CampaignService:
         # ── Step 1: Database Catalog & Inventory Discovery ──
         if session is not None:
             try:
+                # Escape LIKE wildcards in the derived category: without this
+                # a "%" or "_" in the goal text becomes a wildcard match.
+                like_cat = target_cat.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 # Query candidate products in merchant's catalog
                 query = session.query(Product).filter(Product.merchant_id == merchant_id)
                 if category:
                     query = query.filter(Product.category_id == category)
                 else:
                     query = query.filter(
-                        (Product.category_id.ilike(f"%{target_cat}%"))
-                        | (Product.title.ilike(f"%{target_cat}%"))
+                        (Product.category_id.ilike(f"%{like_cat}%", escape="\\"))
+                        | (Product.title.ilike(f"%{like_cat}%", escape="\\"))
                     )
 
                 candidates = query.order_by(Product.product_id).limit(3).all()
@@ -96,9 +99,14 @@ class CampaignService:
                         .filter(Inventory.offer_id == offer.offer_id)
                         .first()
                     )
-                    avail_qty = 10
-                    if inv:
-                        avail_qty = max(0, inv.available_quantity - inv.reserved_quantity)
+                    # No inventory row means unknown stock, not ten units: a
+                    # phantom quantity would pass the minimum-inventory
+                    # policy and promote an unfulfillable SKU.
+                    if inv is None:
+                        continue
+                    avail_qty = max(0, inv.available_quantity - inv.reserved_quantity)
+                    if avail_qty <= 0:
+                        continue
 
                     # Fetch real cross-sell pairings
                     pairings = (
@@ -284,7 +292,7 @@ class CampaignService:
         if c.status not in (CampaignStatus.DRAFT, CampaignStatus.PROPOSED):
             raise DomainError(
                 f"Campaign cannot be submitted for review from status {c.status.value}.",
-                code=ErrorCode.INVALID_STATUS_TRANSITION,
+                code=ErrorCode.ILLEGAL_TRANSITION,
             )
 
         submitted = Campaign(
@@ -322,13 +330,13 @@ class CampaignService:
         if c.status not in (CampaignStatus.PROPOSED, CampaignStatus.REVIEW):
             raise DomainError(
                 f"Campaign cannot be approved from status {c.status.value}.",
-                code=ErrorCode.INVALID_STATUS_TRANSITION,
+                code=ErrorCode.ILLEGAL_TRANSITION,
             )
 
         if c.policy_check.decision == PolicyDecision.BLOCK:
             raise DomainError(
                 f"Campaign violates policy constraints: {', '.join(c.policy_check.violated_rules)}",
-                code=ErrorCode.POLICY_RULE_VIOLATED,
+                code=ErrorCode.POLICY_BLOCKED,
             )
 
         approved = Campaign(
@@ -366,7 +374,7 @@ class CampaignService:
             raise DomainError(
                 f"Campaign cannot be activated from status {c.status.value}; "
                 "it must be approved first.",
-                code=ErrorCode.INVALID_STATUS_TRANSITION,
+                code=ErrorCode.ILLEGAL_TRANSITION,
             )
 
         # Policy is re-evaluated at activation: a rules change between propose
@@ -383,7 +391,7 @@ class CampaignService:
         if recheck.decision == PolicyDecision.BLOCK:
             raise DomainError(
                 f"Campaign violates policy constraints: {', '.join(recheck.violated_rules)}",
-                code=ErrorCode.POLICY_RULE_VIOLATED,
+                code=ErrorCode.POLICY_BLOCKED,
             )
 
         active = Campaign(
@@ -475,7 +483,7 @@ class CampaignService:
         if c.status != CampaignStatus.ACTIVE:
             raise DomainError(
                 f"Campaign cannot be paused from status {c.status.value}; only ACTIVE campaigns can be paused.",
-                code=ErrorCode.INVALID_STATUS_TRANSITION,
+                code=ErrorCode.ILLEGAL_TRANSITION,
             )
 
         paused = Campaign(
@@ -512,7 +520,7 @@ class CampaignService:
             raise DomainError(
                 f"Campaign cannot be completed from status {c.status.value}; "
                 "only ACTIVE or PAUSED campaigns can be completed.",
-                code=ErrorCode.INVALID_STATUS_TRANSITION,
+                code=ErrorCode.ILLEGAL_TRANSITION,
             )
 
         completed = Campaign(

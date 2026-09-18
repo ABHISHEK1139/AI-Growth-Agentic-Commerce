@@ -500,7 +500,7 @@ export default function PaymentStatusPage({ params }: { params?: { id: string } 
           </div>
 
           <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-            Payment state verified across Razorpay rails and logged to the cryptographic audit ledger.
+            Status as persisted by the gateway. Signature verification happens at payment time, not on this record.
           </p>
 
           {isVerified ? (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from apps.api.auth import require_roles
@@ -21,15 +21,15 @@ MerchantPrincipal = Annotated[
 
 
 class ProposeCampaignRequest(BaseModel):
-    goal_prompt: str
+    goal_prompt: str = Field(min_length=1, max_length=2000)
     max_discount_pct: float = Field(default=10.0, ge=1.0, le=50.0)
     duration_days: int = Field(default=3, ge=1, le=14)
-    budget_minor: int = Field(default=5000000, ge=100000)
-    category: str | None = None
+    budget_minor: int = Field(default=5000000, ge=100000, le=10_000_000_00)
+    category: str | None = Field(default=None, max_length=64)
 
 
 class RejectCampaignRequest(BaseModel):
-    reason: str = Field(default="Merchant declined proposal")
+    reason: str = Field(default="Merchant declined proposal", max_length=500)
 
 
 def _campaign_to_dict(c: Campaign) -> dict[str, Any]:
@@ -124,11 +124,22 @@ def propose_campaign(
 @router.get("")
 def list_campaigns(
     principal: MerchantPrincipal,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
-    """List all proposed, approved, active, and completed campaigns for this merchant."""
+    """List proposed, approved, active, and completed campaigns for this merchant, newest first."""
     service = CampaignService()
     campaigns = service.list_campaigns(merchant_id=principal.merchant_id)
-    return success({"campaigns": [_campaign_to_dict(c) for c in campaigns]})
+    total = len(campaigns)
+    page = campaigns[offset : offset + limit]
+    return success(
+        {
+            "campaigns": [_campaign_to_dict(c) for c in page],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @router.get("/analytics")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -65,9 +65,30 @@ def run_buyer_purchase_scenario(
         return PurchaseResult(
             False, None, None, None, None, None, "No offers found matching criteria."
         )
+    # Validate the pick: an inactive, unavailable, or over-budget first hit
+    # must not become a checkout.
     selected_offer = offers[0]
-    offer_id = selected_offer["offer_id"]
-    log(f"Selected offer: {offer_id} @ {selected_offer['unit_price_minor'] / 100} INR")
+    offer_id = selected_offer.get("offer_id")
+    offer_price = selected_offer.get("unit_price_minor")
+    offer_status = selected_offer.get("status", "active")
+    offer_stock = selected_offer.get("available_quantity", 1)
+    if not offer_id:
+        return PurchaseResult(
+            False, None, None, None, None, None, "Selected offer has no identifier."
+        )
+    if offer_status != "active" or offer_stock is not None and offer_stock <= 0:
+        return PurchaseResult(
+            False, None, None, None, None, None, "Selected offer is not purchasable."
+        )
+    if (
+        isinstance(offer_price, int)
+        and isinstance(max_price_minor, int)
+        and offer_price > max_price_minor
+    ):
+        return PurchaseResult(
+            False, None, None, None, None, None, "Selected offer exceeds the price ceiling."
+        )
+    log(f"Selected offer: {offer_id} @ {selected_offer.get('unit_price_minor', '?')} minor")
 
     # 4. Create Checkout
     log(f"Creating checkout for offer {offer_id}...")
@@ -76,10 +97,15 @@ def run_buyer_purchase_scenario(
         return PurchaseResult(False, None, None, None, None, None, "Checkout creation failed.")
 
     checkout_data = chk_res.data.get("data", {}).get("checkout", {})
-    checkout_id = checkout_data["checkout_id"]
-    total_minor = checkout_data["total_minor"]
+    checkout_id = checkout_data.get("checkout_id")
+    total_minor = checkout_data.get("total_minor")
+    price_hash = checkout_data.get("price_hash")
+    if not checkout_id or not isinstance(total_minor, int):
+        return PurchaseResult(
+            False, None, None, None, None, None, "Checkout response missing ID/total."
+        )
     log(
-        f"Checkout created: {checkout_id}, Total: {total_minor / 100} INR, Price Hash: {checkout_data['price_hash']}"
+        f"Checkout created: {checkout_id}, Total: {total_minor / 100} INR, Price Hash: {price_hash}"
     )
 
     # 5. Request Authorization
@@ -91,10 +117,27 @@ def run_buyer_purchase_scenario(
         )
 
     auth_data = ath_res.data.get("data", {}).get("authorization", {})
-    authorization_id = auth_data["authorization_id"]
+    authorization_id = auth_data.get("authorization_id")
+    if not authorization_id:
+        return PurchaseResult(
+            False, checkout_id, None, None, None, total_minor, "Authorization response missing ID."
+        )
+    policy_decision = str(auth_data.get("policy", {}).get("decision", "")).upper()
     log(
-        f"Authorization held: {authorization_id}, Policy Decision: {auth_data['policy']['decision']}"
+        f"Authorization held: {authorization_id}, Policy Decision: {auth_data.get('policy', {}).get('decision')}"
     )
+
+    # A BLOCKED authorization must stop the flow before any payment attempt.
+    if policy_decision == "BLOCK":
+        return PurchaseResult(
+            False,
+            checkout_id,
+            authorization_id,
+            None,
+            None,
+            total_minor,
+            "Blocked by policy; payment not attempted.",
+        )
 
     # 6. Human in the Loop approval
     approved = True
@@ -112,8 +155,12 @@ def run_buyer_purchase_scenario(
         )
     log("Human approval confirmed.")
 
-    # 7. Create Payment with Idempotency Key
-    idempotency_key = f"idk_client_{uuid.uuid4().hex[:12]}"
+    # 7. Create Payment with a deterministic Idempotency Key derived from the
+    # business key (checkout + authorization). A random key per attempt would
+    # turn every retry after a timeout into a second payment.
+    idempotency_key = (
+        "idk_" + hashlib.sha256(f"{checkout_id}:{authorization_id}".encode()).hexdigest()[:24]
+    )
     log(f"Initiating payment with idempotency key: {idempotency_key}...")
     pay_res = client.create_payment(
         checkout_id=checkout_id,
@@ -134,6 +181,16 @@ def run_buyer_purchase_scenario(
     pay_data = pay_res.data.get("data", {}).get("payment", {})
     payment_id = pay_data.get("payment_id")
     order_id = pay_data.get("order_id")
+    if not payment_id and not order_id:
+        return PurchaseResult(
+            False,
+            checkout_id,
+            authorization_id,
+            None,
+            None,
+            total_minor,
+            "Payment response carried no payment or order identifier.",
+        )
     log(
         f"Payment initiated: {payment_id}, Provider Order: {pay_data.get('provider_order_id')}, Status: {pay_data.get('status')}"
     )

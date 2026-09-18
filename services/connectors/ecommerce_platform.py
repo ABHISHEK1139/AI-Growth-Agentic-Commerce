@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -18,6 +19,50 @@ from services.connectors.base import (
 )
 
 logger = get_logger(__name__)
+
+
+def parse_price_minor(value: Any) -> int:
+    """Parse a platform price string into integer minor units, exactly.
+
+    ``int(float(s) * 100)`` truncates binary floating-point error into a
+    systematic 1-paise undercharge ("10.29" -> 1028). Decimal arithmetic
+    with half-up rounding is exact for two-decimal prices.
+    """
+    if isinstance(value, bool):
+        raise DomainError(
+            "Connector price must be a decimal string or number.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    try:
+        text = str(value).strip().lstrip("$").replace(",", "")
+        minor = Decimal(text).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100
+        result = int(minor.to_integral_value(rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError, AttributeError) as exc:
+        raise DomainError(
+            "Connector price must be a decimal string or number.",
+            code=ErrorCode.VALIDATION_ERROR,
+        ) from exc
+    if result <= 0:
+        raise DomainError(
+            "Connector price must be positive.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    return result
+
+
+def parse_stock_quantity(value: Any, *, default_when_missing: int = 10) -> int:
+    """Parse a stock count, distinguishing missing (default) from zero (out).
+
+    ``int(value or default)`` treats an explicit 0 as missing and invents
+    stock that turns into oversells. None/missing takes the default; anything
+    present is honored, including 0.
+    """
+    if value is None:
+        return default_when_missing
+    try:
+        return max(0, int(str(value).strip()))
+    except (ValueError, TypeError, AttributeError):
+        return 0
 
 
 class ShopifyWooConnector(PlatformConnector):
@@ -40,7 +85,6 @@ class ShopifyWooConnector(PlatformConnector):
         # research worker's URL gate.
         from services.research.safety.url_policy import is_safe_public_url
 
-        flavor = platform_flavor.lower()
         # A bare domain ("mystore.myshopify.com") is normalized to https before
         # the policy check: urlparse treats a scheme-less string as a relative
         # path with no hostname, which would fail the check spuriously.
@@ -94,13 +138,12 @@ class ShopifyWooConnector(PlatformConnector):
         offers: list[CanonicalOffer] = []
         for v in raw.get("variants", []):
             vid = v.get("id")
-            price_str = str(v.get("price", "0"))
             try:
-                price_minor = int(float(price_str) * 100)
-            except ValueError:
-                price_minor = 0
+                price_minor = parse_price_minor(v.get("price", "0"))
+            except DomainError:
+                continue
 
-            stock = int(v.get("inventory_quantity", 0))
+            stock = parse_stock_quantity(v.get("inventory_quantity"), default_when_missing=0)
             offers.append(
                 CanonicalOffer(
                     offer_id=f"ofr_sh_{vid}",
@@ -108,24 +151,15 @@ class ShopifyWooConnector(PlatformConnector):
                     merchant_id=self.merchant_id,
                     unit_price_minor=price_minor,
                     currency="INR",
-                    available_stock=max(0, stock),
+                    available_stock=stock,
                     delivery_days=2,
                     return_period_days=14,
                 )
             )
 
-        if not offers:
-            offers.append(
-                CanonicalOffer(
-                    offer_id=f"ofr_{pid[4:]}",
-                    product_id=pid,
-                    merchant_id=self.merchant_id,
-                    unit_price_minor=100000,
-                    currency="INR",
-                    available_stock=5,
-                )
-            )
-
+        # A product with no priced variants carries no price signal. Minting
+        # a ₹1000 / 5-unit offer would make a draft or price-hidden product
+        # searchable and purchasable at a hallucinated price.
         return product, offers
 
     def parse_woocommerce_product(
@@ -133,13 +167,15 @@ class ShopifyWooConnector(PlatformConnector):
     ) -> tuple[CanonicalProduct, list[CanonicalOffer]]:
         pid = f"prd_woo_{raw.get('id', 'item')}"
         title = raw.get("name", "WooCommerce Product")
-        price_str = str(raw.get("price") or raw.get("regular_price") or "0")
         try:
-            price_minor = int(float(price_str) * 100)
-        except ValueError:
+            price_minor = parse_price_minor(raw.get("price") or raw.get("regular_price") or "0")
+        except DomainError:
             price_minor = 0
 
-        stock = int(raw.get("stock_quantity") or (10 if raw.get("in_stock", True) else 0))
+        stock = parse_stock_quantity(
+            raw.get("stock_quantity"),
+            default_when_missing=10 if raw.get("in_stock", True) else 0,
+        )
 
         cats = raw.get("categories", [])
         category = cats[0].get("name", "general").lower() if cats else "general"

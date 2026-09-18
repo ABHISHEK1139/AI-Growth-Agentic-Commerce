@@ -7,6 +7,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from packages.config.providers import PaymentProviderConfig
 from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
@@ -244,25 +246,28 @@ class WebhookProcessor:
                         if (
                             prov_payment
                             and prov_payment.status in ("captured", "paid", "authorized")
-                            and getattr(prov_payment, "captured", True)
-                            and (
-                                getattr(prov_payment, "amount_minor", None) is None
-                                or prov_payment.amount_minor == payment.amount_minor
-                            )
+                            and prov_payment.captured is True
+                            and prov_payment.amount_minor == payment.amount_minor
+                            and prov_payment.currency.upper() == payment.currency.upper()
                         ):
                             prov_verified = True
                         else:
-                            prov_error = f"Provider payment status '{getattr(prov_payment, 'status', None)}' is uncaptured"
+                            prov_error = f"Provider payment status '{getattr(prov_payment, 'status', None)}' is uncaptured or amount/currency mismatched"
                     except Exception as exc:
                         prov_error = f"Provider payment fetch failed: {exc}"
 
                 if not prov_verified and provider_order_id:
                     try:
                         prov_order = self._provider.fetch_order(provider_order_id)
-                        if prov_order and prov_order.status == "paid":
+                        if (
+                            prov_order
+                            and prov_order.status == "paid"
+                            and prov_order.amount_minor == payment.amount_minor
+                            and prov_order.currency.upper() == payment.currency.upper()
+                        ):
                             prov_verified = True
                         else:
-                            prov_error = f"Provider order status '{getattr(prov_order, 'status', None)}' is unpaid"
+                            prov_error = f"Provider order status '{getattr(prov_order, 'status', None)}' is unpaid or amount/currency mismatched"
                     except Exception as exc:
                         prov_error = f"Provider order fetch failed: {exc}"
 

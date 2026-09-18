@@ -242,6 +242,8 @@ def test_cancel_checkout_releases_inventory():
     session = MagicMock()
     mock_repo = MagicMock()
     mock_repo.get_by_id.return_value = mock_checkout
+    # cancel_checkout re-reads under a row lock after the scoped read.
+    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_checkout
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("services.checkout.service.CheckoutRepository", lambda s, scope: mock_repo)

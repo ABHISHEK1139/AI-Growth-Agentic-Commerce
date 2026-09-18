@@ -25,19 +25,20 @@ import {
   X,
 } from "lucide-react";
 import { formatMinorToMajor } from "@/lib/money";
-import type { ApiError } from "@/lib/api";
+import { apiPost, type ApiError } from "@/lib/api";
 import { useStore } from "@/context/StoreContext";
 import {
   askProductQuestion,
+  getCatalogOffer,
   getCatalogProduct,
   lookupOfferInCatalog,
   validateOffer,
 } from "@/catalog/client";
 import { ALL_PRODUCTS } from "@/data/products";
 import {
+  catalogOfferToProductItem,
   exploreOfferToProductItem,
   productItemToCatalogProduct,
-  productItemToExploreOffer,
   defaultImageForCategory,
 } from "@/catalog/adapt";
 import {
@@ -49,6 +50,7 @@ import {
   stockLabel,
   resolveBrand,
   categoryTitleForSlug,
+  canonicalSlugForCategoryId,
 } from "@/catalog/present";
 import type {
   CatalogProduct,
@@ -142,9 +144,9 @@ export default function ProductDetailPage() {
           merchant_id: "merchant_demo",
           title: prod.title,
           category: prod.category_id,
-          unit_price_minor: o.unit_price_minor || 299900,
+          unit_price_minor: o.unit_price_minor,
           currency: o.currency || "INR",
-          available_stock: o.available_quantity || 15,
+          available_stock: o.available_quantity ?? 15,
           delivery_days: o.delivery_days || 2,
           return_period_days: o.return_period_days || 14,
           expires_at: new Date(Date.now() + 86400000 * 365).toISOString(),
@@ -160,32 +162,11 @@ export default function ProductDetailPage() {
         };
       }
 
-      // Fallback synthesis so no product is ever stranded with "Offer Unavailable"
-      if (!foundOffer && fallback) {
-        foundOffer = productItemToExploreOffer(fallback);
-      } else if (!foundOffer && prod) {
-        foundOffer = {
-          offer_id: `off_${prod.product_id}`,
-          product_id: prod.product_id,
-          merchant_id: "merchant_demo",
-          title: prod.title,
-          category: prod.category_id,
-          unit_price_minor: fallback?.priceMinor || 299900,
-          currency: "INR",
-          available_stock: fallback?.stock || 15,
-          delivery_days: fallback?.deliveryDays || 2,
-          return_period_days: fallback?.returnDays || 14,
-          expires_at: new Date(Date.now() + 86400000 * 365).toISOString(),
-          offer_version: 1,
-          pricing_source: "merchant_configured",
-          rating: prod.average_rating || 4.7,
-          reviews_count: prod.rating_number || 128,
-          image_url: prod.images?.[0]?.source_url || fallback?.imageUrl || "",
-          specs: {
-            brand: (prod.specifications as any)?.brand || fallback?.brand || "Brand",
-            ...prod.specifications,
-          },
-        };
+      // No live offer anywhere: leave the offer empty so the page shows its
+      // "Offer Currently Unavailable" state. Synthesizing one from static
+      // prices would let a buyer check out against a price no merchant set.
+      if (foundOffer && !(foundOffer.unit_price_minor > 0)) {
+        foundOffer = null;
       }
 
       setProduct(prod);
@@ -209,19 +190,25 @@ export default function ProductDetailPage() {
   // Fetch complementary cross-sell item
   useEffect(() => {
     if (!productId) return;
-    fetch("/api/v1/recommendations/cross-sell", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target_product_id: productId, budget_limit_minor: 1500000 }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        const recs = data?.data?.recommendations || [];
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiPost<{ recommendations?: Array<{ product_id: string }> }>(
+          "/api/v1/recommendations/cross-sell",
+          { target_product_id: productId, budget_limit_minor: 1500000 }
+        );
+        if (cancelled) return;
+        const recs = res.ok ? res.data?.recommendations || [] : [];
         if (recs.length > 0) {
           setCrossSellItem(recs[0]);
         }
-      })
-      .catch(() => {});
+      } catch {
+        // No companion card without a live recommendation.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [productId]);
 
   const title = product?.title || offer?.title || productId;
@@ -260,25 +247,31 @@ export default function ProductDetailPage() {
       product_title: title,
       question: trimmed,
     });
-    let answerData = result.ok && result.data?.answer ? result.data : null;
+    const answerData = result.ok && result.data?.answer ? result.data : null;
     if (!answerData) {
-      const fb = ALL_PRODUCTS.find((p) => p.id === productId || p.title === title);
-      const fallbackText = fb?.whyFitsYou?.summary || fb?.shortSpecs || `The ${title} is a verified, authentic model backed by manufacturer warranty.`;
-      answerData = {
-        ok: true,
-        product_id: productId,
-        question: trimmed,
-        answer: `${fallbackText}\n\n• Delivery: 2-day express shipping across India.\n• Return Policy: 14-day hassle-free replacement or refund.\n• Warranty: 1-Year official manufacturer warranty.`,
-        source_type: "catalog_spec",
-        source_label: "Verified Hardware Specification",
-        source_url: null,
-        confidence_score: 0.95,
-        confidence_level: "high",
-        evidence_items: [],
-        reason_for_web_search: null,
-        transparency_steps: ["Verified catalog specifications", "Checked warranty and return terms"],
-        from_cache: true,
-      };
+      // No verified answer available. Say so — a confident-sounding
+      // fallback would present invented specs as manufacturer facts.
+      setAsked((prev) => [
+        {
+          question: trimmed,
+          answer: null,
+          error: !result.ok
+            ? result.error
+            : {
+                code: "CLIENT_MALFORMED_RESPONSE",
+                message: "The research service returned no answer. Please try again.",
+                retryable: false,
+                details: {},
+                nextActions: [],
+                status: null,
+                requestId: null,
+              },
+        },
+        ...prev,
+      ]);
+      setQuestion("");
+      setAsking(false);
+      return;
     }
     setAsked((prev) => [
       {
@@ -353,148 +346,6 @@ export default function ProductDetailPage() {
   const [newReviewComment, setNewReviewComment] = useState("");
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
 
-  useEffect(() => {
-    const cat = (categoryId || "").toLowerCase();
-    const t = (title || "").toLowerCase();
-
-    let initialReviews: CustomerReview[] = [];
-
-    if (cat.includes("phone") || cat.includes("mobile") || t.includes("galaxy") || t.includes("iphone") || t.includes("pixel")) {
-      initialReviews = [
-        {
-          id: "rev_1",
-          author: "Aarav Sharma",
-          rating: 5,
-          title: "Flagship experience, exceptional camera & battery",
-          comment: "The 120Hz display is buttery smooth and the dynamic range on the camera is outstanding. Battery comfortably lasts through heavy usage. Delivered in under 24 hours in pristine packaging.",
-          date: "3 days ago",
-          verified: true,
-          helpful: 24,
-        },
-        {
-          id: "rev_2",
-          author: "Priya Nair",
-          rating: 5,
-          title: "Super fast express delivery & authentic unit",
-          comment: "Delivered next day in Bengaluru with secure packaging. Verified IMEI on manufacturer portal without any issue. Highly recommend buying through AgentPay.",
-          date: "1 week ago",
-          verified: true,
-          helpful: 19,
-        },
-        {
-          id: "rev_3",
-          author: "Rohan Mehta",
-          rating: 4,
-          title: "Solid performance, premium in-hand ergonomics",
-          comment: "Tactile buttons, vibrant OLED display, and zero heating even when playing demanding titles. Only wish a charging brick was bundled in box, but otherwise a 10/10 purchase.",
-          date: "2 weeks ago",
-          verified: true,
-          helpful: 11,
-        },
-      ];
-    } else if (cat.includes("audio") || cat.includes("headphone") || t.includes("headphone") || t.includes("sony wh") || t.includes("airpods")) {
-      initialReviews = [
-        {
-          id: "rev_1",
-          author: "Siddharth Patel",
-          rating: 5,
-          title: "Incredible soundstage and industry-leading ANC",
-          comment: "Active Noise Cancellation effortlessly mutes airplane engines and office chatter. The frequency response is crisp with punchy sub-bass that doesn't bleed into mids.",
-          date: "4 days ago",
-          verified: true,
-          helpful: 31,
-        },
-        {
-          id: "rev_2",
-          author: "Sneha Sen",
-          rating: 5,
-          title: "Ultra-comfortable memory foam cushions",
-          comment: "Wore these for an 8-hour shift with zero fatigue or ear pressure. Multipoint pairing switches instantaneously between laptop and phone.",
-          date: "1 week ago",
-          verified: true,
-          helpful: 15,
-        },
-        {
-          id: "rev_3",
-          author: "Vikram Verma",
-          rating: 4,
-          title: "Great clarity for voice calls and music",
-          comment: "Beamforming mics do an admirable job cutting background wind noise on Zoom calls. Easily get 30+ hours on a single charge.",
-          date: "3 weeks ago",
-          verified: true,
-          helpful: 8,
-        },
-      ];
-    } else if (cat.includes("laptop") || cat.includes("computer") || t.includes("macbook") || t.includes("xps") || t.includes("thinkpad")) {
-      initialReviews = [
-        {
-          id: "rev_1",
-          author: "Aditya Kulkarni",
-          rating: 5,
-          title: "Monstrous performance for heavy software engineering",
-          comment: "Compiles large multi-package codebases in seconds. Fans rarely even spin up. The keyboard travel and glass trackpad are best in class.",
-          date: "2 days ago",
-          verified: true,
-          helpful: 42,
-        },
-        {
-          id: "rev_2",
-          author: "Meera Iyer",
-          rating: 5,
-          title: "Gorgeous color-accurate display and true all-day battery",
-          comment: "The screen brightness and P3 color gamut are immaculate for video color grading. Consistently getting 12+ hours of real work on battery.",
-          date: "5 days ago",
-          verified: true,
-          helpful: 27,
-        },
-        {
-          id: "rev_3",
-          author: "Arjun Reddy",
-          rating: 4,
-          title: "Unibody build is top-tier",
-          comment: "Chassis feels rock-solid with zero flex. Ports are high-bandwidth and charging is rapid. Very satisfied with this unit.",
-          date: "2 weeks ago",
-          verified: true,
-          helpful: 14,
-        },
-      ];
-    } else {
-      initialReviews = [
-        {
-          id: "rev_1",
-          author: "Rajesh Varma",
-          rating: 5,
-          title: "Exceptional build quality and 100% genuine product",
-          comment: "Setup was effortless out of the box. Materials feel sturdy and durable. Very happy with the transaction and transparency.",
-          date: "3 days ago",
-          verified: true,
-          helpful: 22,
-        },
-        {
-          id: "rev_2",
-          author: "Ananya Deshmukh",
-          rating: 5,
-          title: "Prompt delivery and tamper-evident packaging",
-          comment: "Received the item in perfect condition with valid warranty credentials. Performs strictly to spec.",
-          date: "1 week ago",
-          verified: true,
-          helpful: 16,
-        },
-        {
-          id: "rev_3",
-          author: "Karan Malhotra",
-          rating: 4,
-          title: "High quality and great value",
-          comment: "Does everything promised in the description. Sleek aesthetic and dependable performance.",
-          date: "2 weeks ago",
-          verified: true,
-          helpful: 9,
-        },
-      ];
-    }
-
-    setReviews(initialReviews);
-  }, [categoryId, title]);
 
   const handleToggleHelpful = (reviewId: string) => {
     setReviews((prev) =>
@@ -518,12 +369,14 @@ export default function ProductDetailPage() {
 
     const newRev: CustomerReview = {
       id: `rev_${Date.now()}`,
-      author: newReviewAuthor.trim() || "Verified Customer",
+      author: newReviewAuthor.trim() || "Anonymous Shopper",
       rating: newReviewRating,
       title: newReviewTitle.trim(),
       comment: newReviewComment.trim(),
       date: "Just now",
-      verified: true,
+      // Storefront submissions are never purchase-verified: there is no
+      // order check behind this form, so claiming otherwise would be false.
+      verified: false,
       helpful: 0,
       userUpvoted: false,
     };
@@ -548,44 +401,25 @@ export default function ProductDetailPage() {
     }
   };
 
-  const handleAddBundleToBag = () => {
+  const handleAddBundleToBag = async () => {
     if (!offer) return;
     // 1. Add main product
     addToCart(exploreOfferToProductItem(offer, catalogSource), 1, false);
 
-    // 2. Add companion cross-sell product
+    // 2. Add companion cross-sell product — resolved against live data only.
+    // A recommendation the catalog cannot resolve adds nothing: the alternative
+    // is a bag line with an invented price, rating, and merchant.
     if (crossSellItem) {
       const companion = ALL_PRODUCTS.find((p) => p.id === crossSellItem.product_id);
       if (companion) {
         addToCart(companion, 1, false);
       } else {
-        addToCart({
-          id: crossSellItem.product_id,
-          slug: crossSellItem.product_id,
-          title: crossSellItem.title,
-          priceMinor: crossSellItem.price_minor || 299900,
-          originalPriceMinor: crossSellItem.price_minor || 299900,
-          currency: "INR",
-          category: crossSellItem.category || "Accessories",
-          categoryLabel: crossSellItem.category || "Accessories",
-          brand: "Certified Partner",
-          rating: 4.8,
-          reviewCount: 95,
-          stock: 12,
-          deliveryDays: 2,
-          returnDays: 14,
-          imageUrl: crossSellItem.image_url || "",
-          gallery: [crossSellItem.image_url || ""],
-          aiBadge: "Verified Companion",
-          shortSpecs: crossSellItem.compatibility_reason,
-          whyFitsYou: { summary: crossSellItem.compatibility_reason, pros: ["Guaranteed compatible"], warnings: [] },
-          specsGrouped: { performance: { compatibility: "Universal" }, connectivity: { wireless: "Bluetooth & USB" } },
-          sentiment: { performancePct: 95, batteryPct: 90, buildQualityPct: 95, valuePct: 92, displayPct: 90, customerLikes: [], customerConcerns: [] },
-          reviews: [],
-          qa: [],
-          merchant: { id: "mer_companion", name: "Verified Partner", verified: true, rating: 4.8 },
-          crossSell: { id: "", title: "", priceMinor: 0, imageUrl: "" },
-        }, 1, false);
+        const live = await getCatalogOffer(crossSellItem.product_id);
+        if (live.ok && live.data?.offer) {
+          const item = catalogOfferToProductItem(live.data.offer, {});
+          item.aiBadge = "✦ AI Cross-Sell";
+          addToCart(item, 1, false);
+        }
       }
     }
     openCartDrawer();
@@ -636,12 +470,18 @@ export default function ProductDetailPage() {
         </Link>
         <span>/</span>
         {categoryId ? (
-          <Link
-            href={`/category/${categoryId.toLowerCase().endsWith("s") ? categoryId.toLowerCase() : `${categoryId.toLowerCase()}s`}`}
-            className="hover:text-[#174c3c] transition-colors capitalize"
-          >
-            {categoryId}
-          </Link>
+          (() => {
+            const slug = canonicalSlugForCategoryId(categoryId);
+            const href = slug ? `/category/${slug}` : `/search?category=${encodeURIComponent(categoryId)}`;
+            return (
+              <Link
+                href={href}
+                className="hover:text-[#174c3c] transition-colors capitalize"
+              >
+                {categoryId}
+              </Link>
+            );
+          })()
         ) : (
           <span>Catalog</span>
         )}
@@ -730,7 +570,7 @@ export default function ProductDetailPage() {
                   <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
                   <span>{rating}</span>
                   <span className="text-slate-400 font-normal">
-                    ({ratingCount || 120} reviews)
+                    ({ratingCount != null ? `${ratingCount} ratings` : "catalog rating"})
                   </span>
                 </div>
               ) : null}
@@ -765,11 +605,15 @@ export default function ProductDetailPage() {
                 </span>
               </div>
 
-              {/* Express delivery pill */}
+              {/* Delivery estimate from the live offer, not a fixed promise */}
               <div className="flex items-center gap-2 text-xs font-semibold text-emerald-800 pt-1">
                 <Truck className="h-4 w-4 text-emerald-600" />
                 <span>
-                  <strong>FREE Delivery by tomorrow</strong> (2-Day Express Shipping)
+                  {offer.delivery_days <= 2 ? (
+                    <><strong>FREE Delivery by tomorrow</strong> (2-Day Express Shipping)</>
+                  ) : (
+                    <><strong>FREE Delivery in {offer.delivery_days} days</strong> (Standard Shipping)</>
+                  )}
                 </span>
               </div>
             </div>
@@ -845,7 +689,11 @@ export default function ProductDetailPage() {
               <Tag className="h-4 w-4 text-[#174c3c] shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold text-slate-900">No-Cost EMI</p>
-                <p className="text-[11px] text-slate-500">From ₹2,499/mo</p>
+                <p className="text-[11px] text-slate-500">
+                  {offer && offer.unit_price_minor >= 1000000
+                    ? `From ${formatMinorToMajor(Math.floor(offer.unit_price_minor / 12), offer.currency)}/mo`
+                    : "Available on orders above ₹10,000"}
+                </p>
               </div>
             </div>
           </div>
@@ -879,10 +727,7 @@ export default function ProductDetailPage() {
                 <p className="text-xs text-emerald-800 mt-0.5">{crossSellItem.compatibility_reason}</p>
                 <div className="flex items-center gap-3 mt-1 text-xs">
                   <span className="font-black text-[#174c3c]">
-                    Bundle Price: {formatMinorToMajor((offer?.unit_price_minor || 0) + (crossSellItem.price_minor || 299900), "INR")}
-                  </span>
-                  <span className="text-slate-400 line-through text-[11px]">
-                    {formatMinorToMajor(Math.round(((offer?.unit_price_minor || 0) + (crossSellItem.price_minor || 299900)) * 1.15), "INR")}
+                    Combined Total: {formatMinorToMajor((offer?.unit_price_minor || 0) + (crossSellItem.price_minor || 0), "INR")}
                   </span>
                 </div>
               </div>
@@ -1008,7 +853,6 @@ export default function ProductDetailPage() {
                   <div className="text-xs text-slate-700 leading-relaxed font-medium whitespace-pre-line bg-white/70 p-3.5 rounded-xl border border-slate-200/60">
                     {entry.answer.answer}
                   </div>
-
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {entry.answer.source_label && (
                       <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60 inline-flex items-center gap-1">
@@ -1042,6 +886,13 @@ export default function ProductDetailPage() {
                   )}
                 </div>
               ) : null}
+              {entry.error ? (
+                <div className="pl-7">
+                  <div className="text-xs text-rose-800 leading-relaxed font-medium bg-rose-50 p-3.5 rounded-xl border border-rose-200/60">
+                    Couldn&apos;t verify an answer right now{entry.error.message ? `: ${entry.error.message}` : "."} No answer was recorded — please try again.
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1058,7 +909,9 @@ export default function ProductDetailPage() {
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Real feedback from verified buyers across India with authenticated order histories.
+              {reviews.length > 0
+                ? "Shopper-submitted reviews. Only purchases confirmed through an order carry the Verified Buyer badge."
+                : "No shopper reviews yet — the score below is the catalog rating."}
             </p>
           </div>
           <button
@@ -1071,12 +924,14 @@ export default function ProductDetailPage() {
           </button>
         </div>
 
-        {/* Rating Breakdown & Customer Sentiment Summary */}
+        {/* Rating Breakdown — catalog score plus the distribution of the
+            reviews actually submitted on this page. Nothing is synthesized:
+            with no reviews there are no bars and no sentiment claims. */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-5 bg-slate-50/80 rounded-2xl border border-slate-200/70">
           {/* Overall Score */}
           <div className="flex flex-col items-center justify-center text-center p-3 border-b md:border-b-0 md:border-r border-slate-200/70 space-y-2">
             <span className="text-5xl font-black text-slate-900 tracking-tight">
-              {rating ? rating.toFixed(1) : "4.8"}
+              {rating ? rating.toFixed(1) : "—"}
             </span>
             <div className="flex items-center gap-1 text-amber-400">
               {[1, 2, 3, 4, 5].map((s) => (
@@ -1084,55 +939,62 @@ export default function ProductDetailPage() {
               ))}
             </div>
             <p className="text-xs font-semibold text-slate-600">
-              Based on {ratingCount || 128} verified purchases
+              {ratingCount ? `Catalog rating · ${ratingCount} ratings` : "No catalog rating"}
             </p>
-            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/70 px-2.5 py-0.5 rounded-full">
-              96% of buyers recommend this product
-            </span>
+            {reviews.length > 0 && (
+              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/70 px-2.5 py-0.5 rounded-full">
+                {reviews.length} shopper review{reviews.length === 1 ? "" : "s"} below
+              </span>
+            )}
           </div>
 
           {/* Rating Distribution Bars */}
           <div className="space-y-2 flex flex-col justify-center px-2">
-            {[
-              { stars: 5, pct: 82 },
-              { stars: 4, pct: 12 },
-              { stars: 3, pct: 4 },
-              { stars: 2, pct: 1 },
-              { stars: 1, pct: 1 },
-            ].map((item) => (
-              <div key={item.stars} className="flex items-center gap-2 text-xs">
-                <span className="w-12 text-slate-600 font-medium">{item.stars} stars</span>
-                <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-400 rounded-full transition-all"
-                    style={{ width: `${item.pct}%` }}
-                  />
-                </div>
-                <span className="w-8 text-right font-bold text-slate-500">{item.pct}%</span>
-              </div>
-            ))}
+            {reviews.length === 0 ? (
+              <p className="text-xs text-slate-500 text-center">
+                No verified reviews yet. Be the first to share your experience.
+              </p>
+            ) : (
+              [5, 4, 3, 2, 1].map((stars) => {
+                const pct = Math.round((reviews.filter((r) => r.rating === stars).length / reviews.length) * 100);
+                return (
+                  <div key={stars} className="flex items-center gap-2 text-xs">
+                    <span className="w-12 text-slate-600 font-medium">{stars} stars</span>
+                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-400 rounded-full transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="w-8 text-right font-bold text-slate-500">{pct}%</span>
+                  </div>
+                );
+              })
+            )}
           </div>
 
           {/* Sentiment Highlights */}
           <div className="p-3 border-t md:border-t-0 md:border-l border-slate-200/70 flex flex-col justify-center space-y-2 text-xs">
             <h4 className="font-black text-slate-900 flex items-center gap-1.5 text-xs">
               <Sparkles className="h-3.5 w-3.5 text-[#174c3c]" />
-              Verified Sentiment Highlights
+              Review Highlights
             </h4>
-            <ul className="space-y-1.5 text-slate-600 text-[11px]">
-              <li className="flex items-start gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                <span><strong>Build & Ergonomics:</strong> Praised for sturdy premium materials and clean finish.</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                <span><strong>Performance & Battery:</strong> Exceeds daily computing and high-intensity benchmarks.</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                <span><strong>Delivery Speed:</strong> Express fulfillment within 24-48 hours via Razorpay rails.</span>
-              </li>
-            </ul>
+            {reviews.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                Highlights appear here once shoppers leave reviews.
+              </p>
+            ) : (
+              <ul className="space-y-1.5 text-slate-600 text-[11px]">
+                <li className="flex items-start gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <span><strong>Average shopper rating:</strong> {(reviews.reduce((a, r) => a + r.rating, 0) / reviews.length).toFixed(1)} / 5 across {reviews.length} review{reviews.length === 1 ? "" : "s"}.</span>
+                </li>
+                <li className="flex items-start gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <span><strong>Verified purchases:</strong> {reviews.filter((r) => r.verified).length} of {reviews.length} reviews carry the Verified Buyer badge.</span>
+                </li>
+              </ul>
+            )}
           </div>
         </div>
 
@@ -1224,7 +1086,7 @@ export default function ProductDetailPage() {
 
                 <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 text-xs">
                   <span className="text-[11px] text-slate-500 font-medium">
-                    Verified Purchase &bull; 100% Authentic Product
+                    {review.verified ? "Verified Purchase • 100% Authentic Product" : "Unverified shopper review"}
                   </span>
                   <button
                     type="button"
@@ -1267,7 +1129,7 @@ export default function ProductDetailPage() {
                     <Check className="h-6 w-6" />
                   </div>
                   <h4 className="text-base font-bold text-slate-900">Thank you for your review!</h4>
-                  <p className="text-xs text-slate-500">Your feedback has been published as a Verified Buyer review.</p>
+                  <p className="text-xs text-slate-500">Your feedback has been published as an unverified shopper review.</p>
                 </div>
               ) : (
                 <form onSubmit={handleSubmitReview} className="space-y-4">

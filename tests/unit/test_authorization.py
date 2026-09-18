@@ -39,6 +39,26 @@ def _sample_auth(
     )
 
 
+def _scoped_repo(auth: Authorization):
+    """Patch the tenant-scoped repository to return ``auth`` regardless of scope."""
+    mock_repo = MagicMock()
+    mock_repo.get_by_id.return_value = auth
+    return pytest.MonkeyPatch.context(), mock_repo
+
+
+def _patched_revalidate(service, session, auth, **kwargs):
+    """Call revalidate_for_payment through the tenant-scoped repository path."""
+    ctx, mock_repo = _scoped_repo(auth)
+    with ctx as mp:
+        mp.setattr(
+            "services.authorization.service.AuthorizationRepository",
+            lambda s, scope: mock_repo,
+        )
+        return service.revalidate_for_payment(
+            session, merchant_id="merch_1", buyer_id="buy_1", **kwargs
+        )
+
+
 # ---------------------------------------------------------------------------
 # Property 5: Pre-payment gates and authorization binding
 # ---------------------------------------------------------------------------
@@ -50,8 +70,10 @@ def test_property_5_revalidation_succeeds_for_matching_hash_and_checkout():
     session.query.return_value.filter.return_value.first.return_value = auth
 
     service = AuthorizationService()
-    validated = service.revalidate_for_payment(
+    validated = _patched_revalidate(
+        service,
         session,
+        auth,
         authorization_id="ath_1",
         checkout_id="chk_1",
         current_price_hash="hash_valid",
@@ -67,8 +89,10 @@ def test_property_5_price_hash_mismatch_blocks_payment():
 
     service = AuthorizationService()
     with pytest.raises(DomainError) as exc_info:
-        service.revalidate_for_payment(
+        _patched_revalidate(
+            service,
             session,
+            auth,
             authorization_id="ath_1",
             checkout_id="chk_1",
             current_price_hash="hash_new_modified",
@@ -84,8 +108,10 @@ def test_authorization_cannot_pay_different_checkout():
 
     service = AuthorizationService()
     with pytest.raises(DomainError) as exc_info:
-        service.revalidate_for_payment(
+        _patched_revalidate(
+            service,
             session,
+            auth,
             authorization_id="ath_1",
             checkout_id="chk_B",
             current_price_hash="hash_valid",
@@ -101,8 +127,10 @@ def test_expired_authorization_is_rejected():
 
     service = AuthorizationService()
     with pytest.raises(DomainError) as exc_info:
-        service.revalidate_for_payment(
+        _patched_revalidate(
+            service,
             session,
+            auth,
             authorization_id="ath_1",
             checkout_id="chk_1",
             current_price_hash="hash_valid",
@@ -118,8 +146,10 @@ def test_consumed_authorization_cannot_be_reused():
 
     service = AuthorizationService()
     with pytest.raises(DomainError) as exc_info:
-        service.revalidate_for_payment(
+        _patched_revalidate(
+            service,
             session,
+            auth,
             authorization_id="ath_1",
             checkout_id="chk_1",
             current_price_hash="hash_valid",
@@ -150,6 +180,18 @@ def test_revalidate_for_payment_enforces_tenant_scoping():
         )
         assert validated.authorization_id == "ath_1"
         mock_repo.get_by_id.assert_called_once_with("ath_1")
+
+
+def test_revalidate_for_payment_requires_tenant_scope():
+    """Omitting merchant_id/buyer_id is a TypeError: the gate has no unscoped path."""
+    service = AuthorizationService()
+    with pytest.raises(TypeError):
+        service.revalidate_for_payment(  # type: ignore[call-arg]
+            MagicMock(),
+            authorization_id="ath_1",
+            checkout_id="chk_1",
+            current_price_hash="hash_valid",
+        )
 
 
 def test_approve_authorization_updates_status_and_checkout():

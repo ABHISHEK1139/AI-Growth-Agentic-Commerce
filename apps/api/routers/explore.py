@@ -71,7 +71,13 @@ INTENT_FALLBACK_NOTE = (
 
 class ExploreQueryRequest(BaseModel):
     prompt: str = Field(
-        ..., description="Natural language shopping query or product specifications"
+        ...,
+        min_length=1,
+        # 10000 is transport hygiene only: the guard's own 4000-char
+        # oversize refusal stays the enforcer (see the pinned
+        # heuristic_bounds contract), so this cap must stay above it.
+        max_length=10000,
+        description="Natural language shopping query or product specifications",
     )
     category: str | None = None
     max_price_minor: int | None = Field(default=None, ge=0)

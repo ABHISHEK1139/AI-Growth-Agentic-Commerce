@@ -49,6 +49,7 @@ export default function CartPage() {
   const [suggestion, setSuggestion] = useState<ProductItem | null>(null);
   const [isComputing, setIsComputing] = useState(false);
   const [serverPriceVerified, setServerPriceVerified] = useState(false);
+  const [priceChanged, setPriceChanged] = useState(false);
 
   // Server-computed breakdown states
   const rawSubtotal = cart.reduce(
@@ -106,7 +107,7 @@ export default function CartPage() {
                   schema_version: "1.0",
                   offer_id: recOfferId,
                   product_id: p.product_id,
-                  merchant_id: p.merchant_id || "mrc_demo_electronics",
+                  merchant_id: p.merchant_id || "merchant_demo",
                   unit_price_minor: recPrice,
                   currency: recCurrency,
                   available_quantity: recAvailQty ?? 1,
@@ -132,44 +133,10 @@ export default function CartPage() {
               const lookup = await lookupOfferInCatalog({ productId: recProductId });
               if (!cancelled && lookup.ok && lookup.data?.found) {
                 setSuggestion(exploreOfferToProductItem(lookup.data.found, lookup.data.catalogSource));
-              } else if (!cancelled && (rec.title || recProductId)) {
-                const offerView = toOfferView(
-                  {
-                    schema_version: "1.0",
-                    offer_id: recOfferId,
-                    product_id: recProductId,
-                    merchant_id: "mrc_demo_electronics",
-                    unit_price_minor: recPrice || 149900,
-                    currency: recCurrency || "INR",
-                    available_quantity: 20,
-                    delivery_days: 1,
-                    return_period_days: 14,
-                    expires_at: "",
-                    offer_version: 1,
-                    pricing_source: "merchant_configured",
-                    status: "active",
-                    specifications: {
-                      memory_gb: null,
-                      storage_gb: null,
-                      weight_grams: null,
-                      length_mm: null,
-                      width_mm: null,
-                      height_mm: null,
-                    },
-                  },
-                  {
-                    title: rec.title || "Complementary Accessory",
-                    category_id: rec.category || "accessory",
-                    imageUrl: rec.image_url || "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=400&q=80",
-                    average_rating: 4.8,
-                    rating_number: 140,
-                    specifications: {
-                      brand: "Certified Companion",
-                      compatibility: rec.compatibility_reason || "Plug and play companion",
-                    },
-                  }
-                );
-                setSuggestion(exploreOfferToProductItem(offerView, "seed_fixture"));
+              } else if (!cancelled) {
+                // No live offer behind this recommendation — show nothing
+                // rather than a card with invented price, rating, or merchant.
+                setSuggestion(null);
               }
             }
           }
@@ -185,10 +152,13 @@ export default function CartPage() {
     };
   }, [cart, currency]);
 
-  // Server Price Verification on Load / Update
+  // Server Price Verification on Load / Update.
+  // Compares every cart line against the live offer price: the badge is
+  // earned per line, and any drift surfaces a "price changed" notice instead.
   useEffect(() => {
     if (!cart.length) {
       setServerPriceVerified(false);
+      setPriceChanged(false);
       return;
     }
 
@@ -197,18 +167,26 @@ export default function CartPage() {
 
     async function verifyServerPrices() {
       try {
-        // Fetch current catalog information for items
-        await Promise.all(
+        const checks = await Promise.all(
           cart.map(async (item) => {
-            const res = await apiGet<any>(`/api/v1/catalog/products/${item.product.id}`);
-            if (res.ok && res.data && !cancelled) {
-              // Validated against live database
-            }
+            const lookupId = item.product.offerId || item.product.id;
+            const res = await apiGet<any>(`/api/v1/catalog/offers/${encodeURIComponent(lookupId)}`);
+            if (!res.ok || !res.data?.offer) return false;
+            const liveUnit = res.data.offer.unit_price_minor;
+            if (typeof liveUnit !== "number") return false;
+            return liveUnit * item.quantity === item.product.priceMinor * item.quantity;
           })
         );
-        if (!cancelled) setServerPriceVerified(true);
+        if (cancelled) return;
+        const allMatched = checks.length > 0 && checks.every(Boolean);
+        setServerPriceVerified(allMatched);
+        setPriceChanged(!allMatched);
       } catch (e) {
         console.warn("Live price verification check:", e);
+        if (!cancelled) {
+          setServerPriceVerified(false);
+          setPriceChanged(false);
+        }
       } finally {
         if (!cancelled) setIsComputing(false);
       }
@@ -355,6 +333,10 @@ export default function CartPage() {
             ) : serverPriceVerified ? (
               <span className="flex items-center gap-1 text-[11px] text-[#174c3c] font-bold">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Price Verified
+              </span>
+            ) : priceChanged ? (
+              <span className="flex items-center gap-1 text-[11px] text-amber-700 font-bold">
+                <RefreshCw className="h-3 w-3" /> Price changed — review at checkout
               </span>
             ) : null}
           </div>
