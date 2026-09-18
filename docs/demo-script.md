@@ -49,7 +49,7 @@ python -m pytest tests/unit/ tests/contract/ tests/security/ tests/evaluation/ t
 1. **Step 1**: Delivery address selection.
 2. **Step 2**: Review items & server-side price freeze (`SHA-256 price_hash`).
 3. **Step 3**: Deterministic policy authorization gate (evaluated without LLM financial decisions).
-4. **Step 4**: Razorpay Standard Web Modal with real test credentials (`rzp_test_YOUR_KEY_ID`).
+4. **Step 4**: Razorpay Standard Web Modal with test credentials (`rzp_test_YOUR_KEY_ID`).
 5. **Failure Demonstrators**: Interactive switches for `PRICE_CHANGED`, `PAYMENT_UNCERTAIN`, and `POLICY_BLOCKED`.
 
 ### D. Revenue Growth: Contextual Cross-Sell (`/cart` & `/api/v1/recommendations/cross-sell`)
