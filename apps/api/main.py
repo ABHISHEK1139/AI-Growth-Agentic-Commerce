@@ -26,6 +26,7 @@ from apps.api.routers import (
     campaigns,
     capability,
     catalog,
+    channels,
     checkout,
     connectors,
     explore,
@@ -37,6 +38,12 @@ from apps.api.routers import (
     razorpay_checkout,
     recommendations,
     research,
+)
+from packages.cache import (
+    InMemoryCacheBackend,
+    NullCacheBackend,
+    RedisCacheBackend,
+    reset_cache,
 )
 from packages.observability.logging import configure_logging, get_logger
 
@@ -70,6 +77,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast rather than serving traffic with template placeholder secrets.
     settings.validate_for_env()
+    # A SQLite URL is a legitimate explicit choice, so this only refuses the
+    # case that is dangerous rather than the case that is unusual: Postgres
+    # configured, not reachable, and the fallback would quietly serve an empty
+    # catalog. `apps.api.db` calls the same check when the connection fails.
+    settings.validate_datastore_for_env()
     configure_logging(level=settings.log_level, service=settings.app_name)
 
     app = FastAPI(
@@ -88,6 +100,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = settings
+
+    # The read cache backend, built here rather than lazily inside the first request so
+    # that `reset_cache` in a test is not undone by the next call. Redis is not
+    # contacted at construction time, so an unreachable cache cannot stop the process
+    # from starting -- `packages.cache` fails open and this only chooses the backend.
+    #
+    # Correctness by default: an in-process cache is only selected when an operator has
+    # said the deployment is a single process. That is the dangerous default to get
+    # wrong, because every worker gets its own copy -- an invalidation on one leaves the
+    # others serving stale entries until their TTLs expire, which for an offer is a
+    # stale price, and the failure is invisible until a customer sees one. So when the
+    # requirement is unmet the cache is *disabled* (correct, and today's behaviour)
+    # rather than silently downgraded to something fast and wrong.
+    if not settings.cache_enabled:
+        reset_cache(NullCacheBackend())
+    elif settings.redis_url:
+        reset_cache(
+            RedisCacheBackend(
+                settings.redis_url,
+                timeout_seconds=settings.cache_timeout_seconds,
+                cooldown_seconds=settings.cache_cooldown_seconds,
+            )
+        )
+    elif settings.cache_allow_process_local:
+        logger.warning(
+            "Using a process-local cache with no Redis configured. This is only correct "
+            "for a single-process deployment: with more than one API worker or replica "
+            "each holds its own copy, so invalidations do not propagate and readers can "
+            "be served a stale offer price until its TTL expires. Configure REDIS_URL, "
+            "or set CACHE_ALLOW_PROCESS_LOCAL=1 to accept that knowingly.",
+            extra={"event": "CACHE_PROCESS_LOCAL_FALLBACK"},
+        )
+        reset_cache(InMemoryCacheBackend())
+    else:
+        logger.warning(
+            "Read cache disabled: no REDIS_URL is configured and "
+            "CACHE_ALLOW_PROCESS_LOCAL is not 1. Falling back to uncached reads, which "
+            "are correct but slower. Configure REDIS_URL to enable caching.",
+            extra={"event": "CACHE_DISABLED_NO_REDIS"},
+        )
+        reset_cache(NullCacheBackend())
 
     # Correlation identifiers, envelopes, error mapping, rate limiting, and CORS.
     # Order matters and is explained in `apps.api.middleware`.
@@ -119,6 +172,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(policy.router)
     app.include_router(research.router)
     app.include_router(connectors.router)
+    app.include_router(channels.router)
 
     # Health probes are mounted unversioned: an orchestrator should not have to
     # know about API versions to decide whether the process is alive.

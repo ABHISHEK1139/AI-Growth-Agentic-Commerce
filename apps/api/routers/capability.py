@@ -11,9 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from apps.api.auth import AppSettings
+from apps.api.auth import AppSettings, optional_principal
 from apps.api.config import Settings
 from apps.api.db import get_db
+from packages.cache import cached
 from packages.observability.logging import get_logger
 from packages.schemas.v1 import (
     CapabilityAuthenticationV1,
@@ -22,6 +23,7 @@ from packages.schemas.v1 import (
     CapabilityLimitsV1,
     CapabilityPolicySummaryV1,
 )
+from packages.security.principals import Principal
 from services.catalog.models import MerchantRules
 
 router = APIRouter(tags=["capability"])
@@ -176,7 +178,40 @@ def _get_optional_db() -> Iterator[Session | None]:
 def get_capability_document(
     settings: AppSettings,
     session: Session | None = Depends(_get_optional_db),
+    principal: Principal | None = Depends(optional_principal),
 ) -> dict[str, Any]:
-    """Serve the machine-readable capability discovery document."""
-    doc = build_capability_document(settings, session)
-    return doc.model_dump(mode="json")
+    """Serve the machine-readable capability discovery document.
+
+    The document carries the merchant's ceilings, auto-approval limit, and
+    category policy, so it is scoped to whoever is asking. An authenticated
+    caller gets their own tenant's rules; an anonymous caller — which is what
+    `/.well-known/agent-commerce` is for — gets the configured default
+    merchant. Passing no merchant at all (the previous behaviour) served
+    `default_merchant_id`'s rules to a token belonging to somebody else.
+
+    Cached, because this is the highest-value cache in the system. Every agent
+    fetches it once per session before doing anything else, so it is
+    "session starts" times the agent count — and it is a pure function of the
+    merchant's rules plus settings, neither of which changes often.
+
+    Tenant-scoped in the key, never shared: the document contains one merchant's
+    ceilings, so a key that omitted ``merchant_id`` would serve one merchant's
+    financial limits to another. That is why the tenant is part of the key rather
+    than a cache-wide default.
+    """
+    merchant_id = principal.merchant_id if principal else None
+
+    def build() -> dict[str, Any]:
+        return build_capability_document(settings, session, merchant_id=merchant_id).model_dump(
+            mode="json"
+        )
+
+    return cached(
+        "capability",
+        merchant_id or settings.default_merchant_id,
+        # The document embeds configured ceilings and a policy version, so a
+        # settings change must invalidate it. Keyed rather than TTL-only because a
+        # stale ceiling is a financial limit the merchant has already moved.
+        ttl_seconds=settings.cache_ttl_seconds_capability,
+        produce=build,
+    )

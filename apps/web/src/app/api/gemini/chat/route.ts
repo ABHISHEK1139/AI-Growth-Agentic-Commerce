@@ -14,6 +14,9 @@ function getAiClient(): GoogleGenAI | null {
   return new GoogleGenAI({
     apiKey,
     httpOptions: {
+      // Without this a stalled provider holds the route handler open until
+      // the platform gives up, and the shopper's spinner never resolves.
+      timeout: UPSTREAM_TIMEOUT_MS,
       headers: {
         "User-Agent": "aistudio-build",
       },
@@ -28,6 +31,12 @@ export interface ChatHistoryItem {
   role: "user" | "model" | "assistant";
   text: string;
 }
+
+/** Cost ceiling on a single unauthenticated completion request. */
+const MAX_MESSAGE_CHARS = 8000;
+const MAX_HISTORY_TURNS = 40;
+const MAX_CUSTOM_INSTRUCTION_CHARS = 2000;
+const UPSTREAM_TIMEOUT_MS = 45000;
 
 
 function detectTaskModel(
@@ -174,20 +183,38 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       message,
-      history = [],
+      history: rawHistory,
       role = "concierge",
-      customSystemInstruction,
+      customSystemInstruction: rawCustomInstruction,
       modelPreference = "auto",
       activeProductId,
-    } = body;
+    } = body || {};
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return NextResponse.json({ ok: false, error: "Message is required" }, { status: 400 });
     }
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return NextResponse.json(
+        { ok: false, error: `Message is too long. Keep it under ${MAX_MESSAGE_CHARS} characters.` },
+        { status: 413 }
+      );
+    }
+
+    // An explicit `history: null` slips past a `= []` default and would throw
+    // inside the trimmer; cap the turn count while we are here.
+    const history: ChatHistoryItem[] = Array.isArray(rawHistory)
+      ? rawHistory.slice(-MAX_HISTORY_TURNS)
+      : [];
+    const customSystemInstruction =
+      typeof rawCustomInstruction === "string"
+        ? rawCustomInstruction.slice(0, MAX_CUSTOM_INSTRUCTION_CHARS)
+        : undefined;
 
     const validRoles: GeminiRole[] = ["grok_teardown", "concierge", "hardware_specialist", "merchant_auditor", "custom"];
     const typedRole: GeminiRole = validRoles.includes(role as GeminiRole) ? (role as GeminiRole) : "concierge";
-    const activeProd = activeProductId ? ALL_PRODUCTS.find((p) => p.id === activeProductId) : undefined;
+    const activeProd = typeof activeProductId === "string"
+      ? ALL_PRODUCTS.find((p) => p.id === activeProductId)
+      : undefined;
 
     const fullSystemInstruction = buildFullSystemInstruction({
       role: typedRole,
@@ -345,12 +372,12 @@ export async function POST(req: NextRequest) {
       durationMs,
     });
   } catch (error: any) {
+    // Provider SDK errors routinely embed the request URL, which carries the
+    // API key as a query parameter. Log the detail, return nothing derived
+    // from it.
     console.error("Gemini Chat API Error:", error);
     return NextResponse.json(
-      {
-        ok: false,
-        error: error?.message || "Failed to process chat with Gemini",
-      },
+      { ok: false, error: "The assistant could not be reached. Please try again." },
       { status: 500 }
     );
   }

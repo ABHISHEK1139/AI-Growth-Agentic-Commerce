@@ -68,26 +68,44 @@ def atomic_publish_catalog_version(
 
     All operations occur within the caller's transaction.
     """
-    # 1. Supersede previously published version(s)
+    # 1. Supersede previously published version(s), except the target itself.
+    #
+    # The `catalog_version_id <> :catalog_version_id` guard is load-bearing, not
+    # tidiness. Without it, re-publishing a version that is *already* published --
+    # which is exactly what an idempotent re-seed does, since the second run
+    # resolves to the same catalog version -- superseded it in step 1 and then
+    # declined to restore it in step 2, because step 2 only promotes a draft or
+    # a validating version. The result was a catalog with nothing published:
+    # a re-run silently took the live storefront's catalog offline.
     supersede_stmt = text(
         """
         UPDATE catalog_version
            SET status = 'superseded'
          WHERE merchant_id = :merchant_id
            AND status = 'published'
+           AND catalog_version_id <> :catalog_version_id
         """
     )
-    session.execute(supersede_stmt, {"merchant_id": merchant_id})
+    session.execute(
+        supersede_stmt,
+        {"merchant_id": merchant_id, "catalog_version_id": catalog_version_id},
+    )
 
-    # 2. Publish target version
+    # 2. Publish target version.
+    #
+    # `superseded` is promotable on purpose. It is the status a version is left
+    # in when it was published and then displaced, and a re-seed that resolves to
+    # that version must be able to put the catalog back online. Restricting the
+    # promotion to draft/validating meant a tenant could end up with no published
+    # version at all and no way back through this function.
     publish_stmt = text(
         """
         UPDATE catalog_version
            SET status = 'published',
                published_at = now()
          WHERE catalog_version_id = :catalog_version_id
-           AND merchant_id = :merchant_id
-           AND status IN ('draft', 'validating')
+         AND merchant_id = :merchant_id
+         AND status IN ('draft', 'validating', 'superseded')
         RETURNING catalog_version_id
         """
     )
@@ -95,4 +113,20 @@ def atomic_publish_catalog_version(
         publish_stmt,
         {"catalog_version_id": catalog_version_id, "merchant_id": merchant_id},
     ).fetchone()
-    return row is not None
+    if row is not None:
+        return True
+
+    # 3. Already published: step 1 left it alone and there is nothing to promote.
+    # Returning False here would read as "publish failed", so distinguish it.
+    already = session.execute(
+        text(
+            """
+            SELECT 1 FROM catalog_version
+             WHERE catalog_version_id = :catalog_version_id
+               AND merchant_id = :merchant_id
+               AND status = 'published'
+            """
+        ),
+        {"catalog_version_id": catalog_version_id, "merchant_id": merchant_id},
+    ).fetchone()
+    return already is not None

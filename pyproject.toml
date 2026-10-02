@@ -16,6 +16,9 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "sqlalchemy==2.0.36",
     "alembic==1.14.0",
+    # Argon2id for human console passwords. Not optional: `packages.security.
+    # passwords` imports it at module scope, and the login path imports that.
+    "argon2-cffi==23.1.0",
     "psycopg[binary]==3.2.3",
     "pgvector==0.3.6",
     "redis==5.2.1",
@@ -99,8 +102,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests may use assert, hardcoded test secrets, and print.
-"tests/**" = ["S101", "S105", "S106", "S108", "S311", "T20"]
+# Tests may use assert, hardcoded test secrets, and print. E402 is allowed
+# because `pytestmark = pytest.mark.<marker>` is a module-level statement that
+# conventionally sits above the test module's imports.
+"tests/**" = ["S101", "S105", "S106", "S108", "S311", "T20", "E402"]
 # Operator-facing CLIs; console output is the interface.
 "scripts/**" = ["T20"]
 # The pipeline is a set of operator-facing CLI scripts; console output is the interface.
@@ -111,6 +116,16 @@ ignore = [
 "pipeline/sample_data.py" = ["T20", "S311"]
 # The audit package is an operator CLI and execution harness.
 "audit/**" = ["T20", "S603", "S602", "S101", "S105", "S106"]
+# backup.py / restore.py are operator CLIs. T201: the stderr progress line *is*
+# the interface. S603/S607: pg_dump and psql are invoked with a fixed argv and
+# shell=False, after an explicit `shutil.which` check, so the executable path is
+# not attacker-controlled even though it is not absolute.
+"infra/operations/**" = ["T201", "S603", "S607"]
+
+# loadtest/mint_session.py is an operator CLI whose only output *is* the session
+# token, on stdout, for the caller to capture. It is the same T201 case as
+# backup.py above: the printed line is the interface.
+"infra/loadtest/**" = ["T201"]
 
 # ---------------------------------------------------------------------------
 # Types

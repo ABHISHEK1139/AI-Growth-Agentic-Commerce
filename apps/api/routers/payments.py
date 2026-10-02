@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from apps.api.auth import (
     AppSettings,
@@ -143,11 +144,35 @@ async def handle_webhook(
     x_razorpay_signature: str | None = Header(default=None, alias="X-Razorpay-Signature"),
     x_signature: str | None = Header(default=None, alias="X-Signature"),
 ) -> dict[str, Any]:
+    """Receive a provider webhook, verify it, and apply the state transitions.
+
+    **Why the body is read here but the work is dispatched to a thread.**
+
+    This handler is ``async def``, which FastAPI runs *on the event loop* rather
+    than in the threadpool. Everything it does is synchronous and blocking: the
+    HMAC verify, a SHA-256 over the raw body, a ``SELECT`` to deduplicate the
+    event, an ``INSERT``, and the payment state transitions with their commits.
+    On the loop, each of those stalls every other in-flight request — including
+    storefront browsing — for its duration.
+
+    Provider webhooks arrive in bursts and are retried on failure, so the burst is
+    exactly the case that saturates the loop. That makes this the wrong place for
+    blocking work even though it is not obviously wrong on a read of the code:
+    ``async def`` looks like the "web scale" choice.
+
+    The body read must stay on the loop's side of the split — it is genuinely
+    async, and HMAC verification needs the *exact* bytes the provider sent, which
+    is why this is ``request.body()`` and never a re-serialised model. Everything
+    after it is CPU and database work with no await point, so it goes to the
+    threadpool via :func:`starlette.concurrency.run_in_threadpool`.
+
+    The alternative — making this a plain ``def`` so FastAPI threads the whole
+    handler — is not available: a synchronous endpoint cannot ``await
+    request.body()``, and the raw bytes are not reconstructable from a parsed
+    model.
+    """
     signature = x_razorpay_signature or x_signature
     if not signature:
-        from packages.errors.exceptions import DomainError
-        from packages.errors.registry import ErrorCode
-
         raise DomainError(
             "Webhook signature header is required (X-Razorpay-Signature or X-Signature)",
             code=ErrorCode.WEBHOOK_SIGNATURE_INVALID,
@@ -163,7 +188,10 @@ async def handle_webhook(
     settings = settings_for(request)
     prov_cfg = settings.payment_provider_config()
     processor = WebhookProcessor(provider_config=prov_cfg)
-    return processor.process_webhook(
+
+    # Off the loop, and on purpose: see the docstring above.
+    return await run_in_threadpool(
+        processor.process_webhook,
         session,
         raw_body=raw_body,
         signature=signature,

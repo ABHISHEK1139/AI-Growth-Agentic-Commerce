@@ -1063,7 +1063,7 @@ def test_f11_04_negotiation_evaluate_bid_counter_offer():
 
 
 def test_f11_05_negotiation_exceeding_max_rounds_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises(DomainError):
         NegotiationEngine.evaluate_bid(
             round_number=10,
             proposed_price_minor=95000,

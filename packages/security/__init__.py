@@ -18,6 +18,9 @@ Four modules, deliberately separate:
   signature, verify expiry, rebuild a principal.
 * :mod:`packages.security.apikeys` — long-lived agent credentials, stored as a
   hash and compared in constant time.
+* :mod:`packages.security.passwords` — Argon2id hashing for *human* console
+  passwords, which is a different threat model from an API key and needs a
+  memory-hard KDF.
 * :mod:`packages.security.authorization` — the checks a caller performs against a
   principal: role, scope, tenant, ownership.
 

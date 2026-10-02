@@ -33,6 +33,13 @@ export default function GatedCheckoutPage() {
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
   const [serverPriceHash, setServerPriceHash] = useState<string | null>(null);
   const [serverCheckoutId, setServerCheckoutId] = useState<string | null>(null);
+  // Total the gateway froze for this cart. The payment path charges this, so
+  // it — not the locally summed cart — is the figure the screen must show.
+  const [serverTotalMinor, setServerTotalMinor] = useState<number | null>(null);
+  // Set once the shopper has been shown that the gateway's frozen total differs
+  // from the bag and has chosen to go with the gateway's figure. Any cart change
+  // clears it, because the next freeze is a different offer.
+  const [gatewayPriceAccepted, setGatewayPriceAccepted] = useState(false);
   // Server-side authorization id. The "Approve" button must grant a real
   // authorization through the gateway before payment; the payment endpoint
   // refuses to create an order without one (403 FORBIDDEN otherwise).
@@ -72,23 +79,31 @@ export default function GatedCheckoutPage() {
     setFailureSimulation("NONE");
   }, [setFailureSimulation]);
 
-  // Retrieve authoritative server price freeze hash and checkout record
+  // Retrieve authoritative server price freeze hash and checkout record.
+  // The whole cart is frozen as one record, and the approval granted for the
+  // previous cart is dropped: reusing it would let a shopper approve a small
+  // bag, add an expensive item, and pay under the old authorization.
   useEffect(() => {
+    setServerAuthorizationId(null);
+    setServerTotalMinor(null);
+    setGatewayPriceAccepted(false);
     if (cart.length === 0) return;
     let cancelled = false;
 
     async function loadServerPriceFreeze() {
       try {
-        const primaryOfferId = cart[0]?.product.offerId || cart[0]?.product.id;
-        if (primaryOfferId) {
-          const res = await createCheckout({
-            offer_id: primaryOfferId,
-            quantity: cart[0].quantity,
-          });
-          if (!cancelled && res.ok && res.data?.checkout) {
-            setServerPriceHash(res.data.checkout.price_hash);
-            setServerCheckoutId(res.data.checkout.checkout_id);
-          }
+        const items = cart
+          .map((line) => ({
+            offer_id: line.product.offerId || line.product.id,
+            quantity: line.quantity,
+          }))
+          .filter((line) => Boolean(line.offer_id));
+        if (items.length === 0) return;
+        const res = await createCheckout({ items });
+        if (!cancelled && res.ok && res.data?.checkout) {
+          setServerPriceHash(res.data.checkout.price_hash);
+          setServerCheckoutId(res.data.checkout.checkout_id);
+          setServerTotalMinor(res.data.checkout.pricing?.total_minor ?? null);
         }
       } catch (err) {
         console.warn("Checkout price freeze sync note:", err);
@@ -116,8 +131,17 @@ export default function GatedCheckoutPage() {
   }
 
   const checkoutItems = cart;
-  const totalMinor = checkoutItems.reduce((acc, item) => acc + item.product.priceMinor * item.quantity, 0);
+  const cartTotalMinor = checkoutItems.reduce((acc, item) => acc + item.product.priceMinor * item.quantity, 0);
   const currency = checkoutItems[0]?.product.currency || "INR";
+  // The gateway charges what it froze. Until the freeze lands we show the cart
+  // total, and once it disagrees with the cart we stop before payment rather
+  // than quietly charging a different number than the screen promised — until
+  // the shopper explicitly accepts the gateway figure.
+  const priceChangedDuringCheckout =
+    serverTotalMinor !== null &&
+    serverTotalMinor !== cartTotalMinor &&
+    !gatewayPriceAccepted;
+  const totalMinor = serverTotalMinor ?? cartTotalMinor;
 
   const autoApprovalLimitMinor = userPreferences.autoApprovalLimitMinor || 500000; // ₹5,000.00
   // Matches the gateway default max_transaction_amount_minor (₹70,000.00 in
@@ -139,15 +163,19 @@ export default function GatedCheckoutPage() {
     let currentCheckoutId = serverCheckoutId;
     if (!currentCheckoutId) {
       try {
-        const primaryOfferId = cart[0]?.product.offerId || cart[0]?.product.id || "off_default";
-        const res = await createCheckout({
-          offer_id: primaryOfferId,
-          quantity: cart[0]?.quantity || 1,
-        });
+        const items = cart
+          .map((line) => ({
+            offer_id: line.product.offerId || line.product.id,
+            quantity: line.quantity,
+          }))
+          .filter((line) => Boolean(line.offer_id));
+        if (items.length === 0) return false;
+        const res = await createCheckout({ items });
         if (res.ok && res.data?.checkout) {
           currentCheckoutId = res.data.checkout.checkout_id;
           setServerCheckoutId(currentCheckoutId);
           setServerPriceHash(res.data.checkout.price_hash);
+          setServerTotalMinor(res.data.checkout.pricing?.total_minor ?? null);
         }
       } catch (err) {
         console.warn("On-demand checkout creation note:", err);
@@ -199,6 +227,12 @@ export default function GatedCheckoutPage() {
   };
 
   const handleStep3Proceed = async () => {
+    if (priceChangedDuringCheckout) {
+      setError(
+        "The price changed while you were checking out. Nothing was charged. Review the order and try again."
+      );
+      return;
+    }
     if (failureSimulation === "POLICY_BLOCKED" || totalMinor > maxPolicyCeilingMinor) {
       setError("Policy Gate Tripped: Total amount exceeds the hard autonomous spending ceiling. Explicit supervisor sign-off or cart adjustment required.");
       return;
@@ -213,6 +247,12 @@ export default function GatedCheckoutPage() {
   };
 
   const handleLaunchRazorpayModal = async () => {
+    if (priceChangedDuringCheckout) {
+      setError(
+        "The price changed while you were checking out. Nothing was charged. Review the order and try again."
+      );
+      return;
+    }
     setIsPaying(true);
     setError(null);
 
@@ -295,6 +335,11 @@ export default function GatedCheckoutPage() {
               razorpay_order_id: response.razorpay_order_id || backendOrderId,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
+              // Bind the recorded payment to the frozen checkout so the gateway
+              // prices it from the freeze, not from this payload.
+              checkout_id: serverCheckoutId || undefined,
+              amount_minor: totalMinor,
+              currency,
             }),
           });
           const verifyData = await verifyRes.json().catch(() => ({}));
@@ -314,6 +359,14 @@ export default function GatedCheckoutPage() {
           if (!confirmedOrderId) {
             setIsPaying(false);
             setError("Payment verification failed. No charge was recorded — please try again or contact support.");
+            return;
+          }
+          const settledMinor = verifyData.data?.amount_minor ?? verifyData.amount_minor;
+          if (typeof settledMinor === "number" && settledMinor !== totalMinor) {
+            setIsPaying(false);
+            setError(
+              "The amount the gateway recorded does not match your order total. No local order was recorded — please contact support."
+            );
             return;
           }
         } catch (e) {
@@ -361,6 +414,12 @@ export default function GatedCheckoutPage() {
    * provider keys are configured.
    */
   const handleSimulateTestPayment = async () => {
+    if (priceChangedDuringCheckout) {
+      setError(
+        "The price changed while you were checking out. Nothing was charged. Review the order and try again."
+      );
+      return;
+    }
     setIsPaying(true);
     setError(null);
 
@@ -407,6 +466,12 @@ export default function GatedCheckoutPage() {
    * POST /api/v1/payments/razorpay/verify-signature to confirm success.
    */
   const handleLaunchRazorpayRedirect = async () => {
+    if (priceChangedDuringCheckout) {
+      setError(
+        "The price changed while you were checking out. Nothing was charged. Review the order and try again."
+      );
+      return;
+    }
     setIsPaying(true);
     setError(null);
 
@@ -714,9 +779,38 @@ export default function GatedCheckoutPage() {
           </div>
         )}
 
+        {priceChangedDuringCheckout && (
+          <div className="p-4 bg-amber-50 border-2 border-amber-500 rounded-2xl text-xs text-amber-950 space-y-2">
+            <div className="font-black flex items-center gap-2">
+              <span>⚠️ PRICE CHANGED BEFORE PAYMENT</span>
+            </div>
+            <p className="leading-relaxed">
+              The gateway froze this order at <strong>{formatMinorToMajor(serverTotalMinor ?? 0, currency)}</strong>,
+              which differs from your bag ({formatMinorToMajor(cartTotalMinor, currency)}).
+              <strong> No payment rail has been contacted.</strong>
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setGatewayPriceAccepted(true)}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl transition-all shadow-xs"
+              >
+                Accept {formatMinorToMajor(serverTotalMinor ?? 0, currency)} &amp; continue
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/cart")}
+                className="px-3.5 py-2 bg-white hover:bg-amber-100 text-amber-900 font-bold rounded-xl border border-amber-200 transition-all"
+              >
+                Review my bag
+              </button>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 font-medium flex items-center gap-2">
-            <span className="text-base">\u26a0\ufe0f</span>
+            <span className="text-base">⚠️</span>
             <span>{error}</span>
           </div>
         )}
@@ -864,7 +958,7 @@ export default function GatedCheckoutPage() {
         {step === 3 && (
           <div className="bg-white p-6 sm:p-8 rounded-3xl border-2 border-[#174c3c]/20 shadow-md space-y-6 animate-in zoom-in-95">
             <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-[#174c3c] text-white rounded-xl font-mono text-xs font-bold">\ud83d\udee1\ufe0f</span>
+              <span className="p-1.5 bg-[#174c3c] text-white rounded-xl font-mono text-xs font-bold">🛡️</span>
               <h2 className="text-xl font-black text-slate-900">Step 3: Order Verification & Buyer Protection</h2>
             </div>
 
@@ -887,9 +981,9 @@ export default function GatedCheckoutPage() {
               {/* Why Selected Breakdown */}
               <div className="p-3 bg-white/90 rounded-xl border border-[#c8d4cc] space-y-1 text-slate-700">
                 <span className="font-bold text-[#174c3c] block text-[11px]">Verified Order Guarantees:</span>
-                <div>\u2713 Meets 16GB RAM and specification requirements</div>
-                <div>\u2713 Buyer protection coverage active up to {formatMinorToMajor(maxPolicyCeilingMinor, currency)}</div>
-                <div>\u2713 Guaranteed express delivery within 2 days</div>
+                <div>✓ Meets 16GB RAM and specification requirements</div>
+                <div>✓ Buyer protection coverage active up to {formatMinorToMajor(maxPolicyCeilingMinor, currency)}</div>
+                <div>✓ Guaranteed express delivery within 2 days</div>
               </div>
 
               {failureSimulation === "POLICY_BLOCKED" || totalMinor > maxPolicyCeilingMinor ? (
@@ -979,7 +1073,7 @@ export default function GatedCheckoutPage() {
               <div>
                 <h2 className="text-xl font-black text-slate-900">Step 4: Secure Payment</h2>
                 <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                  <span>\ud83d\udd12</span>
+                  <span>🔒</span>
                   End-to-end encrypted checkout via Razorpay Standard Modal
                 </p>
               </div>
@@ -999,7 +1093,7 @@ export default function GatedCheckoutPage() {
             {/* Test Mode Notice */}
             {!razorpayLoaded && (
               <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 flex items-start gap-2">
-                <span className="text-base mt-0.5">\u2139\ufe0f</span>
+                <span className="text-base mt-0.5">ℹ️</span>
                 <div>
                   <strong>Test Mode:</strong> Razorpay SDK is loading or unavailable. Payment will be simulated automatically
                   and your order will be placed in demo mode. No real charges will be made.
@@ -1031,10 +1125,10 @@ export default function GatedCheckoutPage() {
             <div className="p-4 bg-[#e5f0e9]/50 rounded-2xl border border-[#c8d4cc] space-y-2">
               <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">Accepted Payment Methods</span>
               <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-700">
-                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">\u26a1 UPI (GPay, PhonePe, Paytm)</span>
-                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">\ud83d\udcb3 Cards (Visa, Mastercard, RuPay)</span>
-                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">\ud83c\udfe6 NetBanking (50+ Banks)</span>
-                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">\ud83d\udc5b Wallets &amp; EMI</span>
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">⚡ UPI (GPay, PhonePe, Paytm)</span>
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">💳 Cards (Visa, Mastercard, RuPay)</span>
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">🏦 NetBanking (50+ Banks)</span>
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs">👛 Wallets &amp; EMI</span>
               </div>
             </div>
 
@@ -1042,7 +1136,7 @@ export default function GatedCheckoutPage() {
             {providerConfigured ? (
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-900 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 font-bold">
-                  <span>\ud83d\udd11</span>
+                  <span>🔑</span>
                   <span>Configured key:</span>
                   <code className="font-mono bg-amber-100 px-1.5 py-0.5 rounded text-amber-950 font-bold">{razorpayKeyId}</code>
                 </div>
@@ -1062,9 +1156,9 @@ export default function GatedCheckoutPage() {
 
             {/* Security Trust Badges */}
             <div className="flex items-center justify-center gap-4 text-[10px] text-slate-500 font-medium">
-              <span className="flex items-center gap-1">\ud83d\udd12 256-bit SSL</span>
-              <span className="flex items-center gap-1">\u2705 PCI DSS Compliant</span>
-              <span className="flex items-center gap-1">\ud83d\udee1\ufe0f HMAC-SHA256 Verified</span>
+              <span className="flex items-center gap-1">🔒 256-bit SSL</span>
+              <span className="flex items-center gap-1">✅ PCI DSS Compliant</span>
+              <span className="flex items-center gap-1">🛡️ HMAC-SHA256 Verified</span>
             </div>
 
             <div className="flex items-center justify-between pt-2">

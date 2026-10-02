@@ -1,9 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { gotoAsMerchantAdmin } from "./session";
 
 test.describe("Merchant AI Policy Control & Capability Agreement", () => {
+  // Both tests sign in first. `/merchant/policy` is gated in middleware, so an
+  // unauthenticated navigation lands on `/login?reason=no_session` and the
+  // assertions below would be made against the sign-in page.
   test("loads policy control page with 3-surface agreement check", async ({ page }) => {
-    await page.goto("/merchant/policy");
-    await expect(page.locator("body")).toBeVisible();
+    await gotoAsMerchantAdmin(page, "/merchant/policy");
 
     // Verify main heading
     const heading = page.locator("h1:has-text('Policy Controls'), h1:has-text('Financial Policy')").first();
@@ -17,7 +20,7 @@ test.describe("Merchant AI Policy Control & Capability Agreement", () => {
   });
 
   test("policy routes maintain consistency", async ({ page }) => {
-    await page.goto("/merchant/policy");
+    await gotoAsMerchantAdmin(page, "/merchant/policy");
 
     // Check for agreement section or status badge
     const agreementSection = page

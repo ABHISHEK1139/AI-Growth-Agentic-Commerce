@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from apps.api.auth import AppSettings, require_roles
 from apps.api.db import get_db
 from apps.api.envelope import success
+from packages.cache import invalidate
 from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
 from packages.security.principals import Principal, Role
@@ -158,6 +159,14 @@ def update_merchant_rules(
             },
         )
         session.commit()
+
+        # The capability document embeds these ceilings, so a cached copy now states
+        # limits the merchant has already moved. Invalidated after the commit for the
+        # same reason as the catalogue publish: before it, a concurrent read could
+        # repopulate the cache from the pre-commit rules and leave it stale for its
+        # full TTL.
+        invalidate("capability", effective_merchant_id)
+
         return success({"rules": _rules_to_dict(updated, effective_merchant_id, settings)})
     except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError) as exc:
         with suppress(Exception):

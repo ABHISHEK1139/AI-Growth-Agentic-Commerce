@@ -14,17 +14,29 @@ test.describe("Full End-to-End Human User Flows & Edge Cases", () => {
     const cards = page.locator("article");
     await expect(cards.first()).toBeVisible();
 
-    // 3. Click first product to view details
-    const firstProductLink = cards.first().locator("a[href*='/product/']").first();
-    await firstProductLink.click();
+    // 3. Click a product that can actually be bought.
+    // Deliberately not `cards.first()`. The catalog seeds a refurbished laptop
+    // with zero stock and its card is legitimately badged "Out of stock"; its
+    // product page then disables "Add to Bag", which is the right behaviour but
+    // leaves nothing for a shopper - or this test - to click. Choosing the first
+    // in-stock card is also what a person browsing this category would do.
+    const inStockCard = cards
+      .filter({ hasNotText: "Out of stock" })
+      .filter({ has: page.locator("a[href*='/product/']") })
+      .first();
+    await expect(inStockCard).toBeVisible();
+    await inStockCard.locator("a[href*='/product/']").first().click();
     await page.waitForURL(/\/product\//);
 
     // Verify Product Detail Page
     await expect(page.locator("h1")).toBeVisible();
-    await expect(page.locator("button:has-text('Add to Bag'), button:has-text('Add to Cart')").first()).toBeVisible();
+    const addToBagBtn = page.locator("button:has-text('Add to Bag'), button:has-text('Add to Cart')").first();
+    await expect(addToBagBtn).toBeVisible();
+    // Enabled, not merely present: a sold-out offer renders the same button
+    // disabled, so visibility alone is not evidence the flow can be completed.
+    await expect(addToBagBtn).toBeEnabled();
 
     // 4. Add to bag
-    const addToBagBtn = page.locator("button:has-text('Add to Bag'), button:has-text('Add to Cart')").first();
     await addToBagBtn.click();
 
     // Verify Cart Drawer opens or badge increments (web-first: no fixed sleeps)
@@ -48,7 +60,7 @@ test.describe("Full End-to-End Human User Flows & Edge Cases", () => {
     await page.goto("/");
 
     // Open AI Drawer via nav button (no conditional: a missing trigger is a failure)
-    const openAssistantBtn = page.locator("button:has-text('Ask'), button[aria-label*='AI'], button:has-text('Chat']").first();
+    const openAssistantBtn = page.locator("button:has-text('Ask'), button[aria-label*='AI'], button:has-text('Chat')").first();
     await expect(openAssistantBtn).toBeVisible();
     await openAssistantBtn.click();
 

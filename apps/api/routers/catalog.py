@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from apps.api.auth import optional_principal
+from apps.api.auth import AppSettings, optional_principal
 from apps.api.catalog_source import search_catalog
 from apps.api.envelope import success
+from packages.cache import cached
 from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
 from packages.security.principals import Principal
@@ -92,86 +93,110 @@ def get_product(
     product_id: str,
     session: OptionalDatabaseSession,
     principal: Principal | None = Depends(optional_principal),
+    settings: AppSettings = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    """Fetch product details with images and specifications."""
+    """Fetch product details with images and specifications.
+
+    Cached per (merchant, product), because this is the second-largest slice of
+    measured traffic (~35% of the load mix) and the read that motivates the offer
+    cache -- an agent browsing a category fetches every product it compares.
+
+    A *missing* product is deliberately not cached. The handler raises
+    ``DomainError`` for a product that is absent, and because that propagates out of
+    ``produce`` nothing is written, so a product created moments later is visible
+    immediately rather than after a negative-cache TTL. Negative caching is a
+    legitimate optimisation with a real staleness cost, and this is not the place
+    to take it on silently.
+    """
     merchant_id = (principal.merchant_id if principal else None) or "merchant_demo"
 
-    if session is not None:
-        try:
-            product = (
-                session.query(Product)
-                .filter(
-                    Product.product_id == product_id,
-                    Product.merchant_id == merchant_id,
+    def build() -> dict[str, Any]:
+        if session is not None:
+            try:
+                product = (
+                    session.query(Product)
+                    .filter(
+                        Product.product_id == product_id,
+                        Product.merchant_id == merchant_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
-        except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
-            # The datastore is unreachable: fall through to the seed catalog
-            # below. Anything else (including a found row) is handled
-            # explicitly so programming errors never masquerade as products.
-            product = None
-        if product is not None:
-            images = (
-                session.query(ProductImage)
-                .filter(ProductImage.product_id == product_id)
-                .order_by(ProductImage.position.asc())
-                .all()
-            )
-            return success(
-                {
-                    "product": {
-                        "product_id": product.product_id,
-                        "external_product_id": product.external_product_id,
-                        "category_id": product.category_id,
-                        "title": product.title,
-                        "status": product.status,
-                        "description": product.description,
-                        "specifications": product.specifications,
-                        "average_rating": product.average_rating,
-                        "rating_number": product.rating_number,
-                        "images": [
-                            {
-                                "source_url": img.source_url,
-                                "storage_key": img.storage_key,
-                                "resolution": img.resolution,
-                                "position": img.position,
-                            }
-                            for img in images
-                        ],
+            except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
+                # The datastore is unreachable: fall through to the seed catalog
+                # below. Anything else (including a found row) is handled
+                # explicitly so programming errors never masquerade as products.
+                product = None
+            if product is not None:
+                images = (
+                    session.query(ProductImage)
+                    .filter(ProductImage.product_id == product_id)
+                    .order_by(ProductImage.position.asc())
+                    .all()
+                )
+                return success(
+                    {
+                        "product": {
+                            "product_id": product.product_id,
+                            "external_product_id": product.external_product_id,
+                            "category_id": product.category_id,
+                            "title": product.title,
+                            "status": product.status,
+                            "description": product.description,
+                            "specifications": product.specifications,
+                            "average_rating": product.average_rating,
+                            "rating_number": product.rating_number,
+                            "images": [
+                                {
+                                    "source_url": img.source_url,
+                                    "storage_key": img.storage_key,
+                                    "resolution": img.resolution,
+                                    "position": img.position,
+                                }
+                                for img in images
+                            ],
+                        }
                     }
-                }
-            )
+                )
 
-    # Fallback to seed catalog
-    candidates = load_seed_candidates(merchant_id)
-    for c in candidates:
-        if c.offer.product_id == product_id:
-            return success(
-                {
-                    "product": {
-                        "product_id": c.offer.product_id,
-                        "external_product_id": c.offer.product_id,
-                        "category_id": c.category_id,
-                        "title": c.title,
-                        "status": "valid",
-                        "description": [c.title],
-                        "specifications": c.specifications,
-                        "average_rating": c.average_rating,
-                        "rating_number": c.rating_number,
-                        "images": [
-                            {
-                                "source_url": c.image_url,
-                                "storage_key": None,
-                                "resolution": "hi_res",
-                                "position": 0,
-                            }
-                        ]
-                        if c.image_url
-                        else [],
+        # Fallback to seed catalog
+        candidates = load_seed_candidates(merchant_id)
+        for c in candidates:
+            if c.offer.product_id == product_id:
+                return success(
+                    {
+                        "product": {
+                            "product_id": c.offer.product_id,
+                            "external_product_id": c.offer.product_id,
+                            "category_id": c.category_id,
+                            "title": c.title,
+                            "status": "valid",
+                            "description": [c.title],
+                            "specifications": c.specifications,
+                            "average_rating": c.average_rating,
+                            "rating_number": c.rating_number,
+                            "images": [
+                                {
+                                    "source_url": c.image_url,
+                                    "storage_key": None,
+                                    "resolution": "hi_res",
+                                    "position": 0,
+                                }
+                            ]
+                            if c.image_url
+                            else [],
+                        }
                     }
-                }
-            )
+                )
+
+        raise DomainError("The requested product does not exist.", code=ErrorCode.NOT_FOUND)
+
+    return cached(
+        "product",
+        merchant_id,
+        product_id,
+        ttl_seconds=(settings.cache_ttl_seconds_product if settings else 30),
+        produce=build,
+    )
 
     raise DomainError("The requested product does not exist.", code=ErrorCode.NOT_FOUND)
 
@@ -181,26 +206,49 @@ def get_offer(
     offer_id: str,
     session: OptionalDatabaseSession,
     principal: Principal | None = Depends(optional_principal),
+    settings: AppSettings = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    """Fetch an offer by ID within merchant scope."""
+    """Fetch an offer by ID within merchant scope.
+
+    Cached per (merchant, offer), because this is the single most frequent read in the
+    system: an agent evaluating a product fetches its priced offer, and a storefront
+    listing renders one per row. §4.1 of the readiness plan measures the ceiling as
+    database round-trips per request, so this is one of the reads worth cutting.
+
+    The TTL is short (15s by default) and the key is tenant-qualified. An offer is a
+    *price*, so a stale entry here is a wrong price rather than a stale banner -- which
+    is why this is not cached for minutes and why the catalogue publish path
+    invalidates the namespace explicitly.
+    """
     merchant_id = (principal.merchant_id if principal else None) or "merchant_demo"
-    if session is not None:
-        try:
-            service = OfferService()
-            offer = service.get_offer_by_id(session, merchant_id=merchant_id, offer_id=offer_id)
-            return success({"offer": offer.model_dump(mode="json")})
-        except DomainError:
-            raise
-        except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
-            pass  # Datastore unreachable: fall through to the seed lookup below.
 
-    # Seed fallback
-    candidates = load_seed_candidates(merchant_id)
-    for c in candidates:
-        if c.offer.offer_id == offer_id:
-            return success({"offer": c.offer.model_dump(mode="json")})
+    def build() -> dict[str, Any]:
+        if session is not None:
+            try:
+                service = OfferService()
+                offer = service.get_offer_by_id(session, merchant_id=merchant_id, offer_id=offer_id)
+                return success({"offer": offer.model_dump(mode="json")})
+            except DomainError:
+                raise
+            except (OperationalError, InterfaceError, DBAPIError, SQLAlchemyError):
+                pass  # Datastore unreachable: fall through to the seed lookup below.
 
-    raise DomainError("The requested offer does not exist.", code=ErrorCode.NOT_FOUND)
+        # Seed fallback
+        candidates = load_seed_candidates(merchant_id)
+        for c in candidates:
+            if c.offer.offer_id == offer_id:
+                return success({"offer": c.offer.model_dump(mode="json")})
+
+        raise DomainError("The requested offer does not exist.", code=ErrorCode.NOT_FOUND)
+
+    ttl = settings.cache_ttl_seconds_offer if settings else 15
+    return cached(
+        "offer",
+        merchant_id,
+        offer_id,
+        ttl_seconds=ttl,
+        produce=build,
+    )
 
 
 @router.post("/offers/{offer_id}/validate")

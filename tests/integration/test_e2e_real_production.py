@@ -138,7 +138,7 @@ def main() -> None:
     loaded_products = 0
     loaded_offers = 0
 
-    with open(products_file, encoding="utf-8") as f:
+    with products_file.open(encoding="utf-8") as f:
         for idx, line in enumerate(f):
             if idx >= 50:
                 break
@@ -160,7 +160,7 @@ def main() -> None:
             session.add(p_obj)
             loaded_products += 1
 
-    with open(offers_file, encoding="utf-8") as f:
+    with offers_file.open(encoding="utf-8") as f:
         for idx, line in enumerate(f):
             if idx >= 50:
                 break
@@ -216,7 +216,6 @@ def main() -> None:
 
     # Pick the first real item for live purchase
     selected_row = sql_res[0]
-    selected_product_id = selected_row[0]
     selected_offer_id = selected_row[1]
     selected_title = selected_row[2]
     selected_price_minor = selected_row[3]

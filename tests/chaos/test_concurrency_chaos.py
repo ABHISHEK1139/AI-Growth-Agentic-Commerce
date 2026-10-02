@@ -565,6 +565,8 @@ def test_chaos_mandate_rejection_atomically_releases_inventory(chaos_db):
         session, offer_id="off_leak_test_1", checkout_id="chk_leak_1", quantity=1
     )
     session.commit()
+    assert rsv.quantity == 1
+    assert rsv.status == "held"
 
     # Verify inventory is held
     check_inv = get_inventory(session, "off_leak_test_1")
@@ -724,6 +726,8 @@ def test_chaos_double_commit_idempotency_no_double_decrement(chaos_db):
         session, offer_id="off_leak_test_4", checkout_id="chk_double_cmt", quantity=2
     )
     session.commit()
+    assert rsv.quantity == 2
+    assert rsv.status == "held"
 
     assert get_inventory(session, "off_leak_test_4").available_quantity == 5
     assert get_inventory(session, "off_leak_test_4").reserved_quantity == 2

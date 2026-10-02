@@ -111,7 +111,8 @@ function currencyFromMetadata(metadata: Record<string, unknown> | null): string 
 const FALLBACK_CURRENCY = "INR";
 
 /** Timestamps arrive as the database rendered them; shown as-is plus a local reading. */
-function localTimestamp(raw: string): string | null {
+function localTimestamp(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
   const parsed = new Date(raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" });

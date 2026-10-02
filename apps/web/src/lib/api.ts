@@ -116,11 +116,25 @@ export const DEFAULT_TIMEOUT_MS = 15000;
  * The value is normalised to an origin: a configured `/api` or `/api/v1` suffix
  * is stripped, because callers here pass full paths (`/api/v1/payments/...`) and
  * a base that already carried the prefix would produce `/api/v1/api/v1/...`.
- * `docker-compose.yml` currently sets the variable to
- * `http://localhost:8000/api/v1`, so this normalisation is load-bearing.
+ *
+ * Two variables, because the two runtimes are in different places.
+ * `NEXT_PUBLIC_API_BASE_URL` is compiled into the client bundle, so its value is
+ * resolved by the *browser*, where `http://localhost:8000` is the developer's own
+ * machine and is correct. The same literal read on the *server* is the web
+ * container pointing at itself: the API is a separate service in the compose
+ * network. `AGENTPAY_API_INTERNAL_URL` is the server-side answer.
+ *
+ * It is guarded by a `typeof window` check and that guard is load-bearing, not
+ * tidiness. The value has to be inlined at build time for the Edge middleware to
+ * read it (see next.config.js), and inlining puts it in the client bundle too -
+ * where `http://api:8000` is a hostname that does not resolve outside the
+ * compose network. Without the guard the browser's own catalog and auth calls
+ * failed with `ERR_NAME_NOT_RESOLVED` and every page sat on its loading state.
  */
 function apiBase(): string {
-  const configured = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
+  const onServer = typeof window === "undefined";
+  const internal = onServer ? (process.env.AGENTPAY_API_INTERNAL_URL || "").trim() : "";
+  const configured = internal || (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
   if (!configured) return "";
   return configured.replace(/\/+$/, "").replace(/\/api(\/v\d+)?$/, "");
 }
@@ -211,23 +225,188 @@ export interface RequestOptions {
 
 let bootstrapPromise: Promise<boolean> | null = null;
 
-export async function bootstrapSession(role: "buyer" | "merchant_admin" = "buyer"): Promise<boolean> {
+/**
+ * Whether this deployment accepts a no-credential demo session.
+ *
+ * `null` until the backend has answered. Every caller that would auto-bootstrap
+ * has to wait for this, because silently minting a `merchant_admin` session on a
+ * deployment that has turned the demo path off would leave the console
+ * permanently unreachable with no way to sign in.
+ */
+let demoSessionAllowed: boolean | null = null;
+let demoSessionProbe: Promise<boolean> | null = null;
+
+async function probeDemoSession(): Promise<boolean> {
+  if (demoSessionAllowed !== null) return demoSessionAllowed;
+  if (!demoSessionProbe) {
+    demoSessionProbe = (async () => {
+      try {
+        const res = await fetch(resolveApiUrl("/api/v1/auth/console-status"), {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+        });
+        if (!res.ok) {
+          // An unreachable or older backend. Assume the demo path is on, which
+          // preserves the previous behaviour rather than locking every operator
+          // out of a console that used to work.
+          return true;
+        }
+        const body = asRecord(await res.json());
+        const data = asRecord(body.data);
+        return data.demo_session_enabled === true;
+      } catch {
+        return false;
+      }
+    })();
+  }
+  demoSessionAllowed = await demoSessionProbe;
+  return demoSessionAllowed;
+}
+
+/** Test seam: forget the cached probe result. */
+export function __resetDemoSessionProbe(): void {
+  demoSessionAllowed = null;
+  demoSessionProbe = null;
+  bootstrapPromise = null;
+  mintInFlight = null;
+}
+
+export async function loginWithPassword(
+  email: string,
+  password: string
+): Promise<{ ok: boolean; message?: string; mustChangePassword?: boolean }> {
   try {
-    const res = await fetch(resolveApiUrl("/api/v1/auth/session"), {
+    const res = await fetch(resolveApiUrl("/api/v1/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        role,
-        merchant_id: "merchant_demo",
-        buyer_id: role === "buyer" ? "buy_shopper_demo" : undefined,
-        subject: role === "buyer" ? "demo_shopper" : "demo_merchant_admin",
-      }),
+      body: JSON.stringify({ email, password }),
       credentials: "include",
     });
+    const body = asRecord(await res.json().catch(() => ({})));
+    if (res.ok) {
+      const data = asRecord(body.data);
+      bootstrapPromise = null;
+      return {
+        ok: true,
+        mustChangePassword: data.must_change_password === true,
+      };
+    }
+    const error = asRecord(body.error);
+    return {
+      ok: false,
+      message:
+        typeof error.message === "string"
+          ? error.message
+          : "Sign-in failed. Check your email and password.",
+    };
+  } catch {
+    return { ok: false, message: "Could not reach the server." };
+  }
+}
+
+export async function logoutSession(): Promise<boolean> {
+  try {
+    const res = await fetch(resolveApiUrl("/api/v1/auth/logout"), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
+    bootstrapPromise = null;
     return res.ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * The role of the session this browser already holds, or `null` if none.
+ *
+ * Read from the server rather than inferred from the URL. A path-based guess
+ * looks reasonable and is wrong: a buyer who navigates to a merchant URL would
+ * be re-minted as a merchant admin on any deployment where the demo session is
+ * live, and the re-mint is a *session* -- it is not scoped to the page that
+ * triggered it.
+ */
+async function currentRole(): Promise<string | null> {
+  try {
+    const res = await fetch(resolveApiUrl("/api/v1/auth/me"), {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const body = asRecord(await res.json());
+    const data = asRecord(body.data);
+    if (data.authenticated !== true) return null;
+    const principal = asRecord(data.principal);
+    return typeof principal.role === "string" ? principal.role : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Mint a no-credential session. Refused unless the backend says the deployment
+ * allows it, so this can never become a silent way into an admin console.
+ */
+export async function bootstrapSession(
+  role: "buyer" | "merchant_admin" = "buyer"
+): Promise<boolean> {
+  if (!(await probeDemoSession())) return false;
+
+  // Never replace a session that already exists. This is called from the
+  // storefront on every page load with the default `buyer` role, so a merchant
+  // admin who had just signed in was silently downgraded -- and the console
+  // screens then failed with `FORBIDDEN` on every request that needs a merchant
+  // role, which reads as a permissions bug rather than as a session that had
+  // been replaced thirty seconds earlier.
+  const existing = await currentRole();
+  if (existing !== null) {
+    // `true` means "this browser has a usable session", which is what the
+    // callers actually check. Not "we minted one" -- a caller cannot act on
+    // that distinction, and reporting failure here would make the storefront
+    // look broken to a signed-in shopper.
+    return true;
+  }
+
+  return mintDemoSession(role);
+}
+
+/**
+ * POST a fresh no-credential session, unconditionally.
+ *
+ * Split out from {@link bootstrapSession} so the rate-limited request is
+ * serialised: the storefront calls `bootstrapSession` on every page load, and
+ * several tabs or a fast test run would otherwise fire several of them at once.
+ */
+let mintInFlight: Promise<boolean> | null = null;
+
+function mintDemoSession(role: "buyer" | "merchant_admin"): Promise<boolean> {
+  if (mintInFlight) return mintInFlight;
+
+  mintInFlight = (async () => {
+    try {
+      const res = await fetch(resolveApiUrl("/api/v1/auth/demo-session"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          role,
+          merchant_id: "merchant_demo",
+          buyer_id: role === "buyer" ? "buy_shopper_demo" : undefined,
+          subject: role === "buyer" ? "demo_shopper" : "demo_merchant_admin",
+        }),
+        credentials: "include",
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      // Cleared so a later call can mint again. Kept until the request settles
+      // so concurrent callers share one, which is the whole point.
+      mintInFlight = null;
+    }
+  })();
+
+  return mintInFlight;
 }
 
 /**
@@ -345,11 +524,26 @@ async function request<T>(
     );
   }
 
-  if ((res.status === 401 || res.status === 403) && !path.includes("/auth/") && !options.skipAuthBootstrap) {
-    const role = path.includes("/merchant") || path.includes("/campaigns") || path.includes("/audit") || path.includes("/policy")
-      ? "merchant_admin"
-      : "buyer";
-    const ok = await bootstrapSession(role);
+  if (
+    (res.status === 401 || res.status === 403) &&
+    !path.includes("/auth/") &&
+    !options.skipAuthBootstrap
+  ) {
+    // Re-mint and retry, once. This is what makes the console usable in local
+    // development, where the demo session is the only credential there is. It
+    // must not become a way past a real login: `bootstrapSession` refuses unless
+    // the backend reports that the demo path is enabled, and outside local
+    // development it is not, so a 401 here stays a 401.
+    //
+    // **Read the current session, never guess the role.** The role used to be
+    // inferred from the request path, which meant a `/merchant/*` request would
+    // re-mint as `merchant_admin` -- including for a *buyer* who had navigated
+    // to a merchant URL. On a deployment where the demo path is live that
+    // silently escalated the session; where it is not, the re-mint was a no-op
+    // and the console just 403'd in a loop. Reading `/auth/me` costs one request
+    // and is correct in both cases.
+    const current = await currentRole();
+    const ok = await bootstrapSession(current === "merchant_admin" ? "merchant_admin" : "buyer");
     if (ok) {
       return request<T>(path, init, { ...options, skipAuthBootstrap: true });
     }

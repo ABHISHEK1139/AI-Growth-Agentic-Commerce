@@ -56,7 +56,10 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-800",
 };
 
-function formatConfirmedAt(raw: string): string {
+function formatConfirmedAt(raw: string | null | undefined): string {
+  // A record from a shim store can be missing its timestamp; falling through to
+  // `.endsWith` here would throw inside the table's `.map` and blank the page.
+  if (typeof raw !== "string" || raw.length === 0) return "—";
   const parsed = new Date(raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toLocaleDateString("en-IN", {

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.auth import require_roles
 from apps.api.db import get_db
+from packages.cache import invalidate
 from packages.security.principals import Principal, Role
 from services.catalog.service import CatalogService
 
@@ -363,6 +364,18 @@ def publish_import(
     )
     session.commit()
 
+    # The publish created and priced new offers, so every cached offer for this
+    # merchant is now suspect. Invalidated after the commit, not before: dropping the
+    # cache first would leave a window where a concurrent read re-populated it from the
+    # pre-commit state, and the stale entries would then outlive the publish by their
+    # full TTL.
+    #
+    # Scoped to the merchant rather than the whole namespace because a publish is
+    # per-tenant, and one tenant's price change must not cost every other tenant their
+    # cache.
+    invalidate("offer", merchant_id)
+    invalidate("product", merchant_id)
+
     return PublishResultResponse(
         import_id=import_id,
         status="published",
@@ -387,4 +400,10 @@ def rollback_import(
     service = _catalog_service()
     service.rollback_import(session, merchant_id=merchant_id, import_id=import_id)
     session.commit()
+    # A rollback discards staged rows for an import that was never published, so no
+    # published offer changes. Invalidated anyway, because "was never published" is a
+    # claim about the code path rather than about the cache's contents, and a stale
+    # price is too expensive a failure to guard with reasoning.
+    invalidate("offer", merchant_id)
+    invalidate("product", merchant_id)
     return {"import_id": import_id, "status": "rolled_back"}

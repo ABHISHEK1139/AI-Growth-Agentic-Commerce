@@ -1,4 +1,4 @@
-"""The error code registry â€” one source of truth for every failure this system
+"""The error code registry — one source of truth for every failure this system
 can report (design: "Error code registry").
 
 Clients switch on these codes. The frontend drives recovery UI from them and the
@@ -27,8 +27,8 @@ class ErrorCode(StrEnum):
     """Every code a client may observe.
 
     The domain block mirrors the design's registry table. The transport block
-    covers the generic conditions the middleware has to name â€” a malformed body,
-    an unmatched route, an unexpected exception â€” so that no response can ever
+    covers the generic conditions the middleware has to name — a malformed body,
+    an unmatched route, an unexpected exception — so that no response can ever
     escape without a code.
     """
 
@@ -71,6 +71,15 @@ class ErrorCode(StrEnum):
     # --- Domain: state machine -------------------------------------------
     ILLEGAL_TRANSITION = "ILLEGAL_TRANSITION"
     ALREADY_FINALIZED = "ALREADY_FINALIZED"
+
+    # --- Domain: commerce channels ----------------------------------------
+    # A third-party store failing on its own terms. Separate from the gateway's
+    # own codes because the remedy is the merchant's, not the caller's: fix the
+    # token, wait out a rate limit, or check the network.
+    CONNECTOR_UNAUTHORIZED = "CONNECTOR_UNAUTHORIZED"
+    CONNECTOR_UNREACHABLE = "CONNECTOR_UNREACHABLE"
+    CONNECTOR_RATE_LIMITED = "CONNECTOR_RATE_LIMITED"
+    CONNECTOR_ERROR = "CONNECTOR_ERROR"
 
     # --- Domain: access ---------------------------------------------------
     FORBIDDEN = "FORBIDDEN"
@@ -263,6 +272,35 @@ _SPECS: tuple[ErrorSpec, ...] = (
         "That change is not allowed from the current state.",
     ),
     _spec(ErrorCode.ALREADY_FINALIZED, 409, False, "This record is already final."),
+    # --- Commerce channels -------------------------------------------------
+    # A third-party store failing is a dependency problem, not a client mistake,
+    # and the merchant's remedy differs per case: fix the token, wait out a rate
+    # limit, or check the network. Distinct codes so the console can say which,
+    # rather than one "sync failed" that leaves the merchant guessing.
+    _spec(
+        ErrorCode.CONNECTOR_UNAUTHORIZED,
+        401,
+        False,
+        "The store rejected the configured credential.",
+    ),
+    _spec(
+        ErrorCode.CONNECTOR_UNREACHABLE,
+        503,
+        True,
+        "The store could not be reached.",
+    ),
+    _spec(
+        ErrorCode.CONNECTOR_RATE_LIMITED,
+        429,
+        True,
+        "The store is rate-limiting this sync. Retry shortly.",
+    ),
+    _spec(
+        ErrorCode.CONNECTOR_ERROR,
+        502,
+        True,
+        "The store returned an unexpected response.",
+    ),
     # --- Access -----------------------------------------------------------
     _spec(ErrorCode.FORBIDDEN, 403, False, "You do not have access to this resource."),
     _spec(

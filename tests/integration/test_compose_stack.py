@@ -98,15 +98,15 @@ def test_compose_config_is_valid() -> None:
     assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
 
 
-def test_compose_declares_exactly_the_five_agreed_services() -> None:
-    """The infrastructure rule from the design: five services, no drift."""
+def test_compose_declares_exactly_the_six_agreed_services() -> None:
+    """The infrastructure rule: API, worker, web, data stores, and migrations."""
     _require_daemon()
 
     result = _run("compose", "config", "--services")
     assert result.returncode == 0, result.stderr
 
     services = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    assert services == {"api", "worker", "web", "postgres", "redis"}
+    assert services == {"api", "worker", "web", "postgres", "redis", "migrate"}
 
 
 @pytest.mark.parametrize("service", RUNNING_SERVICES)

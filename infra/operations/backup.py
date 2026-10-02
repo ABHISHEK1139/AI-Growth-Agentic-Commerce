@@ -27,6 +27,7 @@ Required environment variables (one of these forms):
 from __future__ import annotations
 
 import argparse
+import gzip
 import os
 import re
 import shutil
@@ -117,11 +118,10 @@ def backup_database(dest: Path, label: str = "manual") -> Path:
 
     with out_file.open("wb") as out_fp:
         proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        assert proc.stdout is not None
+        if proc.stdout is None:  # pragma: no cover - stdout=PIPE guarantees it
+            raise RuntimeError("pg_dump did not expose a stdout pipe")
         # Stream through gzip so even a multi-GB database does not need to
         # be held entirely in memory.
-        import gzip
-
         with gzip.GzipFile(fileobj=out_fp, mode="wb", compresslevel=6) as gz:
             while True:
                 chunk = proc.stdout.read(64 * 1024)

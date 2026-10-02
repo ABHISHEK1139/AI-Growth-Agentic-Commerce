@@ -6,6 +6,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from packages.config.providers import PaymentProviderConfig
@@ -17,7 +18,13 @@ from services.audit.repository import append_event
 from services.authorization.service import AuthorizationService
 from services.checkout.hash import PriceSnapshot, compute_price_hash
 from services.checkout.models import Checkout
-from services.checkout.transitions import TransitionContext, TransitionEvent, transition
+from services.checkout.transitions import (
+    TransitionContext,
+    TransitionEvent,
+    normalize_source_status,
+    price_hashes_match,
+    transition,
+)
 from services.inventory.service import InventoryService
 from services.offers.models import Offer
 from services.orders.service import OrderService
@@ -78,6 +85,57 @@ def _ensure_tz(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
+
+
+#: The append-only ledger row that records one refund actually issued.
+_REFUND_EVENT_TYPE = "PAYMENT_REFUNDED"
+
+
+def _refunded_minor_so_far(session: Session, payment: Payment) -> int:
+    """Minor units already returned against this payment.
+
+    Summed from the refund ledger rather than from a counter column so the
+    ceiling is derived from refunds that really happened. The identifiers are
+    bound parameters, and the ledger row is written in the same transaction as
+    the provider refund, so a committed refund is always counted.
+    """
+    total = session.execute(
+        text(
+            """
+            SELECT COALESCE(SUM(amount_minor), 0)
+              FROM audit_event
+             WHERE aggregate_type = 'payment'
+               AND aggregate_id = :payment_id
+               AND event_type = :event_type
+            """
+        ),
+        {"payment_id": payment.payment_id, "event_type": _REFUND_EVENT_TYPE},
+    ).scalar_one()
+    return int(total)
+
+
+def _checkout_status(checkout: Checkout) -> str:
+    """A checkout's status in the one spelling the state machine reasons about.
+
+    The state machine accepts either casing (``normalize_source_status`` and
+    ``format_target_status`` both exist for that), so a row stored as
+    ``CANCELLED`` is the same state as one stored as ``cancelled``. Comparing a
+    raw column value against a lowercase literal therefore silently misses every
+    canonical-cased row — and a cancelled or expired checkout would go on to be
+    charged. Every guard below reads the canonical form.
+    """
+    return normalize_source_status("checkout", checkout.status)
+
+
+#: States from which no further transition is legal. A payment must not be
+#: created or verified against one of these.
+_CHECKOUT_UNPAYABLE_STATES = frozenset(
+    {"CANCELLED", "POLICY_BLOCKED", "PRICE_CHANGED", "INVENTORY_CHANGED"}
+)
+#: Dead checkouts whose hold is already gone. Charging or re-driving one is a bug.
+_CHECKOUT_DEAD_STATES = frozenset({"CANCELLED", "CHECKOUT_EXPIRED"})
+#: Every state the checkout can no longer leave.
+_CHECKOUT_TERMINAL_STATES = _CHECKOUT_DEAD_STATES | _CHECKOUT_UNPAYABLE_STATES | {"COMPLETED"}
 
 
 class PaymentService:
@@ -174,7 +232,7 @@ class PaymentService:
             raise DomainError("The requested checkout does not exist.", code=ErrorCode.NOT_FOUND)
 
         # 2. Validate checkout status and expiry
-        if checkout.status in ("cancelled", "expired"):
+        if _checkout_status(checkout) in _CHECKOUT_DEAD_STATES:
             raise DomainError("This checkout has expired.", code=ErrorCode.CHECKOUT_EXPIRED)
 
         if _ensure_tz(current_time) >= _ensure_tz(checkout.expires_at):
@@ -254,7 +312,7 @@ class PaymentService:
             )
             current_price_hash = compute_price_hash(current_snapshot)
 
-        if current_price_hash != checkout.price_hash:
+        if not price_hashes_match(current_price_hash, checkout.price_hash):
             transition(
                 checkout,
                 TransitionEvent.DETECT_PRICE_CHANGE,
@@ -303,7 +361,12 @@ class PaymentService:
             is_replay, idm_record, cached_body, _ = IdempotencyManager.acquire_lock(
                 session,
                 actor_type="buyer",
-                actor_id=buyer_id,
+                # Tenant-qualified. The lock's unique key is
+                # (actor_type, actor_id, endpoint, idempotency_key) and there is
+                # no merchant column, so a bare buyer id lets the same key
+                # collide across tenants: tenant B's request would read tenant
+                # A's cached response body, which carries A's payment id.
+                actor_id=f"{merchant_id}:{buyer_id}",
                 endpoint="POST /payments",
                 idempotency_key=idempotency_key,
                 request_hash=req_hash,
@@ -315,7 +378,7 @@ class PaymentService:
                 # the cached success would hand the caller a payment id that can
                 # never complete. Re-check liveness before serving cache; a dead
                 # checkout falls through to the normal expiry/cancel errors.
-                if checkout.status not in ("cancelled", "expired") and _ensure_tz(
+                if _checkout_status(checkout) not in _CHECKOUT_DEAD_STATES and _ensure_tz(
                     current_time
                 ) < _ensure_tz(checkout.expires_at):
                     return PaymentV1.model_validate(cached_body)
@@ -352,13 +415,23 @@ class PaymentService:
         session.flush()
 
         # 7. Contact payment provider (first irreversible external step)
+        #
+        # The provider deduplicates order creation on this header, and the
+        # caller's `Idempotency-Key` is optional. A timeout leaves the
+        # authorization unconsumed on purpose (step 8) so the buyer can retry —
+        # but with no key on the wire the retry is a *second* order for the
+        # same checkout, and the buyer can pay both. Only one of them can ever
+        # confirm here, so the other is a captured charge with no order and no
+        # inventory decrement. Fall back to the checkout, which is the identity
+        # of the attempt: one authorization per checkout, so one provider order.
+        provider_idempotency_key = idempotency_key or checkout_id
         try:
             order = self._provider.create_order(
                 amount_minor=checkout.total_minor,
                 currency=checkout.currency,
                 receipt=checkout_id,
                 notes={"checkout_id": checkout_id, "payment_id": payment_id},
-                idempotency_key=idempotency_key,
+                idempotency_key=provider_idempotency_key,
             )
         except Exception as exc:
             transition(
@@ -470,23 +543,19 @@ class PaymentService:
         # A dead checkout must never be revived by a late callback: the
         # payment transition below would otherwise mark an expired, cancelled,
         # or policy-rejected checkout verified and mint an order for it.
-        if checkout.status == "expired":
+        checkout_status = _checkout_status(checkout)
+        if checkout_status == "CHECKOUT_EXPIRED":
             raise DomainError(
                 f"Checkout {payment.checkout_id} has expired.",
                 code=ErrorCode.CHECKOUT_EXPIRED,
             )
-        if checkout.status in (
-            "cancelled",
-            "policy_blocked",
-            "price_changed",
-            "inventory_changed",
-        ):
+        if checkout_status in _CHECKOUT_UNPAYABLE_STATES:
             raise DomainError(
                 f"Checkout {payment.checkout_id} is already final (status: {checkout.status}).",
                 code=ErrorCode.ALREADY_FINALIZED,
             )
 
-        if checkout.status == "completed":
+        if checkout_status == "COMPLETED":
             from services.orders.models import Order
 
             existing_order = (
@@ -512,9 +581,12 @@ class PaymentService:
             pay_id = provider_payment_id or ""
             checkout_payload = f"{order_id}|{pay_id}".encode()
 
-            signature_valid = self._provider.verify_signature(
+            # The callback is signed with the key secret; the webhook surface
+            # is signed with the webhook secret. Verifying against the wrong one
+            # would accept a signature minted for the other surface.
+            signature_valid = self._provider.verify_payment_signature(
                 checkout_payload, provider_signature
-            ) or self._provider.verify_signature(pay_id.encode(), provider_signature)
+            ) or self._provider.verify_payment_signature(pay_id.encode(), provider_signature)
 
             if signature_valid:
                 # Signature authenticates the caller; the provider fetch below
@@ -604,13 +676,8 @@ class PaymentService:
             .with_for_update()
             .first()
         )
-        is_terminal = checkout and checkout.status in (
-            "completed",
-            "cancelled",
-            "expired",
-            "policy_blocked",
-            "price_changed",
-            "inventory_changed",
+        is_terminal = (
+            checkout is not None and _checkout_status(checkout) in _CHECKOUT_TERMINAL_STATES
         )
 
         if checkout and not is_terminal:
@@ -683,12 +750,8 @@ class PaymentService:
         # Read the checkout before touching inventory: a late `payment.failed`
         # webhook for a checkout another payment already completed must not
         # release stock that was committed against a successful charge.
-        is_terminal_checkout = checkout is not None and checkout.status in (
-            "completed",
-            "cancelled",
-            "expired",
-            "price_changed",
-            "inventory_changed",
+        is_terminal_checkout = checkout is not None and (
+            _checkout_status(checkout) in _CHECKOUT_TERMINAL_STATES
         )
 
         if not is_terminal_checkout:
@@ -765,10 +828,27 @@ class PaymentService:
             )
 
         refund_amount = amount_minor if amount_minor is not None else payment.amount_minor
-        if refund_amount <= 0 or refund_amount > payment.amount_minor:
+        # The ceiling is what is still refundable, not the captured amount. A
+        # per-call check against `payment.amount_minor` alone lets two full
+        # refunds of the same payment each pass on their own and together return
+        # more than the buyer ever paid.
+        already_refunded_minor = _refunded_minor_so_far(session, payment)
+        refundable_minor = payment.amount_minor - already_refunded_minor
+        if (
+            isinstance(refund_amount, bool)
+            or not isinstance(refund_amount, int)
+            or refund_amount <= 0
+            or refund_amount > refundable_minor
+        ):
             raise DomainError(
-                "The refund amount must be positive and must not exceed the captured amount.",
+                "The refund amount must be a positive integer and must not exceed the "
+                "amount still refundable on this payment.",
                 code=ErrorCode.VALIDATION_ERROR,
+                details={
+                    "captured_minor": payment.amount_minor,
+                    "already_refunded_minor": already_refunded_minor,
+                    "requested_minor": refund_amount,
+                },
             )
 
         provider_refund = self._provider.refund(
@@ -778,7 +858,7 @@ class PaymentService:
 
         append_event(
             session,
-            event_type="PAYMENT_REFUNDED",
+            event_type=_REFUND_EVENT_TYPE,
             aggregate_type="payment",
             aggregate_id=payment_id,
             actor_type="merchant",
@@ -789,7 +869,7 @@ class PaymentService:
                 "reason": reason,
                 "provider_refund_id": provider_refund.refund_id,
                 "full_payment_amount_minor": payment.amount_minor,
-                "is_partial": amount_minor is not None and amount_minor < payment.amount_minor,
+                "is_partial": refund_amount < payment.amount_minor,
             },
         )
 

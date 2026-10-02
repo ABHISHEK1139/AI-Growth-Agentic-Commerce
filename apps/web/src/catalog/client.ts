@@ -462,14 +462,31 @@ export function askProductQuestion(
  * `idempotencyKey` should be stable for one logical intent so that a retry after
  * a timeout cannot produce a second checkout and a second reservation.
  */
+export interface CheckoutLineInput {
+  offer_id: string;
+  quantity: number;
+}
+
 export function createCheckout(
-  request: { offer_id: string; quantity: number; ttl_minutes?: number },
+  request: { offer_id: string; quantity: number; ttl_minutes?: number } | {
+    items: CheckoutLineInput[];
+    ttl_minutes?: number;
+  },
   options: RequestOptions = {}
 ): Promise<ApiResult<{ checkout: CheckoutRecord }>> {
-  const body: Record<string, unknown> = {
-    offer_id: request.offer_id,
-    quantity: Math.max(request.quantity, 1),
-  };
+  const body: Record<string, unknown> = {};
+  if ("items" in request && Array.isArray(request.items)) {
+    // A multi-line cart must be frozen as one record: a checkout built from
+    // only the first line would under-state the total the payment path charges.
+    body.items = request.items.slice(0, 25).map((line) => ({
+      offer_id: line.offer_id,
+      quantity: Math.max(Math.round(line.quantity) || 1, 1),
+    }));
+  } else {
+    const single = request as { offer_id: string; quantity: number; ttl_minutes?: number };
+    body.offer_id = single.offer_id;
+    body.quantity = Math.max(single.quantity, 1);
+  }
   if (request.ttl_minutes != null) body.ttl_minutes = request.ttl_minutes;
   return apiPost<{ checkout: CheckoutRecord }>("/api/v1/checkout", body, options);
 }
@@ -567,17 +584,57 @@ export function composeExplorePrompt(filters: CatalogFilters): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Find the offer for a product (or an offer id) through `/api/explore`.
+ * Widen a search result into the shape the product pages already consume.
+ *
+ * The two endpoints disagree on purpose: search is a pricing/availability
+ * listing and carries no presentation fields, while the product page already
+ * fetched the product separately and takes the title, image and rating from it.
+ * So the fields search does not have are filled with the neutral value rather
+ * than invented - a made-up title or a 0.0 rating would render as real content
+ * on a page that had not fetched the product.
+ */
+function searchOfferToExploreOffer(offer: CatalogOffer): import("./types").ExploreOffer {
+  return {
+    offer_id: offer.offer_id,
+    product_id: offer.product_id,
+    merchant_id: offer.merchant_id,
+    title: offer.product_id,
+    category: null,
+    unit_price_minor: offer.unit_price_minor,
+    currency: offer.currency,
+    available_stock: offer.available_quantity,
+    delivery_days: offer.delivery_days,
+    return_period_days: offer.return_period_days,
+    expires_at: offer.expires_at,
+    offer_version: offer.offer_version,
+    pricing_source: offer.pricing_source,
+    rating: 0,
+    reviews_count: 0,
+    image_url: null,
+    specs: { ...offer.specifications },
+  };
+}
+
+/**
+ * Find the offer for a product (or an offer id).
  *
  * This exists because there is no endpoint that answers "the offers for this
  * product". `GET /api/v1/catalog/offers/{offer_id}` needs an offer id and a
- * credential; `POST /api/v1/catalog/search` takes no product filter. So the open
- * endpoint is asked for a page of ranked offers and the record is matched by id.
+ * credential; `POST /api/v1/catalog/search` takes no product filter. So the
+ * unfiltered search is asked for a page and the record is matched by id.
  *
- * The honest limitation, which callers surface rather than hide: the match can
- * only succeed if the record is inside the page the catalog returned. With a
- * larger published catalog than `limit` it may not be, and the caller says so
- * instead of reporting the record as missing.
+ * It used to ask `/api/explore` instead, which was wrong in a way that only
+ * showed up on real pages. `/api/explore` returns a *ranked top N* - a fixed 16
+ * items chosen by relevance to a prompt, not the catalog - so any product
+ * outside that ranking could never be found. A shopper who opened any seeded
+ * laptop was told "Offer Currently Unavailable" and shown a disabled Add to Bag
+ * for an item that had a dozen in stock, because the offer lookup came back
+ * empty. `/api/v1/catalog/search` is the deterministic, unranked listing of the
+ * published catalog, so the same lookup now actually enumerates it.
+ *
+ * The remaining limitation is honest and still true: a published catalog larger
+ * than `limit` may not contain the record. `truncated` reports that, and callers
+ * surface it rather than reporting the record as missing.
  */
 export interface OfferLookup {
   found: import("./types").ExploreOffer | null;
@@ -592,20 +649,14 @@ export async function lookupOfferInCatalog(
   options: { limit?: number; signal?: AbortSignal } = {}
 ): Promise<FlatResult<OfferLookup>> {
   const limit = Math.min(options.limit ?? MAX_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
-  const result = await exploreCatalog(
-    {
-      // No constraint is stated: the record has to be findable regardless of
-      // price, category, or specification, so nothing may narrow the page.
-      prompt: "List the currently available catalog offers.",
-      limit,
-    },
-    { signal: options.signal }
-  );
+  // No filter is sent: the record has to be findable regardless of price,
+  // category, or specification, so nothing may narrow the page.
+  const result = await searchCatalogOffers({ limit }, { signal: options.signal });
   if (!result.ok) return result;
 
-  const products = Array.isArray(result.data.products) ? result.data.products : [];
+  const offers = Array.isArray(result.data.offers) ? result.data.offers : [];
   const found =
-    products.find(
+    offers.find(
       (offer) =>
         (match.offerId != null && offer.offer_id === match.offerId) ||
         (match.productId != null && offer.product_id === match.productId)
@@ -614,11 +665,15 @@ export async function lookupOfferInCatalog(
   return {
     ok: true,
     data: {
-      found,
-      scanned: products.length,
-      truncated: products.length >= limit,
-      catalogSource: result.data.catalog_source ?? null,
-      warnings: Array.isArray(result.data.warnings) ? result.data.warnings : [],
+      found: found ? searchOfferToExploreOffer(found) : null,
+      scanned: offers.length,
+      truncated: offers.length >= limit,
+      // `/api/v1/catalog/search` reads the published catalog in PostgreSQL and
+      // reports no source of its own, so it is named here rather than left null:
+      // a null reads as "unknown provenance" on the console, when in fact this
+      // path is the live one.
+      catalogSource: "postgresql",
+      warnings: [],
     },
   };
 }

@@ -244,14 +244,31 @@ def offer_matches(
 
 
 def normalize_category(category: str | None) -> str | None:
-    """One spelling for the accessory bucket, shared by every evaluator.
+    """One spelling per category, shared by every evaluator.
 
     The catalog stores both "accessory" and "computer_accessory" for the same
     bucket. Normalizing in exactly one place keeps the Python matcher, the
     SQL predicates, and the equivalence-test predicates answering identically.
+
+    A trailing plural is folded for the same reason. The storefront routes are
+    plural - a shopper browses ``/category/laptops`` and the search box sends
+    ``laptops`` - while the catalog rows are singular, so without this the
+    category page matched nothing and rendered an empty grid. An accepted filter
+    that silently returns zero rows is worse than a rejected one: it looks like
+    the category is empty rather than like the request was wrong.
+
+    Only a single trailing ``s`` is removed, and ``-ies`` becomes ``-y``, so no
+    existing category changes meaning. ``accessory`` is special-cased above
+    because the catalog spells that bucket both ways.
     """
+    if category is None:
+        return None
     if category in ("accessory", "computer_accessory"):
         return "computer_accessory"
+    if category.endswith("ies") and len(category) > 3:
+        return f"{category[:-3]}y"
+    if category.endswith("s") and not category.endswith("ss"):
+        return category[:-1]
     return category
 
 
@@ -319,12 +336,23 @@ def sql_predicates(
     ]
 
     if constraints.category is not None:
-        # Mirror the Python matcher exactly: the bucket has two spellings in
-        # storage, so match both rather than only the normalized form.
-        if normalize_category(constraints.category) == "computer_accessory":
+        # Mirror the Python matcher exactly. Both evaluators normalize before
+        # comparing; the SQL one used to compare the raw request value against
+        # the stored column, so a plural request ("laptops", which is what the
+        # storefront routes and the search box send) matched no rows and the
+        # category page rendered empty. Matching the normalized form *and* the
+        # raw one keeps a row stored under either spelling findable, which is what
+        # normalizing the candidate on the Python side already did.
+        raw = constraints.category
+        normalized = normalize_category(raw) if raw else None
+        if normalized == "computer_accessory":
             clauses.append(product.category_id.in_(["accessory", "computer_accessory"]))
-        else:
-            clauses.append(product.category_id == constraints.category)
+        elif normalized:
+            # Both spellings, so a row stored under either is findable. An empty
+            # normalized form is dropped rather than passed through, because
+            # `IN ("")` matches nothing and reads as an empty category.
+            spellings = [normalized] if normalized == raw else [normalized, raw]
+            clauses.append(product.category_id.in_(spellings))
     if constraints.max_price_minor is not None:
         clauses.append(offer.unit_price_minor <= constraints.max_price_minor)
     if constraints.max_delivery_days is not None:

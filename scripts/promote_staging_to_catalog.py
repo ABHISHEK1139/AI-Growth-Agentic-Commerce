@@ -22,8 +22,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from packages.observability.context import new_id
+from scripts._db import require_server_database, server_session_factory
 from services.catalog.models import CatalogVersion, Merchant, Product, ProductImage
-from services.db.session import get_session_factory
 from services.inventory.models import Inventory
 from services.offers.models import Offer
 from services.staging.models import IngestionRun, StagingCatalogRaw
@@ -89,7 +89,10 @@ def promote_staging_run(
     ingestion_run_id: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    SessionLocal = get_session_factory()
+    # Refuses a silent SQLite fallback: promotion moves staged rows into the live
+    # catalog, so writing to a throwaway local file and reporting success would be
+    # worse than failing. See scripts/_db.py.
+    SessionLocal = server_session_factory(require_server_database(operation="staging promotion"))
 
     with SessionLocal() as session:
         # Ensure merchant exists

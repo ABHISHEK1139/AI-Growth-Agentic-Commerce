@@ -84,6 +84,14 @@ class InventoryService:
 
         Raises InventoryUnavailableError if stock is insufficient.
         """
+        # The SQL guard below is `(available - reserved) >= :qty`, which a
+        # negative quantity satisfies trivially and then *decrements*
+        # reserved_quantity — inflating sellable stock. Zero writes a
+        # reservation that commits nothing. Neither is a quantity, so the
+        # invariant is asserted here rather than left to the caller.
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            raise InventoryUnavailableError()
+
         # Try to reserve quantity atomically
         result = reserve(session, offer_id, quantity)
         if result is None:

@@ -5,7 +5,7 @@
 [![Build](https://img.shields.io/badge/Next.js-14%20(App%20Router)-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Razorpay](https://img.shields.io/badge/Razorpay-Standard%20Checkout%20%26%20Links-0C2340?style=for-the-badge&logo=razorpay)](https://razorpay.com)
-[![Tests](https://img.shields.io/badge/Tests-2229%20Passing%20(100%25)-success?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Tests-1968%20Unit%20%2B%2064%20Integration%20%2B%2030%20E2E-success?style=for-the-badge&logo=pytest)](https://pytest.org)
 [![Ruff](https://img.shields.io/badge/Ruff-clean-46A758?style=for-the-badge)](https://docs.astral.sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-2A6DB5?style=for-the-badge)](https://mypy-lang.org)
 [![TypeScript](https://img.shields.io/badge/tsc-strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org)
@@ -227,18 +227,50 @@ The result is a platform designed around two complementary directions:
 
 ## 🧪 Reliability & Testing
 
-AgentPay includes a comprehensive automated test suite with **2229 tests (100% passing)**, covering:
+AgentPay ships an automated test suite of **1,968 unit/security/contract tests, 64
+integration tests against live PostgreSQL and Redis, and 30 browser end-to-end specs** —
+all green. Coverage spans:
 
 * Agentic commerce integration scenarios
 * Concurrency and inventory races
 * Terminal-state immutability
-* Prompt-injection defenses
-* SSRF defenses
+* Prompt-injection and SSRF defenses
 * Financial-boundary enforcement
 * API scope enforcement
+* Webhook signature verification and replay dedup
+* Event-loop isolation (webhooks must not block unrelated traffic)
+* **ORM-to-database schema agreement** — see below
 * Production frontend build verification
 
-The project also includes a dedicated failure-injection environment for demonstrating how the system behaves under adversarial or inconsistent conditions.
+The project also includes a dedicated failure-injection environment for demonstrating how
+the system behaves under adversarial or inconsistent conditions.
+
+### Measured capacity, not estimated
+
+Throughput is measured, not asserted:
+
+```powershell
+./infra/loadtest/run-capacity-ladder.ps1        # probes a ladder of rates, reports the knee
+./infra/loadtest/run-load-test.ps1 -PeakRate 500 # a single rate, for regression checks
+```
+
+The current figures — **~500 req/s clean on a 2-worker container**, and how they got
+there — are in [`docs/production/capacity-report.md`](docs/production/capacity-report.md),
+together with the host it was measured on. Read the ladder, not the absolute number: the
+shape is the finding, and the absolute value is a property of the machine.
+
+### The suite cannot tell you the schema is wrong
+
+A test suite that builds its tables *from the ORM* verifies that the ORM agrees with
+itself, which it always does. It cannot detect the ORM disagreeing with the database —
+and that is the failure that matters. `tests/integration/test_schema_matches_orm.py`
+compares the two directly across all 33 mapped tables.
+
+It exists because `provider_event` shipped with 7 columns while the ORM declared 12, so
+every correctly-signed payment webhook failed with `UndefinedColumn`, and no test,
+health check, or OpenAPI schema noticed. The same audit found six ORM tables that no
+migration had ever created, and an `alembic/env.py` whose `target_metadata` was empty —
+so `--autogenerate` proposed dropping all 36 tables.
 
 ---
 
@@ -386,6 +418,72 @@ GROK_API_KEY=xai-YOUR_KEY
 # OLLAMA_BASE_URL=http://localhost:11434/v1
 ```
 
+#### 2a. Database configuration
+
+The datastore is configured as discrete parts, the way every managed Postgres
+provider documents it. A full `DATABASE_URL`, if set, overrides all of them.
+
+```env
+DB_DRIVER=postgresql+psycopg
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=agentpay
+# Match the database's own password. Left as a placeholder deliberately -- the compose
+# stack's demo password is `agentpay`, but anything you deploy must not use it.
+DB_PASSWORD=<the same password your database was created with>
+DB_NAME=agentpay
+```
+
+Generate a real password and secret rather than leaving the defaults:
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Two things worth knowing:
+
+- **A password is percent-encoded** when the DSN is composed, so a provider-issued
+  value containing `@` or `/` does not truncate it.
+- **The SQLite fallback is refused outside `APP_ENV=local`.** `apps/api/db.py`
+  falls back to a local file when Postgres is unreachable so a laptop still boots;
+  that fallback is a `WARNING` naming the file it switched to, and
+  `validate_datastore_for_env()` turns it into a startup failure anywhere else. A
+  staging deployment that cannot reach its database should not appear to start and
+  then serve an empty catalog.
+
+  "Anywhere else" means `staging` and `demo` — every `AppEnv` that is not `local`. It
+  does **not** depend on `DB_PASSWORD` being set, which it used to: Docker Compose sets
+  it, so the guard silently did nothing there. The only thing that permits the fallback
+  outside local is saying so explicitly with `ALLOW_SQLITE_FALLBACK=1`.
+
+  Note that the compose stack itself runs `APP_ENV=local`, so the fallback is permitted
+  there on purpose. If you deploy these containers to a real host, set `APP_ENV` to
+  `staging` or `demo` — that is the switch that turns an unreachable database from a
+  silent empty catalog into a startup failure.
+
+#### 2b. Creating the first console login
+
+There is no seeded default password, deliberately — a hardcoded one is the most
+common way a real deployment ends up with a guessable `merchant_admin`. The script
+prompts for the password, or reads it from `SEED_ADMIN_PASSWORD`:
+
+```bash
+# Interactive: prompts twice
+python -m apps.worker.seed_operator --email admin@merchant.local
+
+# Unattended (container entrypoint, CI)
+SEED_ADMIN_PASSWORD=... python -m apps.worker.seed_operator --email admin@merchant.local
+
+# or, via make
+make seed-operator EMAIL=admin@merchant.local
+```
+
+Then sign in at <http://localhost:3000/login>.
+
+Reset a password, or create a merchant tenant with `ALLOW_CONSOLE_SIGNUP=1`:
+```bash
+python -m apps.worker.reset_operator_password --email admin@merchant.local
+```
+
 #### 3. Start the FastAPI Backend
 ```bash
 # Set up Python virtual environment
@@ -425,6 +523,71 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Then create the first console login:
+```bash
+SEED_ADMIN_PASSWORD='choose-something' \
+  docker compose exec api python -m apps.worker.seed_operator --email admin@merchant.local
+```
+
+Sign in at <http://localhost:3000/login>. `SESSION_SECRET` is required for the
+console gate to work — the web tier verifies the session token's signature locally,
+so it needs the same signing secret the API uses.
+
+---
+
+## 🔐 Authentication, the console gate, and store channels
+
+Three things that did not exist before, and how they behave.
+
+### Signing in
+
+`POST /api/v1/auth/login` verifies an Argon2id password hash and derives the role
+from the stored row. The role is never read from the request — previously
+`/api/v1/auth/login` accepted `{"role": "platform_admin"}` with no credential and
+issued a session for it, so any anonymous caller could become a platform
+administrator.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/auth/login` | Verify a credential, set the `HttpOnly` session cookie |
+| `POST /api/v1/auth/demo-session` | No-credential session. **Refused outside `APP_ENV=local`** |
+| `GET /api/v1/auth/console-status` | Which login affordances this deployment has |
+| `POST /api/v1/auth/signup` | Self-service registration. **Off unless `ALLOW_CONSOLE_SIGNUP=1`** |
+| `POST /api/v1/auth/change-password` | Requires the current password |
+
+The demo path moved off `/api/v1/auth/login` so a deployment cannot leave
+"sign in as merchant admin" mounted at the URL a human types. Account lockout
+after 5 failed attempts, a 10-per-5-minutes limit on login, and identical
+responses (and near-identical timing) for an unknown address and a wrong password.
+
+### The console gate
+
+`/merchant/*`, `/scenarios` and `/agent/playground` are gated by
+`apps/web/src/middleware.ts`, which verifies the session token's HMAC locally in
+the Edge runtime. It does not call the API on every navigation, because
+`/api/v1/auth/me` is rate limited and a 429 read as "signed out" was logging valid
+operators out of their own console under load.
+
+This is **defence in depth, not the security boundary.** Every endpoint calls
+`require_roles` regardless of what the middleware decides; a wrong decision there
+can at worst render the wrong shell, never grant an action. A throttled or
+unavailable gateway fails *closed* — the console stays shut rather than opening.
+
+### Store channels
+
+`/merchant/channels` connects Shopify, WooCommerce, a custom REST API, or a
+catalog feed. Connections are persisted in `channel_connection` with the access
+token encrypted at rest, and rehydrated at startup — so a connection survives a
+restart, which it did not before (the registry was in-memory and empty on boot).
+
+- The token is **write-only over HTTP**. There is no endpoint that returns one.
+- A sync that cannot reach the store is recorded as **failed with the store's own
+  message**, and product counts are only written by a clean sync — so a partial run
+  never replaces a real catalog size with a truncated one.
+- A confirmed order is never pushed to the same store twice; a push that reached
+  the store but timed out on the way back is the reason that matters.
+- `/merchant/integrations` and `/merchant/connectors` redirect here.
+
 ---
 
 ## 🤖 Running the External Autonomous Buyer Agent
@@ -443,7 +606,9 @@ The autonomous agent will:
 
 ---
 
-## 🧪 Comprehensive Test Suite (2229 Tests, 100% Passing)
+## 🧪 Comprehensive Test Suite
+
+**1,968 unit/security/contract · 64 integration · 30 browser e2e — all green.**
 
 Quality gates (also wired as `make check` / `make check-all`):
 
@@ -473,6 +638,14 @@ pytest tests/security/test_financial_boundary_security.py -v
 cd apps/web && npm run build
 ```
 
+```bash
+# 6. Assert the ORM and the live database describe the same schema
+pytest tests/integration/test_schema_matches_orm.py -v
+
+# 7. Measure throughput (needs the compose stack up)
+./infra/loadtest/run-capacity-ladder.ps1
+```
+
 ## 🛡️ Hardening notes
 
 Every money-moving path fails closed and is covered by tests:
@@ -482,6 +655,14 @@ Every money-moving path fails closed and is covered by tests:
 - **Tenant isolation** — scoped repositories, mandatory authorization/policy tenancy, cross-tenant inventory guards, buyer-owned reads answered as not-found.
 - **Scope enforcement** — agent tools default-deny unknown names; money routes require `checkout:write`/`payment:write`; bearer lifetimes capped at 24h.
 - **Honest UI** — no invented prices, reviews, ratings, or metrics anywhere: fallbacks are labelled (cached/unavailable/measured:false) or absent.
+
+Beyond the money paths:
+
+- **Blocking work stays off the event loop** — both webhook handlers are `async def` because they must `await request.body()` (HMAC is only valid over the exact bytes signed), and dispatch the processing to a threadpool. Verified by behavioural tests, not source inspection: `tests/unit/test_webhook_event_loop.py`.
+- **Cached prices are short-lived and explicitly invalidated** — offers cache for 15s, and every catalogue publish and merchant-rules write drops the affected tenant's namespace *after* its commit.
+- **A process-local cache is never selected silently** — it is only correct for a single process, so with no `REDIS_URL` and no `CACHE_ALLOW_PROCESS_LOCAL=1` caching is *disabled* rather than silently downgraded to something fast and wrong.
+- **An unreachable database is a startup failure outside local** — the SQLite fallback that lets a laptop boot is refused when `APP_ENV` is `staging` or `demo`, because a service that appears healthy while serving an empty catalogue is worse than one that refuses to start.
+- **The ORM and the database are asserted to agree** — `tests/integration/test_schema_matches_orm.py`, because a suite that builds its tables from the ORM cannot detect the ORM disagreeing with the database, which is the failure that actually happened.
 
 ---
 
@@ -497,6 +678,7 @@ Every money-moving path fails closed and is covered by tests:
 │   ├── commerce/        # CommerceFacade protocol (prevents ORM leakage to LLMs)
 │   ├── money/           # Strict integer-minor arithmetic (zero float errors)
 │   ├── security/        # RBAC roles, tenant scopes, bearer token verification
+│   ├── cache.py         # Read-through Redis cache: versioned keys, fail-open
 │   └── schemas/         # Canonical Pydantic V1 API envelopes
 ├── services/
 │   ├── agent/           # GuardLLM prompt safety, tool registry, bounded loop
@@ -506,7 +688,10 @@ Every money-moving path fails closed and is covered by tests:
 │   ├── recommendations/ # Catalog-verified cross-sell recommendation engine
 │   ├── inventory/       # Atomic stock reservations & release on cancellation
 │   └── audit/           # Append-only immutable audit ledger
-└── tests/               # 2229 automated tests (chaos, security, contract, unit, e2e)
+├── infra/
+│   ├── migrations/      # Alembic chain (0001-0006); schema is asserted against the ORM
+│   └── loadtest/        # k6 scenarios, seeded fixture, capacity ladder
+└── tests/               # 1,968 unit/security/contract + 64 integration + 30 browser e2e
 ```
 
 ---

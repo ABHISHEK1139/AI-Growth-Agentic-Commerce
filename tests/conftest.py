@@ -104,6 +104,36 @@ def settings():  # noqa: ANN201 - inferred from the application factory
     )
 
 
+@pytest.fixture(autouse=True)
+def _rate_limit_counters_stay_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep rate-limit counters out of Redis for every test.
+
+    ``install_middleware`` calls ``build_backend``, which unconditionally returns a
+    Redis-backed counter. That is right in production, where several API replicas
+    must share one allowance, but it made any test that built its own app write into
+    the live Redis of the running compose stack. Counters then survived the process:
+    a later run, or a later test in the same run, inherited an allowance it had
+    already spent and was answered 429 for a route it was exercising for an entirely
+    unrelated reason. The failure was order-dependent, because it depended on which
+    test had just run and how much of the 60s window was left.
+
+    The counters are per-app rather than per-suite, and a new one is built for every
+    call, so a test that constructs several apps cannot exhaust its own allowance
+    either. This patches the name ``install_middleware`` looks up, not the origin, so
+    ``tests/unit/test_middleware_ratelimit.py`` - which imports ``build_backend``
+    itself to assert the Redis choice and to exercise the circuit breaker - is
+    unaffected.
+    """
+    from apps.api import middleware as middleware_pkg
+    from apps.api.middleware.ratelimit import InMemoryRateLimitBackend
+
+    monkeypatch.setattr(
+        middleware_pkg,
+        "build_backend",
+        lambda *args, **kwargs: InMemoryRateLimitBackend(),
+    )
+
+
 @pytest.fixture
 def app(settings) -> FastAPI:
     from apps.api.main import create_app

@@ -36,6 +36,7 @@ def main() -> int:
     # Import every model module so its tables register on Base.metadata.
     import services.catalog.models  # noqa: F401
     import services.checkout.models  # noqa: F401
+    import services.connectors.models  # noqa: F401
     import services.inventory.models  # noqa: F401
     import services.orders.models  # noqa: F401
     import services.payments.models  # noqa: F401
@@ -64,6 +65,31 @@ def main() -> int:
 
     rc = seed_main([])
     print("seed complete" if rc == 0 else f"seed exited with {rc}")
+
+    # A login account, so the console is reachable *through the credential path*
+    # rather than only through the local demo shortcut. The password is read
+    # from the environment and this script refuses to invent one: a hardcoded
+    # dev password here is how `admin/admin` ends up in a real deployment.
+    import os as _os
+
+    if _os.environ.get("SEED_ADMIN_PASSWORD"):
+        from apps.worker.seed_operator import main as operator_main
+
+        operator_rc = operator_main(
+            [
+                "--email",
+                _os.environ.get("SEED_ADMIN_EMAIL", "admin@merchant.local"),
+                "--merchant-id",
+                "merchant_demo",
+            ]
+        )
+        if operator_rc != 0:
+            print(f"operator seed exited with {operator_rc}")
+    else:
+        print(
+            "no operator account created: set SEED_ADMIN_PASSWORD and re-run to get a "
+            "login for /login (the local demo session still works without one)"
+        )
     return rc
 
 

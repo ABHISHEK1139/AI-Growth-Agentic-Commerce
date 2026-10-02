@@ -87,6 +87,16 @@ revision: ## Autogenerate a migration: make revision m="add offers"
 seed: ## Seed the demo merchant, buyer policy, and published catalog
 	$(VENV_BIN)/python -m apps.worker.seed_catalog
 
+.PHONY: seed-operator
+seed-operator: ## Create the first console login. EMAIL=... make seed-operator (prompts for the password)
+	@test -n "$(EMAIL)" || { echo "usage: EMAIL=admin@example.com make seed-operator"; exit 2; }
+	$(VENV_BIN)/python -m apps.worker.seed_operator --email "$(EMAIL)"
+
+.PHONY: reset-operator
+reset-operator: ## Set a new password for an existing console login. EMAIL=... make reset-operator
+	@test -n "$(EMAIL)" || { echo "usage: EMAIL=admin@example.com make reset-operator"; exit 2; }
+	$(VENV_BIN)/python -m apps.worker.reset_operator_password --email "$(EMAIL)"
+
 # --- Catalog pipeline -----------------------------------------------------
 
 
@@ -149,13 +159,35 @@ web-build: ## Build Next.js production web app
 web-lint: ## Run Next.js linter
 	cd apps/web && npm run lint
 
+.PHONY: web-typecheck
+web-typecheck: ## Typecheck the Next.js app (no emit)
+	cd apps/web && npm run typecheck
+
+.PHONY: web-install
+web-install: ## Reproducible install of the web app's dependencies
+	cd apps/web && npm ci
+
 .PHONY: test-e2e
 test-e2e: ## Run the Tier 1-4 requirement-driven e2e suites
 	$(VENV_BIN)/python -m pytest tests/e2e -q
 
+.PHONY: test-chaos
+test-chaos: ## Run the concurrency chaos and state-invariant suite
+	$(VENV_BIN)/python -m pytest tests/chaos -q
+
+.PHONY: test-operations
+test-operations: ## Run the backup/restore operations-script suite
+	$(VENV_BIN)/python -m pytest tests/operations -q
+
+.PHONY: buyer-scenario
+buyer-scenario: ## Run the external autonomous buyer against a running gateway
+	PYTHONPATH=buyer-agent $(VENV_BIN)/python -m buyer_agent.scenario \
+		--base-url $${AGENTPAY_BASE_URL:-http://localhost:8000} \
+		--api-key $${AGENTPAY_BUYER_API_KEY}
+
 .PHONY: check
-check: lint test test-contract test-security ## Everything CI runs on a pull request
+check: lint test test-contract test-security test-e2e test-chaos test-operations ## Everything CI runs on a pull request
 
 .PHONY: check-all
-check-all: lint test test-contract test-security test-e2e web-build web-lint ## Full verification: backend, contract, security, e2e, frontend
+check-all: check web-build web-lint web-typecheck ## Full verification: backend, contract, security, e2e, chaos, frontend
 

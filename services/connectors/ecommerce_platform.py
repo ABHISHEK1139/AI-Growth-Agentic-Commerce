@@ -208,38 +208,94 @@ class ShopifyWooConnector(PlatformConnector):
         return product, [offer]
 
     def _fetch_live_shopify(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Products from the store's Admin API.
+
+        A store that *cannot be reached* raises rather than returning `[]`. It
+        used to swallow the failure and return an empty list, which the caller
+        could not tell from a store that genuinely has no products -- so a dead
+        network, a revoked token, and an empty catalog were all reported to the
+        merchant as a successful sync of zero products, overwriting real counts.
+        A 401 is the same case and is named explicitly, because "your token is
+        wrong" is the one message the merchant can act on.
+        """
         domain = self.config.get("store_domain") or self.store_domain
         token = self.config.get("access_token") or self.access_token
         if not domain or not token or "myshopify.com" not in domain:
             return []
+        url = f"https://{domain}/admin/api/2024-01/products.json"
+        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
         try:
-            url = f"https://{domain}/admin/api/2024-01/products.json"
-            headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
             with httpx.Client(timeout=8.0) as client:
                 res = client.get(url, headers=headers, params={"limit": min(limit, 250)})
-                if res.status_code == 200:
-                    return res.json().get("products", [])
-        except Exception:
-            logger.warning("shopify_live_fetch_failed", extra={"domain": domain}, exc_info=True)
-        return []
+        except Exception as exc:
+            logger.warning(
+                "shopify_live_fetch_failed",
+                extra={"domain": domain, "error_kind": type(exc).__name__},
+            )
+            raise DomainError(
+                f"Could not reach the Shopify store at {domain}: {type(exc).__name__}. "
+                "Check the store domain and your network.",
+                code=ErrorCode.CONNECTOR_UNREACHABLE,
+            ) from exc
+
+        if res.status_code in (401, 403):
+            raise DomainError(
+                f"Shopify refused the access token for {domain} (HTTP {res.status_code}). "
+                "The token has been revoked or lacks the read_products scope.",
+                code=ErrorCode.CONNECTOR_UNAUTHORIZED,
+            )
+        if res.status_code == 429:
+            raise DomainError(
+                "Shopify rate-limited this store (HTTP 429). Try again shortly.",
+                code=ErrorCode.CONNECTOR_RATE_LIMITED,
+            )
+        if res.status_code >= 400:
+            raise DomainError(
+                f"Shopify returned HTTP {res.status_code} for {domain}.",
+                code=ErrorCode.CONNECTOR_ERROR,
+            )
+        return res.json().get("products", [])
 
     def _fetch_live_woocommerce(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Products from a WooCommerce store. Same failure semantics as Shopify."""
         domain = self.config.get("store_domain") or self.store_domain
         token = self.config.get("access_token") or self.access_token
         if not domain or not token:
             return []
+        url = f"https://{domain}/wp-json/wc/v3/products"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         try:
-            url = f"https://{domain}/wp-json/wc/v3/products"
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             with httpx.Client(timeout=8.0) as client:
                 res = client.get(url, headers=headers, params={"per_page": min(limit, 100)})
-                if res.status_code == 200:
-                    data = res.json()
-                    if isinstance(data, list):
-                        return data
-        except Exception:
-            logger.warning("woocommerce_live_fetch_failed", extra={"domain": domain}, exc_info=True)
-        return []
+        except Exception as exc:
+            logger.warning(
+                "woocommerce_live_fetch_failed",
+                extra={"domain": domain, "error_kind": type(exc).__name__},
+            )
+            raise DomainError(
+                f"Could not reach the WooCommerce store at {domain}: "
+                f"{type(exc).__name__}. Check the store URL and your network.",
+                code=ErrorCode.CONNECTOR_UNREACHABLE,
+            ) from exc
+
+        if res.status_code in (401, 403):
+            raise DomainError(
+                f"WooCommerce refused the credentials for {domain} (HTTP "
+                f"{res.status_code}). The key is wrong or lacks the read permission.",
+                code=ErrorCode.CONNECTOR_UNAUTHORIZED,
+            )
+        if res.status_code == 429:
+            raise DomainError(
+                "WooCommerce rate-limited this store (HTTP 429). Try again shortly.",
+                code=ErrorCode.CONNECTOR_RATE_LIMITED,
+            )
+        if res.status_code >= 400:
+            raise DomainError(
+                f"WooCommerce returned HTTP {res.status_code} for {domain}.",
+                code=ErrorCode.CONNECTOR_ERROR,
+            )
+        data = res.json()
+        return data if isinstance(data, list) else []
 
     def fetch_products(self, limit: int = 100) -> list[CanonicalProduct]:
         # Try live platform API first if configured

@@ -53,9 +53,17 @@ Thumbs.db
 data/local_dev.db
 .agents/
 apps/web/test-results/
+# Playwright writes the replayed merchant session to e2e/test-results/.auth/. That
+# file is a live session credential, so it must never be committed -- note the path
+# differs from apps/web/test-results/ above and is easy to miss.
+apps/web/e2e/test-results/
 baseline_failures.txt
 final_run.txt
 qa_db*.py
 qa_verify.py
 make_report.py
 
+
+# k6 writes a summary next to the scenarios on every run; the numbers belong in
+# docs/production/READINESS_PLAN.md, not in version control as a churny artifact.
+infra/loadtest/last-run-summary.json

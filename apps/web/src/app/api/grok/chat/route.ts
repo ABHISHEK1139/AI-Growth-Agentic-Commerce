@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ALL_PRODUCTS, type ProductItem } from "@/data/products";
 import type { CustomModelConfig } from "@/catalog/modelConfig";
+import { chatCompletionsEndpoint, checkOutboundUrl, guardedFetchInit } from "@/lib/outboundUrl";
 import {
   buildFullSystemInstruction,
   trimConversationHistory,
@@ -16,6 +17,12 @@ export interface ChatHistoryItem {
   text: string;
 }
 
+/** Cost ceiling on a single unauthenticated completion request. */
+const MAX_MESSAGE_CHARS = 8000;
+const MAX_HISTORY_TURNS = 40;
+const MAX_CUSTOM_INSTRUCTION_CHARS = 2000;
+const UPSTREAM_TIMEOUT_MS = 45000;
+
 function resolveGrokEndpointAndKey(
   preference?: GrokModelTier,
   customConfig?: CustomModelConfig
@@ -29,11 +36,10 @@ function resolveGrokEndpointAndKey(
   // 1. If user provided a custom config (e.g. Ollama, LM Studio, custom OpenAI endpoint)
   if (customConfig && customConfig.baseUrl) {
     const rawBase = customConfig.baseUrl.trim().replace(/\/$/, "");
-    const endpoint = rawBase.endsWith("/chat/completions") ? rawBase : `${rawBase}/chat/completions`;
     const isLoopback =
       rawBase.includes("localhost") || rawBase.includes("127.0.0.1") || rawBase.includes("0.0.0.0");
     return {
-      endpoint,
+      endpoint: chatCompletionsEndpoint(rawBase),
       key: customConfig.apiKey ? customConfig.apiKey.trim() : "",
       targetModel: customConfig.modelName || "default",
       provider: customConfig.providerId || "custom",
@@ -210,21 +216,37 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       message,
-      history = [],
+      history: rawHistory,
       role = "grok_teardown",
-      customSystemInstruction,
+      customSystemInstruction: rawCustomInstruction,
       modelPreference = "auto",
       activeProductId,
       customConfig,
-    } = body;
+    } = body || {};
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return NextResponse.json({ ok: false, error: "Missing or empty message parameter" }, { status: 400 });
     }
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return NextResponse.json(
+        { ok: false, error: `Message is too long. Keep it under ${MAX_MESSAGE_CHARS} characters.` },
+        { status: 413 }
+      );
+    }
+
+    // `history = []` in the destructuring above would not have covered an
+    // explicit `null`, and trimConversationHistory iterates it directly.
+    const history: any[] = Array.isArray(rawHistory) ? rawHistory.slice(-MAX_HISTORY_TURNS) : [];
+    const customSystemInstruction =
+      typeof rawCustomInstruction === "string"
+        ? rawCustomInstruction.slice(0, MAX_CUSTOM_INSTRUCTION_CHARS)
+        : undefined;
 
     const validRoles: GrokRole[] = ["grok_teardown", "concierge", "hardware_specialist", "merchant_auditor", "custom"];
     const typedRole: GrokRole = validRoles.includes(role as GrokRole) ? (role as GrokRole) : "grok_teardown";
-    const activeProd = activeProductId ? ALL_PRODUCTS.find((p) => p.id === activeProductId) : undefined;
+    const activeProd = typeof activeProductId === "string"
+      ? ALL_PRODUCTS.find((p) => p.id === activeProductId)
+      : undefined;
 
     const fullSystemInstruction = buildFullSystemInstruction({
       role: typedRole,
@@ -236,6 +258,15 @@ export async function POST(req: NextRequest) {
       modelPreference,
       customConfig
     );
+
+    // A caller-supplied baseUrl turns this handler into a server-side request
+    // to any address the operator can reach. Validate it before it is used.
+    if (endpoint && customConfig && customConfig.baseUrl) {
+      const checked = checkOutboundUrl(customConfig.baseUrl);
+      if (!checked.ok) {
+        return NextResponse.json({ ok: false, error: checked.reason }, { status: 400 });
+      }
+    }
 
     let responseText = "";
     let activeModelUsed = targetModel;
@@ -291,11 +322,14 @@ export async function POST(req: NextRequest) {
             temperature: 0.5,
             max_tokens: AI_ASSISTANT_BUDGET.maxResponseTokens,
           }),
+          ...guardedFetchInit(UPSTREAM_TIMEOUT_MS),
         });
 
         if (!grokRes.ok) {
-          const errBody = await grokRes.text();
-          console.warn(`AI API returned ${grokRes.status}: ${errBody}`);
+          // Log the upstream body server-side only. It can echo the request,
+          // so it must never travel back to the caller.
+          const errBody = await grokRes.text().catch(() => "");
+          console.warn(`AI API returned ${grokRes.status}: ${errBody.slice(0, 500)}`);
           throw new Error(`Provider HTTP ${grokRes.status}`);
         }
 
@@ -365,12 +399,11 @@ export async function POST(req: NextRequest) {
       durationMs,
     });
   } catch (error: any) {
+    // Fetch errors embed the target URL, which can carry credentials. Log the
+    // detail, return nothing derived from it.
     console.error("Chat API Error:", error);
     return NextResponse.json(
-      {
-        ok: false,
-        error: error?.message || "Failed to process chat with AI",
-      },
+      { ok: false, error: "The assistant could not be reached. Please try again." },
       { status: 500 }
     );
   }

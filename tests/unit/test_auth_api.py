@@ -5,12 +5,84 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from apps.api.auth import require_scopes, session_principal, start_session
+from apps.api.db import get_db
+from packages.observability.context import new_id
+from packages.security.apikeys import ApiClient, generate_api_key, hash_api_key
 from packages.security.principals import Principal, Role, Scope
 from packages.security.tokens import issue_access_token
+from services.connectors.api_clients import ApiClientRepository
+
+
+@pytest.fixture
+def client_db(app: FastAPI) -> sessionmaker:
+    """An ``api_client`` table for the token exchange to resolve against.
+
+    The registry is now rebuilt per request from the database rather than read
+    from ``app.state``, because a process-lifetime registry was empty on every
+    boot -- so a minted key authenticated until the process recycled and then
+    returned 401, which reads exactly like a wrong key. These tests issue through
+    the repository so they exercise the real path.
+    """
+    import services.connectors.models  # noqa: F401 - register the tables
+    import tests.sqlite_types  # noqa: F401 - registers the JSONB/ARRAY compilers
+    from packages.db.base import Base
+    from services.catalog.models import Merchant
+
+    # `StaticPool` keeps one connection, so the schema survives into the request
+    # thread; `check_same_thread=False` because a sync dependency runs off-thread.
+    engine = create_engine(
+        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    session = factory()
+    session.add(Merchant(merchant_id="merchant_demo", name="Demo", status="active"))
+    session.commit()
+    session.close()
+
+    def override_get_db():
+        db = factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    return factory
+
+
+def _issue(factory: sessionmaker, **overrides: Any) -> str:
+    """Mint a key and return the plaintext, exactly once, as the real route does."""
+    kwargs: dict[str, Any] = {
+        "merchant_id": "merchant_demo",
+        "role": Role.BUYER,
+        "buyer_id": "buyer_ada",
+        "scopes": {Scope.CATALOG_READ, Scope.CHECKOUT_WRITE, Scope.PAYMENT_WRITE},
+    }
+    kwargs.update(overrides)
+    plaintext = generate_api_key()
+    with factory() as session:
+        ApiClientRepository(session).add(
+            ApiClient(
+                client_id=new_id("apc"),
+                key_hash=hash_api_key(plaintext),
+                **kwargs,
+            )
+        )
+        session.commit()
+    return plaintext
 
 
 def _install_protected_test_routes(app: FastAPI) -> None:
@@ -27,14 +99,10 @@ def _install_protected_test_routes(app: FastAPI) -> None:
         return {"subject": principal.subject}
 
 
-def test_api_key_exchange_returns_a_scoped_bearer_token(app: FastAPI, settings) -> None:
-    registry = app.state.api_client_registry
-    api_key, _ = registry.issue(
-        merchant_id="merchant_demo",
-        role=Role.BUYER,
-        buyer_id="buyer_ada",
-        scopes={Scope.CATALOG_READ, Scope.CHECKOUT_WRITE, Scope.PAYMENT_WRITE},
-    )
+def test_api_key_exchange_returns_a_scoped_bearer_token(
+    app: FastAPI, client_db: sessionmaker
+) -> None:
+    api_key = _issue(client_db)
 
     with TestClient(app) as client:
         response = client.post(
@@ -50,7 +118,7 @@ def test_api_key_exchange_returns_a_scoped_bearer_token(app: FastAPI, settings) 
     assert api_key not in response.text
 
 
-def test_unknown_api_key_is_denied_without_echoing_it(app: FastAPI) -> None:
+def test_unknown_api_key_is_denied_without_echoing_it(app: FastAPI, client_db) -> None:
     presented = "ak_unknown-agent-key"
 
     with TestClient(app) as client:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -353,6 +354,21 @@ def normalize_source_status(aggregate_type: str, status: str) -> str:
     return _NORMALIZE_STATUS.get(status_upper, status_upper)
 
 
+def price_hashes_match(supplied: str | None, persisted: str | None) -> bool:
+    """Compare two price hashes without leaking their common prefix by timing.
+
+    The digest is what binds an approved amount to the checkout being charged, so
+    a caller who can time the comparison can recover it one character at a time
+    and present that hash as their own. Encoded to bytes because the digests are
+    compared as opaque octets rather than as text.
+
+    ``None`` on both sides is a match; one side missing is not.
+    """
+    if supplied is None or persisted is None:
+        return supplied is None and persisted is None
+    return hmac.compare_digest(supplied.encode("utf-8"), persisted.encode("utf-8"))
+
+
 def transition(
     aggregate: Aggregate, event: TransitionEvent, context: TransitionContext, session: Session
 ) -> TransitionResult:
@@ -367,7 +383,9 @@ def transition(
     missing = rule.required_fields - context.values.keys()
     if missing:
         raise DomainError(code=ErrorCode.VALIDATION_ERROR, details={"missing": sorted(missing)})
-    if rule.checks_price_hash and context.supplied_price_hash != context.persisted_price_hash:
+    if rule.checks_price_hash and not price_hashes_match(
+        context.supplied_price_hash, context.persisted_price_hash
+    ):
         raise DomainError(code=ErrorCode.PRICE_CHANGED)
     if rule.checks_authorization:
         if context.authorization_consumed:

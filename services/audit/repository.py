@@ -87,7 +87,11 @@ def _safe_metadata(value: Any, key: str = "") -> Any:
             str(item_key): _safe_metadata(item_value, str(item_key))
             for item_key, item_value in value.items()
         }
-    if isinstance(value, list):
+    # Every sequence-like container, not just ``list``. A tuple or set was
+    # returned untouched below, so a caller who passed ``metadata={"headers":
+    # ("Bearer eyJ...",)}`` wrote a live credential straight into the durable
+    # ledger — and ``json.dumps`` rejected a set outright.
+    if isinstance(value, list | tuple | set | frozenset):
         return [_safe_metadata(item) for item in value]
     return value
 

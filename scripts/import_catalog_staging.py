@@ -21,9 +21,9 @@ from typing import Any
 # Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from packages.db.base import Base
 from packages.observability.context import new_id
-from services.db import Base, get_engine
-from services.db.session import get_session_factory
+from scripts._db import require_server_database, server_session_factory
 from services.staging.models import IngestionRun, StagingCatalogRaw, StagingRejection
 
 
@@ -179,9 +179,11 @@ def stream_import_file(
     max_records: int | None = None,
     report_dir: Path | None = None,
 ) -> dict[str, Any]:
-    engine = get_engine()
+    # Refuses to fall back to a local SQLite file: an import that quietly writes to
+    # data/local_dev.db would report success and stage nothing. See scripts/_db.py.
+    engine = require_server_database(operation="catalog import")
     Base.metadata.create_all(engine)
-    SessionLocal = get_session_factory()
+    SessionLocal = server_session_factory(engine)
 
     run_id = new_id("run")
     start_time = time.perf_counter()

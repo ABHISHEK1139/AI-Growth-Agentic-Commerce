@@ -15,11 +15,17 @@ from services.payments.razorpay_adapter import RazorpayPaymentProvider
 
 KEY_ID = "rzp_test_fixture_123"
 KEY_SECRET = "secret_fixture_456"
+WEBHOOK_SECRET = "webhook_secret_fixture_789"
 
 
 @pytest.fixture
 def provider() -> RazorpayPaymentProvider:
-    return RazorpayPaymentProvider(key_id=KEY_ID, key_secret=KEY_SECRET, timeout_seconds=5.0)
+    return RazorpayPaymentProvider(
+        key_id=KEY_ID,
+        key_secret=KEY_SECRET,
+        webhook_secret=WEBHOOK_SECRET,
+        timeout_seconds=5.0,
+    )
 
 
 def test_missing_credentials_raises(provider: RazorpayPaymentProvider) -> None:
@@ -134,11 +140,34 @@ def test_fetch_order_not_found(provider: RazorpayPaymentProvider) -> None:
 
 
 def test_verify_signature(provider: RazorpayPaymentProvider) -> None:
-    payload = b'{"event":"payment.captured"}'
-    valid_sig = hmac.new(KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+    """Each surface accepts only the secret it is actually signed with.
 
-    assert provider.verify_signature(payload, valid_sig) is True
+    A webhook and a payment callback are signed with different Razorpay
+    secrets. Accepting either on both surfaces means a signature captured from
+    one endpoint replays against the other, so the two checks are separate and
+    the test pins that separation rather than just "the right one works".
+    """
+    payload = b'{"event":"payment.captured"}'
+    webhook_sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+    key_sig = hmac.new(KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+
+    assert provider.verify_signature(payload, webhook_sig) is True
+    assert provider.verify_signature(payload, key_sig) is False
     assert provider.verify_signature(payload, "forged_sig") is False
+
+    assert provider.verify_payment_signature(payload, key_sig) is True
+    assert provider.verify_payment_signature(payload, webhook_sig) is False
+    assert provider.verify_payment_signature(payload, "forged_sig") is False
+
+
+def test_verify_signature_fails_closed_without_a_secret() -> None:
+    """No webhook secret configured means no webhook verification, not any."""
+    key_only = RazorpayPaymentProvider(key_id=KEY_ID, key_secret=KEY_SECRET)
+    payload = b'{"event":"payment.captured"}'
+    key_sig = hmac.new(KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+
+    assert key_only.verify_signature(payload, key_sig) is False
+    assert key_only.verify_payment_signature(payload, key_sig) is True
 
 
 def test_refund_success(provider: RazorpayPaymentProvider) -> None:

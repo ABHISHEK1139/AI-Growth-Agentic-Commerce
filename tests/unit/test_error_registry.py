@@ -57,6 +57,15 @@ DESIGN_TABLE: tuple[tuple[str, int, bool | None], ...] = (
     ("PROMPT_INJECTION_SUSPECTED", 400, False),
     ("ILLEGAL_TRANSITION", 409, False),
     ("ALREADY_FINALIZED", 409, False),
+    # Commerce-channel additions, not in the original design table. A third-party
+    # store failing is a dependency problem with a merchant-facing remedy, and the
+    # cases are separated so the console can say which one it was: fix the token,
+    # wait out a rate limit, or check the network. One generic "sync failed" code
+    # would leave the merchant guessing between those three.
+    ("CONNECTOR_UNAUTHORIZED", 401, False),
+    ("CONNECTOR_UNREACHABLE", 503, True),
+    ("CONNECTOR_RATE_LIMITED", 429, True),
+    ("CONNECTOR_ERROR", 502, True),
     ("FORBIDDEN", 403, False),
     ("RATE_LIMITED", 429, True),
 )
@@ -77,6 +86,15 @@ TRANSPORT_TABLE: tuple[tuple[str, int, bool | None], ...] = (
     ("SERVICE_UNAVAILABLE", 503, True),
     ("GATEWAY_TIMEOUT", 504, True),
 )
+
+#: Codes whose HTTP status deliberately has no entry in the middleware's
+#: status-to-code fallback table, and why. A response with one of these statuses
+#: is always the result of a specific raised `DomainError`, never of an unhandled
+#: exception falling through to a generic mapping -- an unhandled failure must not
+#: be reported to a merchant as an upstream store problem.
+STATUSES_WITHOUT_A_FALLBACK: dict[int, str] = {
+    502: "CONNECTOR_ERROR is raised explicitly; 502 must not imply a generic failure",
+}
 
 ALL_ROWS = DESIGN_TABLE + TRANSPORT_TABLE
 
@@ -116,6 +134,29 @@ class TestRegistryMatchesTheDesignDocument:
         change the string a client is switching on."""
         for code in ErrorCode:
             assert code.value == code.name
+
+    @pytest.mark.parametrize(
+        ("status", "reason"),
+        list(STATUSES_WITHOUT_A_FALLBACK.items()),
+        ids=[str(status) for status in STATUSES_WITHOUT_A_FALLBACK],
+    )
+    def test_a_declared_status_absent_from_the_fallback_table(
+        self, status: int, reason: str
+    ) -> None:
+        """The fallback exists for statuses nobody raised on purpose.
+
+        A status present in the registry but missing from
+        `_STATUS_TO_CODE` is only safe when it can only be produced by a specific
+        `DomainError`. This pins that intent so adding 502 to the fallback later
+        is a deliberate change with a reason, not an accident -- at which point a
+        merchant would start seeing "store problem" for unrelated 502s.
+        """
+        from packages.errors.registry import _STATUS_TO_CODE
+
+        assert status not in _STATUS_TO_CODE, reason
+
+        # And the status is genuinely used, so this is not a vacuous pin.
+        assert any(spec.http_status == status for spec in ERROR_REGISTRY.values()), reason
 
 
 class TestInBandCodes:

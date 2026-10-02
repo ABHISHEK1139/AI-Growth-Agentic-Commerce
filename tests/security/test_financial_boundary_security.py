@@ -104,23 +104,32 @@ def test_agent_tool_execute_enforces_required_scopes(client, settings):
 
 
 def test_strict_scope_validation_in_api_key_exchange(app, settings):
-    """Strict Scope Validation: Requesting scopes not granted to API key returns 403 Forbidden."""
+    """Strict Scope Validation: Requesting scopes not granted to API key returns 403 Forbidden.
+
+    The registry is built here rather than read from `app.state`, which is no
+    longer where credentials live: a process-lifetime registry was empty on every
+    boot, so keys stopped authenticating after a restart. The scope ceiling being
+    tested here is unchanged by that -- it is applied at exchange time against
+    whatever the registry holds.
+    """
     from apps.api.auth import exchange_api_key
     from packages.errors.exceptions import ForbiddenError
+    from packages.security.apikeys import ApiClientRegistry
     from packages.security.principals import Role, Scope
 
-    registry = app.state.api_client_registry
-    api_key, _ = registry.issue(
+    registry = ApiClientRegistry()
+    issued_key, client = registry.issue(
         merchant_id="merch_1",
         role=Role.BUYER,
         buyer_id="buyer_1",
         scopes={Scope.CATALOG_READ},  # Only catalog:read granted
     )
+    assert client.scopes == frozenset({Scope.CATALOG_READ})
 
     # Requesting catalog:read + payment:write must raise ForbiddenError (403)
     with pytest.raises(ForbiddenError) as exc_info:
         exchange_api_key(
-            api_key,
+            issued_key,
             registry=registry,
             settings=settings,
             requested_scopes=frozenset({Scope.CATALOG_READ, Scope.PAYMENT_WRITE}),

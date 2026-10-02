@@ -31,6 +31,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -68,6 +69,15 @@ MAX_TTL_SECONDS: Final[int] = 30 * 86_400
 MAX_ACCESS_TTL_SECONDS: Final[int] = 86_400
 
 _HEADER: Final[Mapping[str, str]] = {"alg": ALGORITHM, "typ": "JWT"}
+
+#: The base64url alphabet and nothing else. Every segment this module issues is
+#: built from it, so a segment carrying anything else was not issued by us. This
+#: is part of step 1 (shape) rather than a nicety: the signature step re-encodes
+#: the received segments as ASCII, so without it a credential containing a
+#: non-ASCII character raised ``UnicodeEncodeError`` out of the decoder and was
+#: answered 500 INTERNAL_ERROR instead of 401. An *empty* segment is left to the
+#: signature comparison, so ``alg: none`` still fails where it always has.
+_SEGMENT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +178,10 @@ def decode_signed_token(
 
     segments = token.split(".")
     if len(segments) != 3:
+        raise TokenMalformedError(
+            "The credential could not be read.", details={"reason": "malformed"}
+        )
+    if not all(_SEGMENT_PATTERN.match(segment) for segment in segments):
         raise TokenMalformedError(
             "The credential could not be read.", details={"reason": "malformed"}
         )

@@ -18,6 +18,9 @@ inward, the stack this builds is:
 4. :class:`~apps.api.middleware.ratelimit.RateLimitMiddleware` — innermost of
    ours, so a 429 is still logged, still gets correlation headers, and still gets
    CORS headers.
+5. :class:`~apps.api.middleware.security.SecurityHeadersMiddleware` — outside the
+   rate limiter and the exception handler so their responses carry the security
+   headers too. A header that appears only on 200s is not a control.
 
 A single ``install_middleware`` call keeps that reasoning in one place instead of
 spread through the application factory.
@@ -39,6 +42,7 @@ from apps.api.middleware.ratelimit import (
     RateLimitRule,
     build_backend,
 )
+from apps.api.middleware.security import SecurityHeadersMiddleware
 
 __all__ = ["install_middleware"]
 
@@ -62,6 +66,11 @@ def install_middleware(app: FastAPI, settings: Settings) -> None:
         enabled=settings.rate_limit_enabled,
         default_rule=RateLimitRule(limit=settings.rate_limit_default_per_minute, window_seconds=60),
     )
+
+    # Placed outside the exception handler and rate limiter so their responses carry
+    # the security headers too: a 429 or a rendered 500 that omits them would be an
+    # easy way to end up with a header that only exists on 200s.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     app.add_middleware(UnhandledExceptionMiddleware)
 

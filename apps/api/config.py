@@ -25,7 +25,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from packages.config.providers import (
@@ -43,6 +43,48 @@ from packages.urls import LOOPBACK_HOSTNAMES, is_loopback_url
 AppEnv = Literal["local", "staging", "demo"]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_ENV_FILE = REPO_ROOT / ".env"
+
+#: The environment variable that turns on reading ambient configuration. It gates
+#: credentials; it does not gate configuration.
+LIVE_OPT_IN_VAR = "ALLOW_LIVE_CREDENTIALS"
+
+
+def _live_credentials_enabled() -> bool:
+    return os.environ.get(LIVE_OPT_IN_VAR) == "1"
+
+
+def _dotenv_app_env() -> str | None:
+    """``APP_ENV`` as written in ``.env``, or None.
+
+    Read directly because with the opt-in absent ``Settings`` is not given the
+    file at all, so there is no other way to learn what the deployment declared.
+    A plain line scan is enough: the file is a template of ``KEY=value`` pairs.
+    """
+    if not _ENV_FILE.is_file():
+        return None
+    try:
+        for raw in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = line.partition("=")
+            if sep and key.strip().upper() == "APP_ENV":
+                candidate = value.strip().strip("'\"")
+                return candidate.lower() or None
+    except OSError:  # pragma: no cover - unreadable .env is handled as absent
+        return None
+    return None
+
+
+def _declared_app_env() -> str | None:
+    """The environment the deployment says it is running as."""
+    raw = os.environ.get("APP_ENV")
+    if raw is None or not raw.strip():
+        return _dotenv_app_env()
+    return raw.strip().lower()
+
 
 #: Re-exported. The provider-name literals and the loopback predicate now live in
 #: ``packages`` so a domain service can reach them without importing the API
@@ -64,9 +106,9 @@ __all__ = [
 class Settings(BaseSettings):
     """Typed view of the process environment."""
 
-    _live_env_opt_in = os.environ.get("ALLOW_LIVE_CREDENTIALS") == "1"
+    _live_env_opt_in = _live_credentials_enabled()
     model_config = SettingsConfigDict(
-        env_file=(REPO_ROOT / ".env") if _live_env_opt_in else None,
+        env_file=_ENV_FILE if _live_env_opt_in else None,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -86,9 +128,29 @@ class Settings(BaseSettings):
         The default behavior is intentionally safe: a developer shell that happens to
         export real values must not silently influence a fresh app run unless the
         process has opted in with ``ALLOW_LIVE_CREDENTIALS=1``.
+
+        The opt-in has to be loud about its own scope. Because it suppressed
+        *every* source rather than just the credential-bearing fields, a real
+        deployment that set ``APP_ENV=staging`` and a ``DATABASE_URL`` but
+        forgot the opt-in started happily in **local** mode: ``app_env`` read
+        back as ``local``, so ``validate_for_env`` returned before checking
+        anything, ``is_local`` disabled ``Secure`` on the session cookie, and
+        ``DATABASE_URL`` was discarded in favour of the built-in localhost URL.
+        A process that was told it is staging must never be able to start as
+        local, so a declared non-local environment without the opt-in is a hard
+        startup failure naming the variable to set.
         """
-        if os.environ.get("ALLOW_LIVE_CREDENTIALS") == "1":
+        if _live_credentials_enabled():
             return init_settings, env_settings, dotenv_settings, file_secret_settings
+
+        declared = _declared_app_env()
+        if declared is not None and declared != "local":
+            raise ValueError(
+                f"APP_ENV={declared} but {LIVE_OPT_IN_VAR} is not 1. Without that opt-in this "
+                "process ignores DATABASE_URL, provider credentials, and every other "
+                "environment value, so it would serve in local mode against the built-in "
+                f"localhost database. Set {LIVE_OPT_IN_VAR}=1 for any {declared} deployment."
+            )
         return (init_settings,)
 
     # --- Application ------------------------------------------------------
@@ -99,8 +161,70 @@ class Settings(BaseSettings):
     api_port: int = 8000
 
     # --- Datastores -------------------------------------------------------
-    database_url: str = "postgresql+psycopg://agentpay:agentpay@localhost:5432/agentpay"
+    # `DATABASE_URL` remains the single source of truth for the DSN. The
+    # discrete `DB_*` fields below exist so an operator can supply a host,
+    # user, and password separately -- as every managed Postgres provider
+    # documents them -- without hand-assembling a URL and risking a
+    # mistyped scheme. An explicit `DATABASE_URL` always wins; the parts only
+    # apply when it is absent, so an existing deployment is unaffected.
+    database_url: str | None = None
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_user: str = "agentpay"
+    db_password: SecretStr = SecretStr("agentpay")
+    db_name: str = "agentpay"
+    db_driver: str = "postgresql+psycopg"
+    db_connect_timeout_seconds: int = Field(default=3, ge=1, le=60)
+    # Connection pool sizing. These were previously hard-coded inside
+    # `apps.api.db.get_engine` (`pool_size=10`, `max_overflow=5`) while a second
+    # engine in `services/db/engine.py` used a different pair, so the effective
+    # ceiling was neither documented nor configurable. Per-process connection count
+    # is `(DB_POOL_SIZE + DB_MAX_OVERFLOW) * uvicorn workers`; with the defaults and
+    # `--workers 2` in `infra/docker/api.Dockerfile` that is 30 connections against a
+    # Postgres `max_connections` of 100, leaving room for the worker, migrations, and
+    # operator scripts. Raise these only alongside `max_connections` -- exceeding it
+    # does not slow the service down, it makes new connections fail outright.
+    db_pool_size: int = Field(default=10, ge=1, le=200)
+    db_max_overflow: int = Field(default=5, ge=0, le=200)
+    # Seconds before a pooled connection is recycled. Proxies and PgBouncer drop idle
+    # connections; without recycling the first request after an idle period fails on
+    # a stale socket. `pool_pre_ping` covers most of that, and recycling covers the
+    # rest.
+    db_pool_recycle_seconds: int = Field(default=300, ge=30, le=3600)
+    # When Postgres is configured but unreachable, `apps.api.db` falls back to
+    # a local SQLite file so a laptop still boots. That fallback silently
+    # discards every row in the real database, so outside local it is refused.
+    allow_sqlite_fallback: bool = False
     redis_url: str = "redis://localhost:6379/0"
+
+    # --- Read cache -------------------------------------------------------
+    # Measured rationale (docs/production/READINESS_PLAN.md §4.1): the service's
+    # ceiling is database round-trips per request, not compute -- 6% API CPU and
+    # 0.03% Postgres CPU at 200 req/s, while /health sustained 250 req/s on the
+    # same machine. So cutting queries is what moves the ceiling.
+    #
+    # TTLs are deliberately short even though catalogue rows change rarely, because
+    # the cheapest way to be wrong here is to serve a stale price. `packages/cache`
+    # fails open, so an unreachable Redis degrades to today's behaviour rather than
+    # to an outage -- these values are therefore an optimisation, never a dependency.
+    cache_enabled: bool = True
+    # Whether an in-process cache may be used when no Redis is configured. Off by
+    # default because it is only correct for a single-process deployment, and the
+    # default has to be the safe one: with several workers each holds its own copy, so
+    # an invalidation on one does not reach the others and a reader can be served a
+    # stale offer price until its TTL expires. When this is off and Redis is
+    # unconfigured, caching is disabled entirely rather than silently downgraded to
+    # something fast and wrong.
+    cache_allow_process_local: bool = False
+    cache_timeout_seconds: float = Field(default=0.25, gt=0, le=5)
+    cache_cooldown_seconds: float = Field(default=5.0, ge=0, le=120)
+    # The capability document is fetched once per agent session and embeds the
+    # merchant's financial ceilings, so it is cached briefly and invalidated
+    # explicitly when merchant rules change.
+    cache_ttl_seconds_capability: int = Field(default=30, ge=1, le=3600)
+    # An offer is a price. Short TTL, and invalidated on every catalogue publish.
+    cache_ttl_seconds_offer: int = Field(default=15, ge=1, le=3600)
+    cache_ttl_seconds_product: int = Field(default=30, ge=1, le=3600)
 
     # --- Rate limiting ----------------------------------------------------
     # The default applies only to routes without their own declared rule; see
@@ -128,6 +252,16 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = Field(default=3600, ge=60, le=86_400)
     session_ttl_seconds: int = Field(default=86_400, ge=300, le=2_592_000)
     cors_allow_origins: str = "http://localhost:3000"
+
+    # --- Console authentication -------------------------------------------
+    # Off by default. An always-open signup on a payments gateway is a way for
+    # anyone to obtain a tenant, and a tenant is a place to publish a catalog,
+    # mint agent API keys, and receive pushed orders.
+    allow_console_signup: bool = False
+    # Master key for channel access tokens at rest. Derived to 32 bytes by
+    # SHA-256 of this value, so any length of passphrase works. The placeholder
+    # keeps a clean clone bootable; `validate_for_env` refuses it outside local.
+    channel_encryption_key: str = "dev-only-change-me-channel-key"  # noqa: S105
 
     # --- Payment provider -------------------------------------------------
     payment_provider: PaymentProviderName = "fake"
@@ -333,9 +467,48 @@ class Settings(BaseSettings):
             timeout_seconds=self.payment_provider_timeout_seconds,
         )
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _blank_database_url_is_absent(cls, value: Any) -> Any:
+        """Treat an empty ``DATABASE_URL=`` as unset, not as a URL.
+
+        `.env.example` documents the variable as empty, and compose declares the
+        key without a value, so a copy of either yields `""`. Read literally that
+        is not a valid DSN, and the process either fails to start or falls through
+        to the discrete parts -- but the *fall-through is the bug*: `env_file`
+        would deliver the host-side `DB_HOST=localhost` into a container where
+        the database is reachable at `postgres`, and the API would silently fail
+        over to SQLite.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @property
+    def is_sqlite_url(self) -> bool:
+        """Whether the resolved DSN targets a SQLite file rather than a server."""
+        return self.resolved_database_url.startswith("sqlite")
+
+    @property
+    def resolved_database_url(self) -> str:
+        """The DSN the engine should connect to, assembled if necessary.
+
+        A password is percent-encoded rather than interpolated raw: managed
+        providers hand out passwords containing ``@``, ``/``, and ``#``, and
+        any of those silently truncates the DSN or, worse, makes the parser read
+        the remainder as the database name.
+        """
+        if self.database_url:
+            return self.database_url
+        from urllib.parse import quote
+
+        user = quote(self.db_user, safe="")
+        password = quote(self.db_password.get_secret_value(), safe="")
+        netloc = f"{user}:{password}@{self.db_host}:{self.db_port}"
+        return f"{self.db_driver}://{netloc}/{self.db_name}"
+
     def validate_for_env(self) -> None:
         """Refuse to start with development placeholders outside local.
-
         Called from the application factory. The failure mode this prevents is a
         demo deployment that silently signs sessions with a secret committed to a
         public template.
@@ -346,8 +519,13 @@ class Settings(BaseSettings):
         problems: list[str] = []
         if "change-me" in self.jwt_secret:
             problems.append("JWT_SECRET is still the template placeholder")
-        if "change-me" in self.session_secret:
+        if self.session_secret is not None and "change-me" in self.session_secret:
             problems.append("SESSION_SECRET is still the template placeholder")
+        if "change-me" in self.channel_encryption_key:
+            problems.append(
+                "CHANNEL_ENCRYPTION_KEY is still the template placeholder; channel access "
+                "tokens would be encrypted with a key that is public in this repository"
+            )
         if self.payment_provider == "razorpay" and not self.razorpay_is_configured():
             problems.append("PAYMENT_PROVIDER=razorpay but no key id/secret is set")
         if self.payment_provider == "razorpay" and not self.razorpay_webhook_secret:
@@ -375,6 +553,62 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"Unsafe configuration for APP_ENV={self.app_env}: " + "; ".join(problems)
             )
+
+    @property
+    def channel_key(self) -> bytes:
+        """The 32-byte key :mod:`services.connectors.models` encrypts tokens with.
+
+        SHA-256 of the configured passphrase, so an operator can supply a value
+        of any length and get a fixed-size key. Deriving rather than requiring
+        exactly 32 bytes removes a class of setup mistake -- a 31-byte key
+        truncated, or a passphrase silently padded -- at the cost of nothing,
+        since the input is already high-entropy or already a passphrase.
+        """
+        import hashlib
+
+        return hashlib.sha256(self.channel_encryption_key.encode("utf-8")).digest()
+
+    def validate_datastore_for_env(self) -> None:
+        """Refuse a configuration that would silently run against the wrong store.
+
+        The SQLite fallback in :func:`apps.api.db.get_engine` exists so a laptop
+        with no Postgres still boots. It is the single most dangerous line of
+        configuration in the project: a staging deployment that cannot reach its
+        database appears to start normally, then serves an empty catalog from a
+        local file while every write is accepted and lost. Outside local that
+        trade is never correct, so it is a startup failure naming the variables
+        to set.
+
+        Why this is unconditional outside ``local``
+        ------------------------------------------
+        An earlier version raised only when ``DB_PASSWORD`` was empty, on the
+        reasoning that a deployment reaching for the fallback had probably not
+        finished configuring itself. That reasoning is wrong, and it made this
+        function a no-op in the one deployment that matters.
+
+        Docker Compose sets ``DB_PASSWORD``, so the check never fired there. It
+        did fire in practice, during load testing: Docker Desktop restarted, the
+        API process came up before PostgreSQL was accepting connections, the
+        engine fell back to SQLite, and the service reported **healthy** while
+        serving an empty catalogue with every write going to a local file. It was
+        found because a seeded fixture suddenly returned 404s -- not by any health
+        check, which was green throughout.
+
+        Whether the password is set says nothing about whether an empty local
+        database is acceptable. Outside ``local`` the only thing that should permit
+        the fallback is saying so explicitly, via ``ALLOW_SQLITE_FALLBACK=1``.
+        """
+        if self.is_local or self.is_sqlite_url or self.allow_sqlite_fallback:
+            return
+
+        raise ValueError(
+            f"APP_ENV={self.app_env} is not 'local', and PostgreSQL is unreachable. "
+            "Refusing to fall back to a local SQLite file: this process would appear "
+            "healthy while serving an empty catalog and losing every write. Fix the "
+            "database connection -- set DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME, "
+            "or a full DATABASE_URL. Only set ALLOW_SQLITE_FALLBACK=1 if an empty "
+            "local store is genuinely better than refusing to start."
+        )
 
 
 @lru_cache(maxsize=1)

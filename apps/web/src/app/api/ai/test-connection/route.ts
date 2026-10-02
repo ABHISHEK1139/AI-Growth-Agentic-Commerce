@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { chatCompletionsEndpoint, checkOutboundUrl } from "@/lib/outboundUrl";
+
+/** Cached per-URL so hammering this endpoint cannot exhaust the outbound pool. */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 30;
+const recentCalls = new Map<string, number[]>();
+
+function rateLimitedFor(clientKey: string): boolean {
+  const now = Date.now();
+  const hits = (recentCalls.get(clientKey) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  hits.push(now);
+  recentCalls.set(clientKey, hits);
+  return hits.length > RATE_LIMIT_MAX;
+}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   try {
+    const clientKey = req.headers.get("x-forwarded-for") || "local";
+    if (rateLimitedFor(clientKey)) {
+      return NextResponse.json(
+        { ok: false, error: "Too many connection tests. Please wait a moment and try again." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { baseUrl, apiKey, modelName = "default", providerId } = body;
 
@@ -13,10 +35,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const trimmedBase = baseUrl.trim().replace(/\/$/, "");
-    const endpoint = trimmedBase.endsWith("/chat/completions")
-      ? trimmedBase
-      : `${trimmedBase}/chat/completions`;
+    // The base URL is caller-supplied and the request below is server-side, so
+    // this endpoint is an SSRF primitive unless the target is validated first.
+    const checked = checkOutboundUrl(baseUrl);
+    if (!checked.ok) {
+      return NextResponse.json({ ok: false, error: checked.reason }, { status: 400 });
+    }
+    const trimmedBase = checked.url.origin + checked.url.pathname.replace(/\/+$/, "");
+    const endpoint = chatCompletionsEndpoint(trimmedBase);
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -34,11 +60,14 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: modelName.trim(),
+          model: typeof modelName === "string" ? modelName.trim() : "default",
           messages: [{ role: "user", content: "hello" }],
           max_tokens: 5,
         }),
         signal: controller.signal,
+        // A public host must not be able to bounce this request to a blocked
+        // address after the URL check above has already passed.
+        redirect: "manual",
       });
 
       clearTimeout(timeoutId);

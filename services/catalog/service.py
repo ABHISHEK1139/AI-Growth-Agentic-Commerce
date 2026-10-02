@@ -10,6 +10,8 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from packages.errors.exceptions import DomainError
+from packages.errors.registry import ErrorCode
 from packages.observability.context import new_id
 from packages.security.tenancy import TenantScope
 from services.catalog.models import (
@@ -210,21 +212,53 @@ class CatalogService:
                     else:
                         needs_review_count += 1
 
-                    prod = Product(
-                        product_id=product_id,
-                        catalog_version_id=catalog_version_id,
-                        merchant_id=merchant_id,
-                        external_product_id=ext_id,
-                        category_id=category,
-                        title=title,
-                        status=status,
-                        description=p_data.get("description", []),
-                        specifications=p_data.get("specifications", {}),
-                        average_rating=_safe_float(p_data.get("average_rating"), 0.0),
-                        rating_number=_safe_int(p_data.get("rating_number"), 0),
-                        created_at=now,
-                    )
-                    session.add(prod)
+                    prod = session.get(Product, product_id)
+                    if prod is None:
+                        prod = Product(
+                            product_id=product_id,
+                            catalog_version_id=catalog_version_id,
+                            merchant_id=merchant_id,
+                            external_product_id=ext_id,
+                            category_id=category,
+                            title=title,
+                            status=status,
+                            description=p_data.get("description", []),
+                            specifications=p_data.get("specifications", {}),
+                            average_rating=_safe_float(p_data.get("average_rating"), 0.0),
+                            rating_number=_safe_int(p_data.get("rating_number"), 0),
+                            created_at=now,
+                        )
+                        session.add(prod)
+                    else:
+                        # `product_id` is the primary key while `catalog_version_id`
+                        # is a plain column, so a product can belong to exactly one
+                        # catalog version -- yet every import mints a new version id.
+                        # Inserting unconditionally therefore made the *second*
+                        # import of any overlapping catalog fail with a
+                        # UniqueViolation, which is what stopped a re-seed and
+                        # would stop a real re-import in production. Repoint the
+                        # existing row at the new version and refresh its content.
+                        if prod.merchant_id != merchant_id:
+                            raise DomainError(
+                                f"Product {product_id} already belongs to another merchant.",
+                                code=ErrorCode.FORBIDDEN,
+                            )
+                        prod.catalog_version_id = catalog_version_id
+                        prod.external_product_id = ext_id
+                        prod.category_id = category
+                        prod.title = title
+                        prod.status = status
+                        prod.description = p_data.get("description", [])
+                        prod.specifications = p_data.get("specifications", {})
+                        prod.average_rating = _safe_float(p_data.get("average_rating"), 0.0)
+                        prod.rating_number = _safe_int(p_data.get("rating_number"), 0)
+                        # Images are replaced rather than appended: the rows are
+                        # keyed by a generated id, so a second import would leave
+                        # the previous set in place and every product would carry
+                        # duplicates.
+                        session.query(ProductImage).filter(
+                            ProductImage.product_id == product_id
+                        ).delete(synchronize_session=False)
 
                     # Images
                     images = p_data.get("images", [])
@@ -277,38 +311,75 @@ class CatalogService:
 
                     expires_at = _parse_offer_expiry(o_data.get("expires_at"), now)
 
-                    offer = Offer(
-                        offer_id=offer_id,
-                        catalog_version_id=catalog_version_id,
-                        product_id=prod_id,
-                        variant_id=o_data.get("variant_id"),
-                        merchant_id=merchant_id,
-                        status=o_data.get("status", "active"),
-                        unit_price_minor=price_minor,
-                        currency=o_data.get("currency", "INR"),
-                        delivery_days=delivery_days,
-                        return_period_days=return_period_days,
-                        pricing_source=pricing_source,
-                        offer_version=offer_version,
-                        expires_at=expires_at,
-                        created_at=now,
-                    )
-                    session.add(offer)
+                    offer = session.get(Offer, offer_id)
+                    if offer is None:
+                        offer = Offer(
+                            offer_id=offer_id,
+                            catalog_version_id=catalog_version_id,
+                            product_id=prod_id,
+                            variant_id=o_data.get("variant_id"),
+                            merchant_id=merchant_id,
+                            status=o_data.get("status", "active"),
+                            unit_price_minor=price_minor,
+                            currency=o_data.get("currency", "INR"),
+                            delivery_days=delivery_days,
+                            return_period_days=return_period_days,
+                            pricing_source=pricing_source,
+                            offer_version=offer_version,
+                            expires_at=expires_at,
+                            created_at=now,
+                        )
+                        session.add(offer)
+                    else:
+                        # Same primary-key conflict as products: an offer belongs to
+                        # exactly one catalog version but every import mints a new
+                        # one, so an unconditional insert made the second import of
+                        # any overlapping catalog fail outright.
+                        if offer.merchant_id != merchant_id:
+                            raise DomainError(
+                                f"Offer {offer_id} already belongs to another merchant.",
+                                code=ErrorCode.FORBIDDEN,
+                            )
+                        offer.catalog_version_id = catalog_version_id
+                        offer.product_id = prod_id
+                        offer.variant_id = o_data.get("variant_id")
+                        offer.status = o_data.get("status", "active")
+                        offer.unit_price_minor = price_minor
+                        offer.currency = o_data.get("currency", "INR")
+                        offer.delivery_days = delivery_days
+                        offer.return_period_days = return_period_days
+                        offer.pricing_source = pricing_source
+                        offer.offer_version = offer_version
+                        offer.expires_at = expires_at
 
                     # Held back rather than added here: `inventory.offer_id` is a
                     # foreign key onto the row above, and staging both together
                     # lets the flush order them inventory-first. Collected and
                     # added after one flush of the offers, so the cost is a single
                     # extra round trip rather than one per row.
-                    avail_qty = _safe_int(o_data.get("available_quantity"), 10)
-                    pending_inventory.append(
-                        Inventory(
-                            offer_id=offer_id,
-                            available_quantity=avail_qty,
-                            reserved_quantity=0,
-                            version=1,
+                    #
+                    # An offer that already exists keeps its inventory row and its
+                    # counters: the stock level is live commerce state, not
+                    # catalog metadata, and overwriting `reserved_quantity` on a
+                    # re-import would erase holds that buyers are mid-checkout on.
+                    existing_inventory = session.get(Inventory, offer_id)
+                    if existing_inventory is None:
+                        pending_inventory.append(
+                            Inventory(
+                                offer_id=offer_id,
+                                available_quantity=_safe_int(o_data.get("available_quantity"), 10),
+                                reserved_quantity=0,
+                                version=1,
+                            )
                         )
-                    )
+                    else:
+                        avail_qty = _safe_int(o_data.get("available_quantity"), 10)
+                        existing_inventory.version = (existing_inventory.version or 0) + 1
+                        # Only raise availability: a re-import must never take
+                        # stock away from what is already on offer.
+                        existing_inventory.available_quantity = max(
+                            existing_inventory.available_quantity or 0, avail_qty
+                        )
 
             session.flush()
             for inv in pending_inventory:

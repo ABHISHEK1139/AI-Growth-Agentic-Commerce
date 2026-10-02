@@ -9,7 +9,7 @@ Two properties matter more than the algorithm.
 
 **It fails open.** If Redis is unreachable the request is allowed and the
 degradation is logged. A rate limiter is a protective control, not a dependency of
-the payment path â€” taking checkout down because a cache is unavailable would be a
+the payment path — taking checkout down because a cache is unavailable would be a
 worse outage than the one being prevented. After a failure the backend stops
 trying for a short cooldown, so a Redis outage does not add its connect timeout to
 every request.
@@ -315,12 +315,40 @@ def actor_identity(request: Request) -> str:
     address is used. ``X-Forwarded-For`` is deliberately ignored: it is
     caller-controlled, and trusting it would let anyone reset their own counter by
     inventing a header.
+
+    The identity is tenant-qualified. ``subject`` alone is not globally unique —
+    two merchants can both have a ``buyer_1`` — and a shared bucket would let one
+    tenant's traffic throttle another's.
     """
-    actor_id = current_ids().actor_id
+    actor_id = current_ids().actor_id or _principal_actor_id(request)
     if actor_id:
         return f"actor:{actor_id}"
     client = request.client
     return f"ip:{client.host}" if client and client.host else "ip:unknown"
+
+
+def _principal_actor_id(request: Request) -> str | None:
+    """The authenticated principal's identity, or ``None`` if there is not one.
+
+    This middleware is the innermost layer, so it runs *before* any route
+    dependency has resolved a principal and ``current_ids().actor_id`` is always
+    empty — the per-actor isolation this module documents silently degraded to
+    per-IP. Reading the credential here is what makes the documented behaviour
+    real. Verification failures are swallowed and fall back to the address: a
+    malformed token is the authentication layer's problem to report, not this
+    layer's, and a rate limiter that 401s is a rate limiter that can be used to
+    probe.
+    """
+    cached = (request.scope.get("state") or {}).get("principal")
+    if cached is not None:
+        return f"{cached.merchant_id}:{cached.subject}"
+    try:
+        from apps.api.auth import resolve_principal
+
+        principal = resolve_principal(request)
+    except Exception:  # noqa: BLE001 - any failure here means "count by address"
+        return None
+    return f"{principal.merchant_id}:{principal.subject}" if principal else None
 
 
 def _bucket_key(rule: RateLimitRule, identity: str, method: str, path: str, now: float) -> str:

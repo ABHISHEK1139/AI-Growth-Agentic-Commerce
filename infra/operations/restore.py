@@ -26,6 +26,8 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from typing import IO
 
 #: Reuse the connection-variable resolver from the backup module so the
 #: two scripts agree on the environment.
@@ -77,10 +79,16 @@ def _existing_table_count(env: dict[str, str]) -> int:
         return -1
 
 
-def restore_snapshot(snapshot: os.PathLike[str] | str) -> int:
-    """Restore a gzipped ``pg_dump`` snapshot into the configured database."""
+def restore_snapshot(snapshot: os.PathLike[str] | str, *, allow_overwrite: bool = False) -> int:
+    """Restore a gzipped ``pg_dump`` snapshot into the configured database.
+
+    ``allow_overwrite`` is the ``--yes`` the operator passed to ``main``. Without
+    it a non-empty database is refused. It has to be threaded all the way down
+    here: an earlier version re-probed inside this function and returned the
+    refusal unconditionally, so ``--yes`` was accepted and then ignored.
+    """
     snap_path = os.fspath(snapshot)
-    if not os.path.isfile(snap_path):
+    if not Path(snap_path).is_file():
         raise FileNotFoundError(f"snapshot does not exist: {snap_path}")
     if not snap_path.endswith(".sql.gz") and not snap_path.endswith(".sql"):
         # Cheap validation so an obviously-wrong file is refused up front
@@ -102,7 +110,7 @@ def restore_snapshot(snapshot: os.PathLike[str] | str) -> int:
             "ensure the database exists and the connection variables are correct.",
             file=sys.stderr,
         )
-    elif existing > 0:
+    elif existing > 0 and not allow_overwrite:
         return 3  # caller will surface the refusal
     print(
         f"[restore] starting against {_redact_url(os.environ.get('DATABASE_URL', ''))} from {snap_path}",
@@ -119,11 +127,10 @@ def restore_snapshot(snapshot: os.PathLike[str] | str) -> int:
         "--set",
         "ON_ERROR_STOP=1",
     ]
-    with open(snap_path, "rb") as raw_fp:
-        if snap_path.endswith(".gz"):
-            sql_fp = gzip.GzipFile(fileobj=raw_fp, mode="rb")
-        else:
-            sql_fp = raw_fp  # type: ignore[assignment]
+    with Path(snap_path).open("rb") as raw_fp:
+        sql_fp: IO[bytes] = (
+            gzip.GzipFile(fileobj=raw_fp, mode="rb") if snap_path.endswith(".gz") else raw_fp
+        )
         proc = subprocess.Popen(
             cmd, env=env, stdin=sql_fp, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
@@ -158,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     try:
-        return restore_snapshot(args.snapshot)
+        return restore_snapshot(args.snapshot, allow_overwrite=args.yes)
     except (RuntimeError, FileNotFoundError, ValueError) as exc:
         print(f"[restore] FAILED: {exc}", file=sys.stderr)
         return 2

@@ -32,6 +32,9 @@ from packages.observability.logging import JsonFormatter, redact
 from packages.security.principals import Principal, Role, Scope
 from packages.security.tenancy import TenantScope
 from packages.security.tokens import (
+    TokenError,
+    TokenExpiredError,
+    TokenSignatureError,
     decode_signed_token,
     issue_access_token,
     principal_from_access_token,
@@ -232,14 +235,14 @@ def test_f3_b05_policy_blocked_rejects_all_events():
 def test_f4_b01_reserve_stock_zero_quantity():
     session = MagicMock()
     service = InventoryService()
-    with pytest.raises(Exception):
+    with pytest.raises(InventoryUnavailableError):
         service.reserve_stock(session, "off_1", "chk_zero", 0)
 
 
 def test_f4_b02_reserve_stock_negative_quantity():
     session = MagicMock()
     service = InventoryService()
-    with pytest.raises(Exception):
+    with pytest.raises(InventoryUnavailableError):
         service.reserve_stock(session, "off_1", "chk_neg", -3)
 
 
@@ -313,13 +316,13 @@ def test_f5_b05_money_rounding_half_even():
 # ==============================================================================
 def test_f6_b01_provider_zero_amount_order_handling():
     provider = FakePaymentProvider()
-    with pytest.raises(Exception):
+    with pytest.raises(DomainError):
         provider.create_order(amount_minor=0, currency="INR", receipt="rcpt_zero")
 
 
 def test_f6_b02_provider_negative_amount_rejected():
     provider = FakePaymentProvider()
-    with pytest.raises(Exception):
+    with pytest.raises(DomainError):
         provider.create_order(amount_minor=-500, currency="INR", receipt="rcpt_neg")
 
 
@@ -610,7 +613,7 @@ def test_f9_b05_dedup_stored_event_lookup():
 # ==============================================================================
 def test_f10_b01_idempotency_empty_key_rejected():
     session = MagicMock()
-    with pytest.raises(Exception):
+    with pytest.raises(DomainError):
         IdempotencyManager.acquire_lock(
             session,
             actor_type="buyer",
@@ -856,7 +859,7 @@ def test_f14_b01_token_expiry_boundary_expired_token_rejected():
         ttl_seconds=10,
         now=time.time() - 3600,  # Already expired
     )
-    with pytest.raises(Exception):
+    with pytest.raises(TokenExpiredError):
         principal_from_access_token(token.token, secret=secret)
 
 
@@ -872,7 +875,7 @@ def test_f14_b02_token_wrong_secret_signature_verification_failed():
         scopes=[Scope.CATALOG_READ],
         ttl_seconds=3600,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(TokenSignatureError):
         principal_from_access_token(token.token, secret=secret2)
 
 
@@ -900,8 +903,8 @@ def test_f14_b04_token_tampered_payload_rejected():
     )
     parts = token.token.split(".")
     tampered = f"{parts[0]}.eyJyZXF1ZXN0IjoiaGFjayJ9.{parts[2]}"
-    with pytest.raises(Exception):
-        decode_signed_token(tampered, secret)
+    with pytest.raises(TokenError):
+        decode_signed_token(tampered, secret=secret, expected_type="access")
 
 
 def test_f14_b05_platform_admin_has_platform_scopes():

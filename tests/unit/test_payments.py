@@ -949,12 +949,16 @@ def test_verify_payment_succeeds_with_valid_hmac_signature():
 
 KEY_ID_FIXTURE = "rzp_test_fixture_123"
 KEY_SECRET_FIXTURE = "secret_fixture_456"
+WEBHOOK_SECRET_FIXTURE = "webhook_secret_fixture_789"
 
 
 @pytest.fixture
 def rzp_provider() -> RazorpayPaymentProvider:
     return RazorpayPaymentProvider(
-        key_id=KEY_ID_FIXTURE, key_secret=KEY_SECRET_FIXTURE, timeout_seconds=5.0
+        key_id=KEY_ID_FIXTURE,
+        key_secret=KEY_SECRET_FIXTURE,
+        webhook_secret=WEBHOOK_SECRET_FIXTURE,
+        timeout_seconds=5.0,
     )
 
 
@@ -1074,9 +1078,9 @@ def test_razorpay_verify_signature(rzp_provider: RazorpayPaymentProvider) -> Non
     import hashlib
     import hmac
 
-    valid_sig = hmac.new(KEY_SECRET_FIXTURE.encode(), payload, hashlib.sha256).hexdigest()
+    webhook_sig = hmac.new(WEBHOOK_SECRET_FIXTURE.encode(), payload, hashlib.sha256).hexdigest()
 
-    assert rzp_provider.verify_signature(payload, valid_sig) is True
+    assert rzp_provider.verify_signature(payload, webhook_sig) is True
     assert rzp_provider.verify_signature(payload, "forged_sig") is False
 
 

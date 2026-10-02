@@ -85,7 +85,24 @@ _VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bgsk_[A-Za-z0-9_\-]{16,}"),  # Groq secret key
     re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{16,}", re.IGNORECASE),
     re.compile(r"\beyJ[A-Za-z0-9._\-]{20,}"),  # JWT
+    # Our own external-agent API key (see ``packages.security.apikeys``). It is
+    # the one live credential shape this process mints itself, and it was the
+    # one shape value detection did not know: ``"key"`` is not a sensitive key
+    # name, so `extra={"key": api_key}` printed the working credential in full.
+    re.compile(r"\bak_[A-Za-z0-9_\-]{20,}"),
 )
+
+#: Credentials embedded in a connection URL. Handled as its own pass rather than
+#: through ``_VALUE_PATTERNS`` because the replacement has to keep the username:
+#: only the password is secret, and ``user`` plus ``host`` plus ``database`` is
+#: what makes the line diagnosable ("wrong host", "wrong database") without ever
+#: writing the password down. This is the most common way a secret reaches a log,
+#: because a DSN looks like configuration rather than like a credential.
+#:
+#: The username is optional because a password-only DSN is the normal shape for
+#: Redis and every broker token: ``redis://:hunter2@cache:6379/0``. Requiring a
+#: username left exactly that form unmasked.
+_URL_CREDENTIALS: re.Pattern[str] = re.compile(r"(://[^/\s:@]*):([^/\s@]*)@", re.ASCII)
 
 #: Attributes the stdlib puts on every record; anything else is caller-supplied
 #: and belongs in the log line.
@@ -128,6 +145,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 def _scrub_value_shape(value: str) -> str:
+    value = _URL_CREDENTIALS.sub(rf"\1:{REDACTED}@", value)
     for pattern in _VALUE_PATTERNS:
         value = pattern.sub(REDACTED, value)
     return value

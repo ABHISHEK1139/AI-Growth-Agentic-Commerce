@@ -42,6 +42,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, Request, Response
+from sqlalchemy.orm import Session
 
 from apps.api.config import Settings, get_settings
 from packages.errors.exceptions import ForbiddenError, UnauthenticatedError
@@ -78,14 +79,43 @@ PrincipalDependency = Callable[[Request], Awaitable[Principal]]
 
 
 def install_auth(app: Any, settings: Settings) -> None:
-    """Attach the API client registry to the application.
+    """Attach the application state the authentication path needs.
 
-    In-memory for now, holding nothing. Task 9 owns the ``api_client`` table; the
-    exchange below depends only on :meth:`ApiClientRegistry.resolve`, so that swap
-    replaces one object on ``app.state`` and touches no authentication code.
+    Two things live here, and the first is now historical: the API client
+    registry used to be a process-lifetime object on ``app.state``, empty on
+    every boot, which meant every minted agent key died with the process and the
+    token exchange answered 401 for a key that was perfectly valid. The registry
+    is now rebuilt per request from ``api_client`` by
+    :func:`registry_for`, so it is no longer stored.
+
+    What remains is the connector registry rehydration, which has to happen once
+    at startup and is the difference between a merchant's Shopify connection
+    existing and not existing.
     """
-    del settings  # nothing configuration-dependent yet; kept for a stable signature
-    app.state.api_client_registry = ApiClientRegistry()
+    app.state.api_client_registry_loaded_from = "database"
+
+    try:
+        from apps.api.db import get_session_factory
+        from services.connectors import channels
+        from services.connectors.registry import GLOBAL_CONNECTOR_REGISTRY
+
+        factory = get_session_factory()
+        with factory() as session:
+            loaded = channels.rehydrate(GLOBAL_CONNECTOR_REGISTRY, session, settings.channel_key)
+        if loaded:
+            logger.info(
+                "channel connections rehydrated",
+                extra={"event": "CHANNELS_REHYDRATED", "count": loaded},
+            )
+    except Exception:
+        # A datastore that is not up yet must not stop the process from serving
+        # `/health` and reporting itself unhealthy. The registry stays empty, and
+        # the console's connection list -- which reads the database, not the
+        # registry -- is unaffected.
+        logger.warning(
+            "channel connections could not be rehydrated; the connector registry is empty",
+            exc_info=True,
+        )
 
 
 def settings_for(request: Request) -> Settings:
@@ -110,10 +140,32 @@ def settings_for(request: Request) -> Settings:
 AppSettings = Annotated[Settings, Depends(settings_for)]
 
 
-def registry_for(request: Request) -> ApiClientRegistry:
-    registry = getattr(request.app.state, "api_client_registry", None)
-    if not isinstance(registry, ApiClientRegistry):
-        raise RuntimeError("api client registry is not installed on the application")
+def registry_for(request: Request, db: Session) -> ApiClientRegistry:
+    """The API client registry for this request, loaded from ``api_client``.
+
+    Rebuilt per request rather than held on ``app.state``, which is the fix for a
+    bug this used to have: the state registry was populated once at boot and empty
+    on every start, so a merchant's agent keys authenticated until the process
+    recycled and then returned 401 -- indistinguishable from a wrong key.
+
+    The lookup is one indexed query. Revocation therefore takes effect on the
+    next exchange with no cache to expire, and the constant-time digest
+    comparison still happens in :class:`ApiClientRegistry`, which is pure logic
+    and keeps its timing properties testable without a database.
+    """
+    from services.connectors.api_clients import ApiClientRepository
+
+    del request  # the session is all that is needed; kept for a stable call shape
+    registry = ApiClientRegistry()
+    skipped = ApiClientRepository(db).load_into(registry)
+    if skipped:
+        # Logged, not raised. One unreadable row must cost that agent its key and
+        # nothing else, but a silently dropped credential is indistinguishable
+        # from a wrong one -- so the ids have to be visible.
+        logger.warning(
+            "api_client rows skipped: unrecognised role or invalid scope set",
+            extra={"event": "API_CLIENT_ROWS_SKIPPED", "client_ids": skipped},
+        )
     return registry
 
 

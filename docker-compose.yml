@@ -1,12 +1,56 @@
 # ---------------------------------------------------------------------------
 # AgentPay local development stack
 # ---------------------------------------------------------------------------
-# Exactly five services, per the addendum's hard infrastructure rule: api,
-# worker, web, postgres, redis. Nothing else is added until the golden path,
-# the external buyer, and the contract tests are complete.
+# Six services: postgres, redis, migrate, api, worker, web.
+#
+# `migrate` is a one-shot schema apply, not a long-running process. It is here
+# because without it nothing in the stack ran alembic: `docker compose up`
+# produced healthy-looking containers against a database with no tables, and the
+# first query failed. The other five depend on it with
+# `service_completed_successfully`, so the stack cannot report ready before the
+# schema is at head.
 # ---------------------------------------------------------------------------
 
 name: agentpay
+
+# Every Python service gets the same environment. Compose has no way to share one
+# block across services, so the anchor below is expanded (`*agentpay-environment`)
+# by each one that needs it.
+#
+# `ALLOW_LIVE_CREDENTIALS=1` is load-bearing, not a convenience. The settings
+# loader suppresses ambient environment values unless a process has opted in, so
+# without it `Settings.redis_url` falls back to its `redis://localhost:6379/0`
+# default. Inside a container `localhost` is the container itself, so /health/db
+# reported `redis: ConnectionError` while Redis sat healthy two services away, and
+# the rate limiter silently failed open.
+x-agentpay-environment: &agentpay-environment
+  APP_ENV: ${APP_ENV:-local}
+  ALLOW_LIVE_CREDENTIALS: ${ALLOW_LIVE_CREDENTIALS:-1}
+  # Read by the web tier's middleware, which verifies the session token's
+  # signature locally so the console gate does not have to ask the API on every
+  # navigation. It has to be the *same* value the API signs with, or every
+  # signature check fails and the console is unreachable.
+  #
+  # Server-only, so it is not `NEXT_PUBLIC_`-prefixed and never reaches the
+  # browser bundle. Mirrored to the web service below.
+  SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set for the console gate to work}
+  DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
+  # The discrete `DB_*` parts are overridden alongside DATABASE_URL, and have to
+  # be. The host-side `.env` describes the *host's* Postgres (`DB_HOST=localhost`)
+  # and `env_file` delivers it into every container, where `localhost` is the
+  # container itself. `DATABASE_URL` alone was not enough: the settings loader
+  # prefers the discrete parts whenever DATABASE_URL is absent, and `.env.example`
+  # ships it empty -- so the API connected to nothing, fell through to the SQLite
+  # fallback, and served an empty catalog while reporting itself healthy.
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USER: agentpay
+  DB_PASSWORD: agentpay
+  DB_NAME: agentpay
+  REDIS_URL: redis://redis:6379/0
+  # The compiled-in defaults are host-relative and never exist in the image.
+  AGENTPAY_RAW_DIR: /app/data/raw
+  AGENTPAY_OUT_DIR: /app/data/out
 
 services:
   postgres:
@@ -24,7 +68,7 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentpay -d agentpay"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 12
 
   redis:
@@ -40,22 +84,40 @@ services:
       timeout: 3s
       retries: 12
 
+  migrate:
+    # One-shot schema apply, described in the header.
+    #
+    # Shares the api image by name rather than re-declaring the same `build`
+    # block. Compose tags each `build` as its own image, so services built from
+    # one Dockerfile can end up on different builds: `api` was rebuilt with a
+    # dependency fix while `migrate` kept the previous layer, and alembic then
+    # failed with "Can't locate revision" for a migration the api image had and
+    # the migrate image did not. One image, one build.
+    image: agentpay-api:local
+    command: ["alembic", "-c", "infra/migrations/alembic.ini", "upgrade", "head"]
+    env_file:
+      - .env
+    environment: *agentpay-environment
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   api:
     build:
       context: .
       dockerfile: infra/docker/api.Dockerfile
+    # `migrate` runs this same image (see its comment). Tagging it explicitly is
+    # what keeps the two from silently diverging.
+    image: agentpay-api:local
     env_file:
       - .env
-    environment:
-      # Override the host-side URLs with in-network service names.
-      DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
-      REDIS_URL: redis://redis:6379/0
-      # Point the pipeline at the container mount below. The compiled-in
-      # default (../datasets) is host-relative and never exists in the image.
-      AGENTPAY_RAW_DIR: /app/data/raw
-      AGENTPAY_OUT_DIR: /app/data/out
+    environment: *agentpay-environment
     ports:
       - "8000:8000"
+    restart: unless-stopped
     volumes:
       # Bind-mounted for hot reload in development.
       - ./apps:/app/apps
@@ -71,6 +133,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/health').status_code==200 else 1)"]
       interval: 10s
@@ -84,11 +148,8 @@ services:
       dockerfile: infra/docker/worker.Dockerfile
     env_file:
       - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://agentpay:agentpay@postgres:5432/agentpay
-      REDIS_URL: redis://redis:6379/0
-      AGENTPAY_RAW_DIR: /app/data/raw
-      AGENTPAY_OUT_DIR: /app/data/out
+    environment: *agentpay-environment
+    restart: unless-stopped
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
@@ -100,6 +161,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   web:
     build:
@@ -109,11 +172,53 @@ services:
         # Baked into the client bundle at build time (see web.Dockerfile):
         # without this the app always builds in relative-proxy mode.
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        # Also baked, not runtime values: middleware runs on the Edge runtime and
+        # cannot read an un-inlined `process.env`, and Next evaluates rewrites at
+        # build time. The browser resolves the first, the server and the middleware
+        # the second, which is why they are not the same. The third makes the API the
+        # gateway for `/api/*`; with it set, the local demo fallback refuses to
+        # answer anything but health instead of mixing real and fabricated responses.
+        AGENTPAY_API_INTERNAL_URL: http://api:8000
+        BACKEND_URL: http://api:8000
     environment:
+      # Compiled into the client bundle, so the *browser* resolves it: from the
+      # developer's machine `localhost:8000` is the API.
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      # Read on the *server*. It is a different value on purpose - from inside this
+      # container `localhost` is the container itself, so reusing the browser's
+      # literal made the web tier's calls to the API fail. See `apiBase()` in
+      # src/lib/api.ts.
+      AGENTPAY_API_INTERNAL_URL: http://api:8000
+      # The console gate verifies the session token's HMAC locally (see
+      # `src/lib/sessionToken.ts`), so the web tier needs the same signing secret
+      # the API uses. A mismatch makes every signature check fail and the console
+      # unreachable -- which is why it is required rather than defaulted: a
+      # silently wrong value produces a redirect loop, not an error.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set for the console gate to work}
       NODE_ENV: production
+      # This stack is the demo, and it runs the in-process backend in
+      # `apps/web/src/app/api/[...path]/route.ts` on purpose: there is no BACKEND_URL,
+      # so that route answers every `/api/*` the browser sends relatively, out of a
+      # bundled seed catalog and the SQLite file mounted below.
+      #
+      # The route refuses to do that unless it is told to, because the same code path
+      # is reachable in a real deployment that merely forgot to set BACKEND_URL, where
+      # serving a fabricated catalog is far worse than failing. See
+      # `localBackendAllowed()` in that file. Stating the opt-in here is what makes
+      # this stack's choice explicit rather than accidental; a deployment that sets
+      # BACKEND_URL gets rewrites instead and never reaches the fallback.
+      ALLOW_LOCAL_BACKEND: "1"
     ports:
       - "3000:3000"
+    restart: unless-stopped
+    volumes:
+      # The web tier reads a SQLite catalog through `src/lib/serverDb.ts` and
+      # probes it at /health/db. The directory is mounted read-write because
+      # `getServerDb()` issues UPDATE statements and the schema is created on
+      # first open. Nothing seeds it: the app falls back to the committed seed
+      # catalog baked into the bundle, which is the same data
+      # `scripts/dev_bootstrap.py` loads locally.
+      - ./data/web:/app/data
     depends_on:
       api:
         condition: service_healthy

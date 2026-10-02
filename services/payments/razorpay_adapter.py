@@ -31,7 +31,12 @@ class RazorpayPaymentProvider:
         self.name = "razorpay"
         self.key_id = key_id
         self.key_secret = key_secret
-        self.webhook_secret = webhook_secret or key_secret
+        # Not `webhook_secret or key_secret`. Razorpay signs webhooks with a
+        # separate secret from the API key, and collapsing the two made every
+        # webhook signature verify against the API key — so a signature minted
+        # for a payment callback also satisfied the webhook endpoint. Left as
+        # None when unset, which makes webhook verification fail closed.
+        self.webhook_secret = webhook_secret or None
         self.timeout_seconds = timeout_seconds
 
     def _auth_header(self) -> dict[str, str]:
@@ -141,15 +146,25 @@ class RazorpayPaymentProvider:
             raise DomainError(f"Razorpay error: {exc}", code=ErrorCode.SERVICE_UNAVAILABLE) from exc
 
     def verify_signature(self, payload: bytes, signature: str) -> bool:
-        if self.webhook_secret:
-            expected = hmac.new(self.webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
-            if hmac.compare_digest(expected, signature):
-                return True
-        if self.key_secret:
-            expected = hmac.new(self.key_secret.encode(), payload, hashlib.sha256).hexdigest()
-            if hmac.compare_digest(expected, signature):
-                return True
-        return False
+        """Verify a webhook signature against the webhook secret only.
+
+        Deliberately does not fall back to the key secret. A webhook is signed
+        with a different value than a payment callback, so accepting either
+        would let a signature minted for one surface be replayed against the
+        other — which is the separation the two verification paths depend on.
+        No configured webhook secret means no verification, i.e. fail closed.
+        """
+        if not self.webhook_secret:
+            return False
+        expected = hmac.new(self.webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    def verify_payment_signature(self, payload: bytes, signature: str) -> bool:
+        """Verify a payment callback signature against the key secret only."""
+        if not self.key_secret:
+            return False
+        expected = hmac.new(self.key_secret.encode(), payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
 
     def refund(self, provider_payment_id: str, amount_minor: int) -> ProviderRefund:
         try:

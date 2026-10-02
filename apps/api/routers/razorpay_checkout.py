@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from apps.api.auth import AppSettings, require_scopes
 from apps.api.db import get_db
@@ -537,8 +538,7 @@ def get_razorpay_checkout_url(
 @router.post("/api/v1/payments/razorpay/webhook")
 async def razorpay_webhook(
     request: Request,
-    settings: AppSettings
-    | None = None,  # FastAPI injects via Annotated; None placeholder for Python
+    settings: AppSettings,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -550,12 +550,37 @@ async def razorpay_webhook(
     and deduplicated so duplicate deliveries are safe.
 
     The webhook secret is configured via ``RAZORPAY_WEBHOOK_SECRET``.
+
+    **Why ``settings: AppSettings`` must stay exactly as written.** ``AppSettings`` is
+    ``Annotated[Settings, Depends(settings_for)]``, so the annotation *is* the
+    injection and the parameter correctly carries no default.
+
+    It was previously declared ``settings: AppSettings | None = None``. Widening with
+    ``| None`` and supplying a default made FastAPI read the parameter as an optional
+    value with no declared dependency: ``settings_for`` was dropped from the route's
+    dependency list and ``None`` was passed here instead. Because the parameter had a
+    default, nothing failed at import or startup -- the route registered cleanly, then
+    raised ``Settings not configured`` (500) on every delivery, permanently. No test
+    posted to this path, so the endpoint was dead while the suite stayed green.
+
+    It is declared before ``session`` so it needs no default, rather than taking a
+    ``None`` placeholder that could mask a missing dependency again.
+
+    **Why the processing is dispatched to a thread.** This handler is ``async def``,
+    so FastAPI runs it on the event loop rather than the threadpool, but every step
+    below is synchronous: HMAC verify, a SHA-256 over the body, a ``SELECT`` to
+    deduplicate, an ``INSERT``, and the payment state transitions with their commits.
+    On the loop, a burst of provider callbacks stalls all other in-flight requests --
+    including storefront browsing -- for the duration. Razorpay retries callbacks on
+    failure and delivers them in bursts, so that is the case that actually occurs.
+
+    The body read stays on the loop's side of the split because it is genuinely async
+    and HMAC needs the exact bytes sent, never a re-serialised model. Everything after
+    it has no await point, so it goes to the threadpool.
     """
     # This endpoint is called by Razorpay's servers, not by a logged-in browser,
     # so it intentionally has no `current_principal` dependency. The HMAC on the
     # raw body is the authentication mechanism.
-    if settings is None:
-        raise DomainError("Settings not configured.", code=ErrorCode.INTERNAL_ERROR)
 
     # Read raw body as bytes (required for deterministic HMAC verification)
     body_bytes = await request.body()
@@ -570,7 +595,9 @@ async def razorpay_webhook(
     processor = WebhookProcessor(provider_config=prov_cfg)
 
     try:
-        result = processor.process_webhook(
+        # Off the event loop: see the docstring above.
+        result = await run_in_threadpool(
+            processor.process_webhook,
             session=session,
             raw_body=body_bytes,
             signature=razorpay_signature,

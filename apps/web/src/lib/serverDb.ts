@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { resolveBrand } from "@/catalog/present";
 import { defaultImageForCategory } from "@/catalog/adapt";
+import { CATALOG_SCHEMA_SQL } from "@/lib/catalogSchema";
 
 let _db: DatabaseSync | null = null;
 
@@ -20,12 +21,43 @@ function resolveDatabasePath(): string {
       return candidate;
     }
   }
-  return path.resolve(process.cwd(), "agentpay.db");
+  return path.resolve(process.cwd(), "data/local_dev.db");
+}
+
+/**
+ * Create the file if it is missing and give it the schema.
+ *
+ * A container has no reason to already have this database: `.dockerignore`
+ * excludes `*.db`, because a database copied in at build time is a stale
+ * database, and a stale one is harder to notice than an absent one. So the web
+ * tier creates its own, which is what a fresh checkout has always had to do too.
+ *
+ * The result is empty. That is deliberate and not a degraded mode: the read paths
+ * here fall back to the committed seed catalog baked into the bundle, which is
+ * the same data `scripts/dev_bootstrap.py` loads for a developer. The file exists
+ * so that `/health/db` can probe a real handle and so that anything this tier
+ * does write - a payment row, an audit event - has somewhere to go.
+ */
+function ensureDatabaseFile(dbPath: string): void {
+  const directory = path.dirname(dbPath);
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  if (fs.existsSync(dbPath)) {
+    return;
+  }
+  const created = new DatabaseSync(dbPath);
+  try {
+    created.exec(CATALOG_SCHEMA_SQL);
+  } finally {
+    created.close();
+  }
 }
 
 export function getServerDb(): DatabaseSync {
   if (!_db) {
     const dbPath = resolveDatabasePath();
+    ensureDatabaseFile(dbPath);
     _db = new DatabaseSync(dbPath);
     _db.exec("PRAGMA foreign_keys = OFF;");
     try {
@@ -692,6 +724,7 @@ export function saveCheckout(checkout: {
   total_minor?: number;
   currency?: string;
   price_hash?: string;
+  line_items?: Array<{ offer_id: string; quantity: number; unit_price_minor: number }>;
 }): any {
   const db = getServerDb();
   const now = new Date().toISOString();
@@ -730,6 +763,17 @@ export function saveCheckout(checkout: {
     new Date(Date.now() + 900000).toISOString(),
     now
   );
+
+  // The bag itself. Written after the parent row so the reader never sees line
+  // items for a checkout that does not exist.
+  if (checkout.line_items && checkout.line_items.length > 0) {
+    try {
+      saveCheckoutItems(checkout.checkout_id, checkout.line_items);
+    } catch {
+      // A database without a checkout_item table still serves the total, which
+      // is the figure that matters for payment.
+    }
+  }
 
   return {
     checkout_id: checkout.checkout_id,
@@ -824,6 +868,70 @@ export function getAuthorizationById(authId: string): any | null {
   };
 }
 
+/**
+ * Replace a checkout's line items.
+ *
+ * `POST /api/v1/checkout` accepts a full `items` list, so a checkout can hold
+ * more than one line — but only the primary offer reaches the `checkout` row.
+ * Without the per-line rows, every reader has to reconstruct the bag from the
+ * total, and `total / unit_price` is meaningless the moment there are two lines
+ * with different prices. `checkout_item` already exists with the right columns,
+ * so the lines are written rather than guessed at read time.
+ */
+export function saveCheckoutItems(
+  checkoutId: string,
+  lines: Array<{ offer_id: string; quantity: number; unit_price_minor: number }>
+): void {
+  if (lines.length === 0) return;
+  const db = getServerDb();
+  // Replace, not append: the delete has to come *before* the inserts. Done the
+  // other way round it removes the rows just written for this same checkout_id
+  // and every read falls back to the derived quantity.
+  db.prepare("DELETE FROM checkout_item WHERE checkout_id = ?").run(checkoutId);
+  const insertStmt = db.prepare(`
+    INSERT INTO checkout_item (checkout_item_id, checkout_id, offer_id, quantity, unit_price_minor, total_minor)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  for (const line of lines) {
+    const qty = Math.max(1, Math.trunc(line.quantity) || 1);
+    const unit = Math.max(0, Math.trunc(line.unit_price_minor) || 0);
+    insertStmt.run(
+      `cki_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+      checkoutId,
+      line.offer_id,
+      qty,
+      unit,
+      unit * qty
+    );
+  }
+}
+
+/** A checkout's line items, or an empty array when none were recorded. */
+export function getCheckoutItems(
+  checkoutId: string
+): Array<{ offer_id: string; quantity: number; unit_price_minor: number; total_minor: number }> {
+  try {
+    const db = getServerDb();
+    const rows = db
+      .prepare(
+        `SELECT offer_id, quantity, unit_price_minor, total_minor
+           FROM checkout_item
+          WHERE checkout_id = ?
+          ORDER BY checkout_item_id`
+      )
+      .all(checkoutId) as any[];
+    return rows.map((r) => ({
+      offer_id: r.offer_id,
+      quantity: Number(r.quantity) || 0,
+      unit_price_minor: Number(r.unit_price_minor) || 0,
+      total_minor: Number(r.total_minor) || 0,
+    }));
+  } catch {
+    // No checkout_item table (an un-migrated database). Callers fall back.
+    return [];
+  }
+}
+
 export function getCheckoutById(checkoutId: string): any | null {
   const db = getServerDb();
   const cleanId = (checkoutId || "").trim();
@@ -854,7 +962,19 @@ export function getCheckoutById(checkoutId: string): any | null {
     // Offer row gone; totals below still stand on their own.
   }
   const total = r.total_minor || 0;
-  const quantity = unitPrice > 0 && total > 0 ? Math.max(1, Math.round(total / unitPrice)) : 1;
+
+  // Prefer the recorded lines. `total / unit_price` is only the right answer for
+  // a single-line checkout: with two lines at different prices it reports a
+  // quantity that belongs to neither, and the UI then shows "Qty 3" for a
+  // two-item bag. The fallback exists for checkouts written before the line
+  // rows existed.
+  const lines = getCheckoutItems(r.checkout_id);
+  const quantity =
+    lines.length > 0
+      ? lines.reduce((acc, l) => acc + l.quantity, 0)
+      : unitPrice > 0 && total > 0
+        ? Math.max(1, Math.round(total / unitPrice))
+        : 1;
 
   return {
     schema_version: "1.0",
@@ -875,6 +995,10 @@ export function getCheckoutById(checkoutId: string): any | null {
       total_minor: total,
       currency: r.currency || "INR",
     },
+    // The authoritative bag. `pricing.unit_price_minor` / `pricing.quantity`
+    // above describe the primary line only; `total_minor` is the figure the
+    // payment path charges.
+    line_items: lines,
     price_hash: r.price_hash,
     price_snapshot: priceSnapshot,
     expires_at: r.expires_at,

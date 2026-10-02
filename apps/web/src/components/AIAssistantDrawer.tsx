@@ -103,6 +103,13 @@ export function AIAssistantDrawer() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * A `customPrompt` is merged into the context and is *not* cleared when the
+   * drawer closes, so without this guard every reopen re-fired the same
+   * question and appended a duplicate user turn to the transcript.
+   */
+  const consumedCustomPromptRef = useRef<string | null>(null);
+
   // Initialize context when opened
   useEffect(() => {
     if (!isAiDrawerOpen) return;
@@ -111,9 +118,11 @@ export function AIAssistantDrawer() {
       setActiveProductsInView([aiDrawerContext.product]);
     }
 
-    if (aiDrawerContext.customPrompt) {
-      handleUserSubmit(aiDrawerContext.customPrompt);
-    } else if (messages.length === 0) {
+    const customPrompt = aiDrawerContext.customPrompt;
+    if (customPrompt && consumedCustomPromptRef.current !== customPrompt) {
+      consumedCustomPromptRef.current = customPrompt;
+      handleUserSubmit(customPrompt);
+    } else if (!customPrompt && messages.length === 0) {
       if (aiDrawerContext.pageType === "product" && aiDrawerContext.product) {
         setMessages([
           {

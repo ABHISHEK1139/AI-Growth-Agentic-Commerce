@@ -1,0 +1,49 @@
+# Load-test overlay: `docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d api`
+#
+# WHAT THIS IS FOR
+# ----------------
+# Measures the API's aggregate capacity. It disables exactly one control and nothing
+# else, because that control makes aggregate measurement impossible from a single
+# harness.
+#
+# WHY THE RATE LIMITER HAS TO COME OFF
+# ------------------------------------
+# `apps/api/middleware/ratelimit.py` counts requests per *authenticated actor*
+# (`actor_identity`), not per address, so one minted session owns one bucket. The
+# declared ceiling for `GET /api/v1/catalog/*` is 60/min -- one catalogue read per
+# second, per client.
+#
+# That is a reasonable per-client control and it is not the thing being measured. But it
+# means a load harness presenting a single session cannot exceed 1 catalogue req/s, so
+# every "capacity" number it produced would have been the rate limiter's ceiling
+# wearing the API's clothes. With the limiter on, a 30 req/s run achieved 7 req/s with
+# 5.4% 429s and a p95 of 30ms -- latency that looks excellent and throughput that is
+# fiction.
+#
+# THE REAL FINDING, WHICH IS *NOT* DISABLED
+# ------------------------------------------
+# Those per-client ceilings are themselves a capacity constraint, and they are recorded
+# in docs/production/READINESS_PLAN.md rather than treated as noise:
+#
+#   20,000 concurrent agents x 10 tool calls per run x ~1 run/minute
+#     = ~200,000 req/min fleet-wide
+#   per-client ceiling on catalogue reads = 60/min
+#   -> each agent can issue at most 1 catalogue read per second
+#
+# Ten tool calls inside one 60-second window is inside that budget, so a *well-behaved*
+# agent is fine. An agent that bursts -- retrying after a timeout, or a client-side
+# retry storm from a buyer who double-clicks -- exhausts its 60/min immediately and gets
+# 429s on the retry. Whether that is acceptable is a product decision, not a
+# performance one, and it is flagged rather than decided here.
+#
+# WHAT THIS DOES NOT DISABLE
+# --------------------------
+# Authentication stays on: every request still carries and verifies a signed session.
+# Signature verification stays on. The security headers stay on. This overlay changes one
+# boolean.
+
+services:
+  api:
+    environment:
+      # Named so the run log states plainly which configuration produced the numbers.
+      RATE_LIMIT_ENABLED: "false"

@@ -61,7 +61,18 @@ class PaymentProvider(Protocol):
 
     def fetch_order(self, provider_order_id: str) -> ProviderOrder: ...
 
-    def verify_signature(self, payload: bytes, signature: str) -> bool: ...
+    def verify_signature(self, payload: bytes, signature: str) -> bool:
+        """Verify a *webhook* signature (raw request body)."""
+        ...
+
+    def verify_payment_signature(self, payload: bytes, signature: str) -> bool:
+        """Verify a *payment callback* signature (``order_id|payment_id``).
+
+        Separate from :meth:`verify_signature` on purpose: the two surfaces are
+        signed with different provider secrets, so a signature that verifies on
+        one must not be accepted on the other.
+        """
+        ...
 
     def refund(self, provider_payment_id: str, amount_minor: int) -> ProviderRefund: ...
 
@@ -168,6 +179,9 @@ class FakePaymentProvider:
             return False
         expected = hmac.new(self.secret.encode(), payload, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
+
+    def verify_payment_signature(self, payload: bytes, signature: str) -> bool:
+        return self.verify_signature(payload, signature)
 
     def refund(self, provider_payment_id: str, amount_minor: int) -> ProviderRefund:
         refund_id = f"rfnd_fake_{new_id('prfnd')}"

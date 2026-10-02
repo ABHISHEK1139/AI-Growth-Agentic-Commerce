@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
-from apps.api.config import Settings, is_loopback_url
+from apps.api.config import LIVE_OPT_IN_VAR, Settings, get_settings, is_loopback_url
 
 
 def test_defaults_require_no_credentials() -> None:
@@ -158,6 +160,7 @@ class TestStartupGuard:
             app_env="demo",
             jwt_secret="a-real-secret",
             session_secret="another-real-secret",
+            channel_encryption_key="a-real-channel-key",
             model_provider="openai_compatible",
             model_base_url=base_url,
             model_name="qwen3.5:4b",
@@ -206,6 +209,7 @@ class TestStartupGuard:
             app_env="demo",
             jwt_secret="a-real-secret",
             session_secret="another-real-secret",
+            channel_encryption_key="a-real-channel-key",
             payment_provider="razorpay",
             razorpay_key_id="rzp_test_abc",
             razorpay_key_secret="secret",
@@ -216,6 +220,299 @@ class TestStartupGuard:
             model_api_key="test-key-not-a-real-credential",
             cors_allow_origins="https://agentpay.example.com",
         ).validate_for_env()  # must not raise
+
+    def test_the_placeholder_channel_key_is_refused_outside_local(self) -> None:
+        """Channel access tokens would be encrypted with a key in this repository.
+
+        The other placeholder secrets are refused for the same reason, and the
+        failure is at startup rather than at the first store sync, because by then
+        a merchant has already entered real Shopify credentials.
+        """
+        with pytest.raises(ValueError, match="CHANNEL_ENCRYPTION_KEY"):
+            Settings(
+                app_env="staging",
+                jwt_secret="real",
+                session_secret="real",
+                payment_provider="fake",
+                model_provider="mock",
+            ).validate_for_env()
+
+
+class TestDatastoreResolution:
+    """The DSN assembled from the discrete `DB_*` parts.
+
+    `DATABASE_URL` was the only datastore setting before this, so an operator
+    following their provider's documentation -- host, user, password, database
+    name -- had to hand-assemble a URL, and a password containing `@` or `/`
+    silently truncated it.
+    """
+
+    def test_discrete_parts_compose_a_dsn(self) -> None:
+        settings = Settings(
+            database_url=None,
+            db_driver="postgresql+psycopg",
+            db_host="db.internal",
+            db_port=6543,
+            db_user="agentpay",
+            db_password="s3cret",
+            db_name="commerce",
+        )
+
+        assert (
+            settings.resolved_database_url
+            == "postgresql+psycopg://agentpay:s3cret@db.internal:6543/commerce"
+        )
+        assert settings.is_sqlite_url is False
+
+    def test_an_explicit_database_url_wins(self) -> None:
+        """A deployment that already sets a DSN must be unaffected by the new parts."""
+        settings = Settings(
+            database_url="sqlite:///./data/local_dev.db",
+            db_host="ignored.example.com",
+            db_password="ignored",
+        )
+
+        assert settings.resolved_database_url == "sqlite:///./data/local_dev.db"
+        assert settings.is_sqlite_url is True
+
+    def test_a_password_with_url_metacharacters_is_encoded(self) -> None:
+        """A managed provider password containing `@` or `/` truncates a raw DSN.
+
+        Interpolated unencoded, `p@ss/word` makes the parser read part of it as
+        the host and the rest as credentials -- a connection failure that looks
+        like a wrong-password error.
+        """
+        settings = Settings(
+            database_url=None,
+            db_host="db.example.com",
+            db_user="u",
+            db_password="p@ss/word?#x",
+            db_name="d",
+        )
+
+        url = settings.resolved_database_url
+        assert "p%40ss%2Fword%3F%23x" in url
+        assert url.endswith("@db.example.com:5432/d")
+
+
+class TestDatastoreSafety:
+    """The SQLite fallback, which is the most dangerous line of configuration here.
+
+    `apps.api.db` falls back to a local file when Postgres is unreachable so a
+    laptop still boots. A deployment that hits that path appears to start
+    normally and then serves an empty catalog while losing every write.
+    """
+
+    def test_a_non_local_deployment_refuses_to_fall_back(self) -> None:
+        settings = Settings(
+            app_env="staging",
+            database_url="postgresql+psycopg://agentpay:agentpay@db:5432/agentpay",
+            db_password="",
+        )
+
+        with pytest.raises(ValueError, match="DB_PASSWORD"):
+            settings.validate_datastore_for_env()
+
+    def test_a_configured_password_does_not_buy_the_fallback(self) -> None:
+        """The regression that shipped: a set ``DB_PASSWORD`` used to permit the fallback.
+
+        The original check raised only when the password was *empty*, reasoning that a
+        deployment reaching for the fallback probably had not finished configuring
+        itself. Docker Compose sets ``DB_PASSWORD``, so the guard never fired there.
+
+        It then fired for real during load testing: Docker Desktop restarted, the API
+        process started before PostgreSQL was accepting connections, and the engine
+        fell back to SQLite. The service reported **healthy** while serving an empty
+        catalogue with every write going to a local file. Nothing caught it except a
+        seeded fixture suddenly returning 404s.
+
+        Whether the password is set says nothing about whether an empty local database
+        is acceptable. This asserts that.
+        """
+        settings = Settings(
+            app_env="staging",
+            database_url="postgresql+psycopg://agentpay:agentpay@db:5432/agentpay",
+            db_password="agentpay",
+            allow_sqlite_fallback=False,
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            settings.validate_datastore_for_env()
+
+        message = str(excinfo.value)
+        assert "staging" in message, "the error must name the environment"
+        assert "DB_HOST" in message, "the error must name the variables to set"
+        assert (
+            "ALLOW_SQLITE_FALLBACK" in message
+        ), "the error must name the one variable that does permit this"
+
+    def test_every_non_local_environment_refuses(self) -> None:
+        """The guard is "not local", not "staging".
+
+        ``AppEnv`` is ``local | staging | demo``, so ``demo`` is a second non-local
+        value that has to be covered. Asserting only staging would leave a gap for
+        whatever environment is added next.
+        """
+        for app_env in ("staging", "demo"):
+            settings = Settings(
+                app_env=app_env,  # type: ignore[arg-type]
+                database_url="postgresql+psycopg://agentpay:secret@db:5432/agentpay",
+                db_password="secret",
+            )
+            with pytest.raises(ValueError, match=app_env):
+                settings.validate_datastore_for_env()
+
+    def test_the_error_says_what_would_have_been_lost(self) -> None:
+        """The message has to say what the operator is about to lose.
+
+        "Connection failed" invites a retry. Naming the consequence -- an apparently
+        healthy service serving an empty catalogue -- is what makes this a decision
+        rather than something to work around.
+        """
+        settings = Settings(
+            app_env="staging",
+            database_url="postgresql+psycopg://agentpay:pw@db:5432/agentpay",
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            settings.validate_datastore_for_env()
+
+        message = str(excinfo.value).lower()
+        assert "empty catalog" in message
+        assert "losing every write" in message
+
+    def test_an_explicit_sqlite_url_is_allowed_anywhere(self) -> None:
+        """Choosing SQLite on purpose is a valid deployment, unlike falling back to it."""
+        settings = Settings(app_env="staging", database_url="sqlite:///./data/local_dev.db")
+
+        settings.validate_datastore_for_env()  # must not raise
+
+    def test_the_fallback_can_be_opted_into_explicitly(self) -> None:
+        settings = Settings(
+            app_env="staging",
+            database_url="postgresql+psycopg://agentpay:agentpay@db:5432/agentpay",
+            db_password="agentpay",
+            allow_sqlite_fallback=True,
+        )
+
+        settings.validate_datastore_for_env()  # must not raise
+
+    def test_local_may_fall_back(self) -> None:
+        settings = Settings(
+            app_env="local",
+            database_url="postgresql+psycopg://agentpay:agentpay@localhost:5432/agentpay",
+        )
+
+        settings.validate_datastore_for_env()  # must not raise
+
+    def test_an_empty_password_is_reported_by_name(self) -> None:
+        """The message has to name the variable, not just fail.
+
+        An operator reading a startup traceback should not have to know that the
+        password is the third field of a DSN to act on it.
+        """
+        settings = Settings(
+            app_env="staging",
+            database_url="postgresql+psycopg://agentpay:@db:5432/agentpay",
+            db_password="",
+        )
+
+        with pytest.raises(ValueError, match="DB_PASSWORD"):
+            settings.validate_datastore_for_env()
+
+
+@pytest.mark.parametrize("declared", ["staging", "demo"])
+def test_a_declared_non_local_environment_cannot_start_without_the_opt_in(
+    declared: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment that says it is staging must not silently boot as local.
+
+    Without the credential opt-in the whole environment is discarded, so a real
+    deployment's ``APP_ENV=staging`` and ``DATABASE_URL`` used to vanish: the
+    process started as ``local`` (which also switched off ``Secure`` on the
+    session cookie and made ``validate_for_env`` return before checking
+    anything) against the built-in localhost database. Refusing to start is the
+    only safe answer.
+    """
+    monkeypatch.delenv(LIVE_OPT_IN_VAR, raising=False)
+    monkeypatch.setenv("APP_ENV", declared)
+
+    with pytest.raises(ValueError, match=LIVE_OPT_IN_VAR):
+        Settings()
+
+
+def test_a_local_declaration_still_boots_without_the_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The opt-in exists to stop ambient credentials leaking in, not to stop a
+    clean clone from running offline."""
+    monkeypatch.delenv(LIVE_OPT_IN_VAR, raising=False)
+    monkeypatch.setenv("APP_ENV", "local")
+
+    settings = Settings()
+
+    assert settings.app_env == "local"
+    assert settings.payment_provider == "fake"
+    assert settings.session_cookie_secure is False
+
+
+def test_the_opt_in_reinstates_the_full_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the opt-in set, ambient configuration is read again — including
+    ``APP_ENV`` itself, which is what makes the previous test's guard necessary."""
+    monkeypatch.setenv(LIVE_OPT_IN_VAR, "1")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@db.internal:5432/shop")
+
+    settings = Settings()
+
+    assert settings.app_env == "staging"
+    assert settings.database_url == "postgresql+psycopg://u:p@db.internal:5432/shop"
+    assert settings.session_cookie_secure is True
+
+
+def test_init_arguments_beat_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit construction is how the test suite injects settings, and it has
+    to keep working regardless of what the ambient environment happens to say."""
+    monkeypatch.delenv(LIVE_OPT_IN_VAR, raising=False)
+    monkeypatch.setenv("APP_ENV", "staging")
+
+    with pytest.raises(ValueError):
+        # Even an explicit app_env cannot bypass the guard: the environment said
+        # staging and no credential opt-in was given.
+        Settings(app_env="local")
+
+    monkeypatch.setenv(LIVE_OPT_IN_VAR, "1")
+    assert Settings(app_env="local").app_env == "local"
+
+
+def test_the_singleton_does_not_leak_between_opt_in_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`get_settings` is `lru_cache`d, and these tests move the very variable
+    that decides which fields it reads.
+
+    A test that sets the opt-in and reads the singleton leaves it cached with
+    environment-derived values, and every later test in the session then sees
+    those instead of its own defaults. It surfaced as unrelated failures
+    elsewhere in the suite -- placeholder-secret checks and loopback exemptions
+    that passed in isolation and failed in a full run. Each test that moves the
+    opt-in therefore clears the cache on the way in *and* on the way out.
+    """
+    monkeypatch.setenv(LIVE_OPT_IN_VAR, "1")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().app_env == os.environ.get("APP_ENV", "local")
+    finally:
+        get_settings.cache_clear()
+
+    monkeypatch.setenv(LIVE_OPT_IN_VAR, "0")
+    get_settings.cache_clear()
+    assert get_settings().app_env == "local", "a leaked cache entry outlived the opt-in"
+
+
+def test_the_opt_in_variable_is_the_documented_one() -> None:
+    """Guards against the name drifting away from what .env.example documents."""
+    assert LIVE_OPT_IN_VAR == "ALLOW_LIVE_CREDENTIALS"
 
 
 class TestLoopbackDetection:

@@ -196,7 +196,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
-  // Automatic browser session bootstrap so console & search APIs authenticate cleanly
+  // Demo session bootstrap for local development. `bootstrapSession` asks the
+  // backend whether the no-credential path is enabled, does nothing when it is
+  // not, and refuses to replace a session that already exists -- so a merchant
+  // admin who signed in is not silently downgraded to a buyer by loading a
+  // storefront page. Without that last guard, opening any public page after
+  // signing in revoked the console session behind the operator's back.
   useEffect(() => {
     bootstrapSession();
   }, []);

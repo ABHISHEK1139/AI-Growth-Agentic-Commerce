@@ -486,7 +486,12 @@ export function hoursAgoInstant(hours: number, now: number = Date.now()): string
 }
 
 /** Timestamps arrive as the database rendered them; add a local reading. */
-export function localTimestamp(raw: string): string | null {
+export function localTimestamp(raw: string | null | undefined): string | null {
+  // Defensive on the type, not just the value: every caller reaches this from a
+  // record it did not construct, and `raw.endsWith(...)` on a missing field
+  // throws inside a `.map`, which takes the whole page to the error boundary
+  // rather than rendering one blank cell.
+  if (typeof raw !== "string" || raw.length === 0) return null;
   const parsed = new Date(raw.endsWith("Z") || raw.indexOf("+") >= 0 ? raw : `${raw}Z`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from apps.api.auth import AppSettings, current_principal, require_scopes
+from apps.api.auth import AppSettings, current_principal, optional_principal, require_scopes
 from apps.api.commerce import get_commerce_facade
 from apps.api.db import get_db
 from apps.api.envelope import success
@@ -20,12 +21,29 @@ from services.agent.model import ModelProvider, get_model_provider
 from services.agent.tools import ALLOWLISTED_TOOLS, validate_tool_arguments
 from services.authorization.service import AuthorizationService
 from services.checkout.service import CheckoutService
+from services.offers.constraints import CATALOG_CURRENCY, OfferConstraints
 from services.offers.models import Offer
 from services.offers.service import OfferService
 from services.orders.service import OrderService
 from services.payments.service import PaymentService
 
+#: Ceiling on the agent-readable feed. It is a discovery document, not a bulk
+#: export: an agent that wants more should narrow by category or price, which the
+#: catalog search endpoint is for.
+AGENT_CATALOG_FEED_LIMIT = 100
+
+#: The wire protocols this feed claims to speak. Kept as a constant because it is a
+#: promise about the shape of the document, and a promise that drifts into a literal
+#: in a response body cannot be asserted on.
+AGENT_CATALOG_PROTOCOL = "ACP/1.0 & NPCI-UAP/2026"
+
+DEFAULT_FEED_BRAND = "AgentPay Select"
+AVAILABILITY_IN_STOCK = "InStock"
+AVAILABILITY_OUT_OF_STOCK = "OutOfStock"
+
 __all__ = [
+    "AGENT_CATALOG_FEED_LIMIT",
+    "AGENT_CATALOG_PROTOCOL",
     "ALLOWLISTED_TOOLS",
     "TOOL_REQUIRED_SCOPES",
     "AgentAuthorizationRequest",
@@ -226,6 +244,89 @@ def agent_converse(
     )
 
 
+@router.get("/catalog")
+def agent_catalog_feed(
+    settings: AppSettings,
+    principal: Principal | None = Depends(optional_principal),
+) -> dict[str, Any]:
+    """The agent-readable product feed.
+
+    A `schema.org` `DataFeed` over the published catalog, so an external agent can
+    discover what is buyable without a bespoke client for this API. It is served
+    from the gateway rather than only from the web tier because the gateway is the
+    only component that knows the published catalog: when the web tier answers
+    `/api/*` itself, the endpoint does not exist and an agent protocol that
+    vanishes in the deployed stack is worse than one that is advertised.
+
+    Returned at the top level, not in the standard envelope. A `DataFeed` is a
+    schema.org document, and a consumer parsing it as JSON-LD would have to know
+    this API's envelope to find the feed at all. The one field an agent needs and
+    the rest of the API disagrees on - `count` - is present alongside it.
+
+    The ceiling is the value the gateway actually enforces
+    (`max_transaction_amount_minor`), not a number invented here, because an agent
+    told it may spend up to X must not be able to find that X refused at checkout.
+    """
+    from apps.api.catalog_source import search_catalog
+
+    merchant_id = (principal.merchant_id if principal else None) or settings.default_merchant_id
+    ceiling = settings.max_transaction_amount_minor
+
+    outcome = search_catalog(
+        merchant_id=merchant_id,
+        constraints=OfferConstraints(limit=AGENT_CATALOG_FEED_LIMIT),
+    )
+
+    items: list[dict[str, Any]] = []
+    for candidate in outcome.candidates:
+        offer = candidate.offer
+        available = int(offer.available_quantity)
+        items.append(
+            {
+                "@type": "Product",
+                "product_id": offer.product_id,
+                "sku": offer.offer_id,
+                "name": candidate.title,
+                "brand": candidate.specifications.get("brand") or DEFAULT_FEED_BRAND,
+                "category": candidate.category_id,
+                "image_url": candidate.image_url,
+                "offers": {
+                    "@type": "Offer",
+                    "offer_id": offer.offer_id,
+                    "price_minor": offer.unit_price_minor,
+                    "currency": offer.currency,
+                    "availability": AVAILABILITY_IN_STOCK
+                    if available > 0
+                    else AVAILABILITY_OUT_OF_STOCK,
+                    "stock": available,
+                    "delivery_days": offer.delivery_days,
+                    "return_period_days": offer.return_period_days,
+                },
+                "agentic_contract": {
+                    "autonomous_checkout_allowed": offer.unit_price_minor <= ceiling,
+                    "bounding_ceiling_minor": ceiling,
+                    "spec_summary": candidate.title,
+                    "technical_specs": candidate.specifications,
+                },
+            }
+        )
+
+    return {
+        "@context": "https://schema.org/",
+        "@type": "DataFeed",
+        "title": "Agentic Commerce Real-Time Product Catalog",
+        "protocol": AGENT_CATALOG_PROTOCOL,
+        "updated_at": datetime.now(UTC).isoformat(),
+        "merchant": {
+            "merchant_id": merchant_id,
+            "currency": CATALOG_CURRENCY,
+            "policy_ceiling_minor": ceiling,
+        },
+        "count": len(items),
+        "items": items,
+    }
+
+
 @router.post("/search")
 @router.post("/offers/query")
 def agent_search(
@@ -341,10 +442,26 @@ def agent_get_payment(
     principal: PaymentAgent,
     session: DatabaseSession,
 ) -> dict[str, Any]:
-    """Agent surface for checking payment status."""
+    """Agent surface for checking payment status.
+
+    Ownership is part of the lookup, not just the tenant: without the
+    ``buyer_id`` filter any buyer token in this merchant could read another
+    buyer's payment — amounts, provider ids, and the checkout and authorization
+    they were raised against. Another buyer's payment is answered NOT_FOUND,
+    exactly as an identifier that never existed is.
+    """
+    if principal.buyer_id is None:
+        from packages.errors.exceptions import DomainError
+        from packages.errors.registry import ErrorCode
+
+        raise DomainError("Buyer ID required for payment lookup", code=ErrorCode.FORBIDDEN)
+
     service = PaymentService()
     payment = service.get_payment_by_id(
-        session, payment_id=payment_id, merchant_id=principal.merchant_id
+        session,
+        payment_id=payment_id,
+        merchant_id=principal.merchant_id,
+        buyer_id=principal.buyer_id,
     )
     return success({"payment": payment.model_dump(mode="json")})
 

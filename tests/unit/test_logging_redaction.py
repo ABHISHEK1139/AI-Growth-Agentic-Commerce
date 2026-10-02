@@ -81,6 +81,46 @@ class TestRedactByValueShape:
         assert "rzp_test_A1b2C3d4E5" not in scrubbed
         assert scrubbed.startswith("created order with key ")
 
+    @pytest.mark.parametrize(
+        ("url", "password"),
+        [
+            ("postgresql+psycopg://agentpay:hunter2@localhost:5432/agentpay", "hunter2"),
+            ("postgresql://u:s3cr3t+p%40ss@db.internal:5432/shop", "s3cr3t+p%40ss"),
+            # Password-only DSN: the normal shape for Redis and every broker
+            # token. A matcher that required a username left exactly this
+            # project's own REDIS_URL unmasked.
+            ("redis://:supersecretpw@cache.internal:6379/0", "supersecretpw"),
+            ("amqp://guest:rabbitpw@mq.internal:5672/", "rabbitpw"),
+        ],
+    )
+    def test_a_connection_url_password_is_masked(self, url: str, password: str) -> None:
+        """A DSN looks like configuration, so it is the easiest secret to log by
+        accident: the datastore's own startup warning printed the full
+        PostgreSQL URL, password included."""
+        scrubbed = redact({"dsn": url})["dsn"]
+
+        assert password not in scrubbed
+        assert REDACTED in scrubbed
+
+    def test_a_connection_url_keeps_what_makes_it_diagnosable(self) -> None:
+        """Masking the whole authority would leave "unreachable at ***", which
+        cannot tell an operator whether the host or the database name is wrong."""
+        scrubbed = redact({"dsn": "postgresql://agentpay:hunter2@db.internal:5432/shop"})["dsn"]
+
+        assert scrubbed == "postgresql://agentpay:***REDACTED***@db.internal:5432/shop"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "sqlite:///./agentpay.db",  # no authority at all
+            "no credentials here at all",
+            "a:b@c without a scheme",  # must not match without `://`
+            "path http://host//x/y",  # a doubled slash is not credentials
+        ],
+    )
+    def test_urls_without_credentials_are_left_alone(self, value: str) -> None:
+        assert REDACTED not in redact({"dsn": value})["dsn"]
+
 
 class TestRedactStructures:
     def test_nested_structures_are_traversed(self) -> None:

@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { ALL_PRODUCTS, ProductItem } from "@/data/products";
 import { SEED_CATALOG_PRODUCTS } from "@/data/seedCatalog";
+import { buildCapabilityDocument } from "@/lib/capabilityDocument";
+import {
+  applyMerchantRulesPatch,
+  getMerchantRules,
+  merchantRulesView,
+  MAX_TRANSACTION_CEILING_MINOR,
+} from "@/lib/merchantRules";
 import {
   searchCatalog as searchDbCatalog,
   getProductById as getDbProductById,
@@ -68,12 +75,117 @@ function signSimPayment(orderId: string, paymentId: string): string {
 }
 
 /**
+ * True only when the deployment has deliberately opted into signature-free
+ * operation. Set AGENTPAY_ALLOW_UNSIGNED_PAYMENTS=1 (never in production) to
+ * let a keyless install record test-mode payments without a provider secret.
+ */
+function unsignedPaymentsAllowed(): boolean {
+  return (
+    process.env.AGENTPAY_ALLOW_UNSIGNED_PAYMENTS === "1" &&
+    process.env.NODE_ENV !== "production"
+  );
+}
+
+/**
+ * Simulated payments mint a server-side signature and are therefore only a
+ * payment if the secret behind that signature is not public knowledge.
+ *
+ * `simSigningSecret` falls back to a literal that is published in this
+ * repository, so on any deployment that can reach the provider — or in
+ * production at all — a `pay_sim_*` id signed with that literal would be a free
+ * confirmed order for anyone who reads the source. Simulated payments are
+ * therefore refused outright there, and the caller's own key is required for
+ * them everywhere else.
+ */
+function simulatedPaymentsAllowed(): boolean {
+  if (process.env.NODE_ENV === "production" && process.env.AGENTPAY_ALLOW_SIM_PAYMENTS !== "1") {
+    return false;
+  }
+  if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Whether this route may serve anything at all.
+ *
+ * Why the gate exists
+ * ------------------
+ * `apps/web/src/app/api/[...path]/route.ts` is a complete in-process backend: it
+ * answers catalog, checkout, payment, and agent-tool requests from a bundled seed
+ * catalog and a `node:sqlite` file (`src/lib/serverDb.ts`). `next.config.js` only
+ * rewrites `/api/*` to the real gateway when `BACKEND_URL` is set, so with that
+ * variable unset this route *is* the API — in any environment, including a
+ * production one that simply forgot to set a variable.
+ *
+ * The failure mode that matters is quiet. A storefront answers 200, the catalog looks
+ * populated from seed data, checkout "succeeds", and every write lands in a local file
+ * that no one reads. Nothing in the UI says "you are talking to a demo". That is worse
+ * than an outage, because it is an outage nobody notices.
+ *
+ * The rule
+ * --------
+ * Serve only when a real backend is configured, or when the operator has explicitly
+ * opted in with `ALLOW_LOCAL_BACKEND=1`. `NODE_ENV=production` alone is not enough to
+ * assume the fallback is wanted — an operator running a production build locally for a
+ * demo is a legitimate case, and it is exactly the case the opt-in exists for. What is
+ * not legitimate is reaching this code with neither.
+ *
+ * `ALLOW_LOCAL_BACKEND=1` is ignored when a `BACKEND_URL` is present, because then the
+ * rewrites send these requests upstream and this route is only a last resort — one that
+ * should never quietly answer instead of erroring.
+ *
+ * Health is exempt
+ * ----------------
+ * `/v1/health` answers either way. A probe that 503s tells an operator nothing about
+ * *why* the service is down; a health response that reports the backend as unconfigured
+ * tells them exactly that, and keeps container orchestration working while they fix it.
+ *
+ * Not exported: Next.js type-checks route modules against a fixed set of HTTP handler
+ * names and rejects any other export. The gate is exercised through the handlers, which
+ * is the only place its behaviour is observable anyway.
+ */
+function localBackendAllowed(): boolean {
+  if (process.env.BACKEND_URL) {
+    // A real gateway is configured. Rewrites handle the traffic; if one somehow
+    // reaches here it is a misconfiguration and must not be papered over.
+    return false;
+  }
+  return process.env.ALLOW_LOCAL_BACKEND === "1";
+}
+
+/**
+ * Paths that stay reachable when the fallback is disabled.
+ *
+ * Health only. Everything else returns 503, because a partial fallback that still
+ * serves the catalog would produce exactly the mixed state this gate exists to prevent:
+ * some requests real, some requests fabricated.
+ */
+function isExemptWhenLocalBackendDisabled(pathStr: string): boolean {
+  return pathStr === "v1/health" || pathStr === "health";
+}
+
+function localBackendDisabledResponse(pathStr: string): NextResponse {
+  return errorEnvelope(
+    "LOCAL_BACKEND_DISABLED",
+    "The in-process demo backend is disabled because BACKEND_URL is not set. " +
+      "Set BACKEND_URL to point at the AgentPay API, or set ALLOW_LOCAL_BACKEND=1 to " +
+      "deliberately run without a gateway.",
+    503,
+    { path: pathStr }
+  );
+}
+
+/**
  * Verify a presented Razorpay signature, fail-closed.
  *
- * - Simulated `pay_sim_*` payments are verified against the sim secret.
- * - Live payments are verified against RAZORPAY_KEY_SECRET when configured.
- * - When no secret is configured (pure offline demo), non-sim payments are
- *   accepted but recorded as test_mode so the audit trail stays honest.
+ * - Simulated `pay_sim_*` payments are verified against the sim secret, and are
+ *   refused outright when {@link simulatedPaymentsAllowed} is false.
+ * - Live payments are verified against RAZORPAY_KEY_SECRET.
+ * - With no secret configured a live payment is *refused*, not accepted. The
+ *   previous behaviour returned ok and marked the payment test_mode, so a
+ *   production deploy that lost its key secret accepted any signature at all.
  */
 function verifyPaymentSignature(
   orderId: string,
@@ -85,19 +197,36 @@ function verifyPaymentSignature(
   }
   const presented = Buffer.from(signature);
   if (paymentId.startsWith("pay_sim_")) {
+    if (!simulatedPaymentsAllowed()) {
+      return {
+        ok: false,
+        code: "FORBIDDEN",
+        message: "Simulated payments are disabled on this deployment.",
+      };
+    }
     const expected = Buffer.from(signSimPayment(orderId, paymentId));
     if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
       return { ok: false, code: "WEBHOOK_SIGNATURE_INVALID", message: "The payment signature did not verify." };
     }
     return { ok: true };
   }
-  if (process.env.RAZORPAY_KEY_SECRET) {
-    const expected = Buffer.from(
-      crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(`${orderId}|${paymentId}`).digest("hex")
-    );
-    if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
-      return { ok: false, code: "WEBHOOK_SIGNATURE_INVALID", message: "The payment signature did not verify." };
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret) {
+    if (unsignedPaymentsAllowed()) {
+      return { ok: true };
     }
+    return {
+      ok: false,
+      code: "SERVICE_UNAVAILABLE",
+      message:
+        "The payment signing secret is not configured on this deployment, so no live payment can be verified.",
+    };
+  }
+  const expected = Buffer.from(
+    crypto.createHmac("sha256", keySecret).update(`${orderId}|${paymentId}`).digest("hex")
+  );
+  if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
+    return { ok: false, code: "WEBHOOK_SIGNATURE_INVALID", message: "The payment signature did not verify." };
   }
   return { ok: true };
 }
@@ -112,6 +241,120 @@ function findProduct(idOrOffer: string) {  const clean = (idOrOffer || "").trim(
       (clean.startsWith("off_") && (p.id === clean.replace("off_", "prd_") || p.id === clean.replace("off_", ""))) ||
       (clean.startsWith("prd_") && (p.offerId === clean.replace("prd_", "off_") || p.id === clean))
   );
+}
+
+/**
+ * A verification callback is delivered at least once, and a shopper who
+ * double-clicks "Pay" produces two. Without a replay guard each delivery minted
+ * a *new* confirmed order for one captured payment. Returns the already-issued
+ * result when this payment id has been verified before, so the second delivery
+ * is a no-op rather than a second fulfilment.
+ */
+function replayedVerification(paymentId: string): NextResponse | null {
+  if (!paymentId) return null;
+  const existing = getDbPaymentById(paymentId);
+  if (!existing) return null;
+  if (existing.status !== "verified" && existing.status !== "paid" && existing.status !== "captured") {
+    return errorEnvelope(
+      "CONFLICT",
+      "That payment is already recorded and is not in a verified state.",
+      409,
+      { payment_id: paymentId, status: existing.status }
+    );
+  }
+  const dbOrders = listDbOrders(200, 0).orders;
+  const order = dbOrders.find((o: any) => o.payment_id === paymentId);
+  return NextResponse.json({
+    ok: true,
+    request_id: `req_${Date.now().toString(36)}`,
+    data: {
+      verified: true,
+      replayed: true,
+      order_id: existing.provider_order_id,
+      payment_id: paymentId,
+      confirmed_order_id: order?.order_id || null,
+      status: "paid",
+      amount_minor: existing.amount_minor,
+      currency: existing.currency,
+    },
+    verified: true,
+    order_id: existing.provider_order_id,
+    payment_id: paymentId,
+    confirmed_order_id: order?.order_id || null,
+    amount_minor: existing.amount_minor,
+    status: "paid",
+  });
+}
+
+/**
+ * Read a line item's unit price out of the catalog. The DB offer price wins;
+ * the in-memory catalog is the offline fallback. Returns null when nothing
+ * prices the id, so callers can refuse instead of freezing a number the
+ * request supplied.
+ */
+function resolveOfferUnitPrice(
+  idOrOffer: string
+): { offerId: string; productId: string; unitPriceMinor: number } | null {
+  const clean = (idOrOffer || "").trim();
+  if (!clean) return null;
+  const bare = clean.startsWith("off_") ? clean.replace("off_", "") : clean;
+
+  const dbOffer = getDbOfferById(clean) || getDbOfferById(bare);
+  if (dbOffer && typeof dbOffer.unit_price_minor === "number" && dbOffer.unit_price_minor > 0) {
+    return {
+      offerId: dbOffer.offer_id || clean,
+      productId: dbOffer.product_id || bare,
+      unitPriceMinor: dbOffer.unit_price_minor,
+    };
+  }
+
+  const product = findProduct(clean);
+  if (product && typeof product.priceMinor === "number" && product.priceMinor > 0) {
+    return {
+      offerId: product.offerId || clean,
+      productId: product.id,
+      unitPriceMinor: product.priceMinor,
+    };
+  }
+  return null;
+}
+
+/**
+ * The amount a payment may record.
+ *
+ * The client posts its own cart total, and an earlier version of this shim
+ * recorded that number verbatim (or a hardcoded 4999900 when none was sent),
+ * which let a caller freeze a checkout and then have a ₹1 "paid" order written
+ * against it. The frozen checkout is the authoritative record, so whenever a
+ * `checkout_id` is supplied it must resolve and its total wins outright — an
+ * unresolvable id is refused rather than quietly replaced by the request's own
+ * number, which is the same hole with an extra step. With no `checkout_id` at
+ * all an explicit positive amount is required; there is no default.
+ */
+function authoritativeAmountMinor(
+  checkoutId: unknown,
+  requestedMinor: unknown
+): { ok: true; amountMinor: number; currency: string } | { ok: false; message: string } {
+  if (typeof checkoutId === "string" && checkoutId.trim()) {
+    const checkout = getDbCheckoutById(checkoutId.trim());
+    const frozen = checkout?.pricing?.total_minor;
+    if (typeof frozen === "number" && Number.isFinite(frozen) && frozen > 0) {
+      return {
+        ok: true,
+        amountMinor: Math.round(frozen),
+        currency: checkout?.pricing?.currency || "INR",
+      };
+    }
+    return { ok: false, message: `No frozen total is recorded for checkout '${checkoutId.trim()}'.` };
+  }
+  const requested = typeof requestedMinor === "number" ? requestedMinor : Number(requestedMinor);
+  if (Number.isInteger(requested) && requested > 0) {
+    return { ok: true, amountMinor: requested, currency: "INR" };
+  }
+  return {
+    ok: false,
+    message: "A checkout_id with a frozen total, or a positive integer amount_minor, is required.",
+  };
 }
 
 /**
@@ -417,6 +660,49 @@ function searchAndRankProducts(
 
 // In-memory runtime state
 const storedOrders: any[] = [];
+
+/**
+ * One audit event in the same shape as the rows `saveAuditEvent` writes.
+ *
+ * The in-memory stream and the database stream are merged and rendered by the
+ * same consumers, so an event has to look like a ledger row from both. An
+ * earlier version of this shim appended `{event_id, timestamp, action, actor,
+ * details}`, which has no `created_at`, `event_type` or `aggregate_*`; the
+ * merchant console then read `created_at` off one of those rows, called
+ * `.endsWith` on `undefined`, and the whole page fell over to the client-side
+ * error boundary as soon as a checkout had been created. Filling the same
+ * fields everywhere is the fix — there is no second event format.
+ */
+function canonicalAuditEvent(fields: {
+  event_type: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  actor_type: string;
+  actor_id?: string | null;
+  amount_minor?: number;
+  metadata?: Record<string, unknown>;
+}) {
+  return {
+    event_id: `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    request_id: `req_${Date.now().toString(36)}`,
+    trace_id: `trc_${Date.now().toString(36)}`,
+    agent_run_id: null,
+    actor_type: fields.actor_type,
+    actor_id: fields.actor_id ?? null,
+    event_type: fields.event_type,
+    aggregate_type: fields.aggregate_type,
+    aggregate_id: fields.aggregate_id,
+    input_hash: null,
+    decision: "allow",
+    reason_code: null,
+    policy_version: "pol_v2_agentic_commerce",
+    model_version: null,
+    amount_minor: fields.amount_minor ?? null,
+    metadata: fields.metadata ?? {},
+    created_at: new Date().toISOString(),
+  };
+}
+
 const auditEvents: any[] = [
   {
     event_id: "evt_aud_001",
@@ -738,16 +1024,54 @@ const campaigns: any[] = [
   },
 ];
 
-let merchantRules = {
-  auto_approve_limit_minor: 10000000,
-  max_transaction_ceiling_minor: 7000000,
-  allowed_categories: ["laptops", "phones", "audio", "monitors", "keyboards", "accessories"],
-  require_two_factor_for_large_purchases: true,
-  max_discount_bps: 1500,
-  ap2_autonomous_enabled: true,
-  uap_protocol_enabled: true,
-  acp_manifest_active: true,
-};
+/** Upstream inference budget for the AI-backed search/research endpoints. */
+const GROQ_TIMEOUT_MS = 20000;
+
+/**
+ * The ceiling published to agents in the catalog feed.
+ *
+ * Read through one function so the feed, the capability document and the
+ * merchant console can never disagree about it: a feed that advertised a wider
+ * ceiling than the policy engine enforces is how an agent concludes it may
+ * autonomously buy something the gateway will then refuse.
+ */
+function publishedCeiling(): number {
+  const ceiling = getMerchantRules().max_transaction_ceiling_minor;
+  return Math.min(ceiling, MAX_TRANSACTION_CEILING_MINOR);
+}
+
+/**
+ * Resolve the post-payment return target.
+ *
+ * `return_url` arrives from an unauthenticated request body / query string and
+ * the payment signature is appended to it below, so an unchecked value turns
+ * this endpoint into an open redirect that also hands the signed payment
+ * callback to an attacker's host. Only a same-origin absolute URL or a
+ * root-relative path is honoured; anything else falls back to the local return
+ * page.
+ */
+function resolveReturnUrl(raw: unknown, requestOrigin: string): { url: string; rejected: boolean } {
+  const fallback = "/checkout/razorpay-return?status=";
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { url: fallback, rejected: false };
+  }
+  const candidate = raw.trim();
+  try {
+    if (candidate.startsWith("/") && !candidate.startsWith("//")) {
+      return { url: candidate, rejected: false };
+    }
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { url: fallback, rejected: true };
+    }
+    if (requestOrigin && parsed.origin !== requestOrigin) {
+      return { url: fallback, rejected: true };
+    }
+    return { url: candidate, rejected: false };
+  } catch {
+    return { url: fallback, rejected: true };
+  }
+}
 
 async function buildRazorpayCheckoutUrl(params: {
   amount: number;
@@ -755,11 +1079,26 @@ async function buildRazorpayCheckoutUrl(params: {
   checkoutId: string;
   returnUrl: string;
   receipt: string;
+  requestOrigin: string;
 }) {
-  const { amount, currency, checkoutId, returnUrl, receipt } = params;
+  const { amount, currency, checkoutId, receipt, requestOrigin } = params;
   const keyId = (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").trim();
 
-  const orderId = await createRazorpayOrderRemote(amount, currency, receipt);
+  const { url: returnUrl, rejected: returnUrlRejected } = resolveReturnUrl(params.returnUrl, requestOrigin);
+  if (returnUrlRejected) {
+    return errorEnvelope(
+      "VALIDATION_ERROR",
+      "return_url must be a root-relative path or an absolute URL on this origin.",
+      400
+    );
+  }
+
+  let orderId: string;
+  try {
+    orderId = await createRazorpayOrderRemote(amount, currency, receipt);
+  } catch (e: any) {
+    return errorEnvelope("PROVIDER_ERROR", e?.message || "The payment provider could not create an order.", 502);
+  }
   const mockPaymentId = `pay_sim_${Date.now().toString(36)}`;
   const mockSig = signSimPayment(orderId, mockPaymentId);
 
@@ -779,7 +1118,8 @@ async function buildRazorpayCheckoutUrl(params: {
   });
 }
 
-async function createRazorpayOrderRemote(amountMinor: number, currency = "INR", receipt = "") {  const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+async function createRazorpayOrderRemote(amountMinor: number, currency = "INR", receipt = "") {
+  const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (keyId && keySecret) {
@@ -799,16 +1139,26 @@ async function createRazorpayOrderRemote(amountMinor: number, currency = "INR", 
             source: "agentpay_web",
           },
         }),
+        // A hung Razorpay would otherwise hold this route handler open with no
+        // timeout, leaving the shopper on a spinner.
+        signal: AbortSignal.timeout(10000),
       });
       if (res.ok) {
         const json = await res.json();
-        return json.id;
+        if (json?.id) return json.id;
       }
+      // Provider keys are configured, so this is a live order. Returning a
+      // fabricated `order_...` id here would hand the client an id Razorpay has
+      // never heard of and let the checkout modal open against nothing.
+      console.warn(`Razorpay order creation failed with HTTP ${res.status}; refusing to fake an order id.`);
+      throw new Error(`Razorpay order creation failed (HTTP ${res.status}).`);
     } catch (e) {
-      console.warn("Razorpay API call error, falling back to simulated order:", e);
+      console.warn("Razorpay API call error, refusing to fake an order id:", e);
+      throw new Error("Razorpay could not be reached to create the order.");
     }
   }
 
+  // No provider keys configured: the offline demo path.
   return `order_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
@@ -816,74 +1166,31 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
   const pathStr = (params.path || []).join("/");
   const url = new URL(req.url);
 
+  // Refuse to fabricate a successful response when no real gateway is configured.
+  // Health stays reachable so an operator can see *why*; see localBackendAllowed().
+  if (!localBackendAllowed() && !isExemptWhenLocalBackendDisabled(pathStr)) {
+    return localBackendDisabledResponse(pathStr);
+  }
+
   // GET /api/v1/health
   if (pathStr === "v1/health") {
     return envelope({
       status: "healthy",
+      // Surfaced so a misconfigured deployment is diagnosable from a probe response
+      // rather than only from this file's comments.
+      local_backend: process.env.BACKEND_URL ? "upstream" : "in_process",
       has_model_api_key: Boolean(process.env.MODEL_API_KEY),
       has_razorpay_key: Boolean(process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID),
     });
   }
 
-  // GET /api/v1/capability, /api/v1/agent/capability, /.well-known/agent-capability.json
-  if (
-    pathStr === "v1/capability" ||
-    pathStr === "v1/agent/capability" ||
-    pathStr === ".well-known/agent-capability.json"
-  ) {
-    return NextResponse.json({
-      schema_version: "1.0",
-      authentication: {
-        method: "api_key_exchange",
-        token_endpoint: "/v1/auth/token",
-        scopes: ["catalog:read", "checkout:write", "payment:write"],
-      },
-      capabilities: [
-        "catalog_search",
-        "offer_query",
-        "checkout",
-        "authorization",
-        "payment",
-        "payment_status",
-        "order_lookup",
-      ],
-      limits: {
-        max_results: 50,
-        max_quantity: 10,
-        max_transaction_minor: 7000000,
-        auto_approval_limit_minor: 5000000,
-        currency: "INR",
-      },
-      endpoints: {
-        search: "/v1/catalog/search",
-        offers_query: "/v1/catalog/offers",
-        checkout: "/v1/checkout",
-        authorization: "/v1/authorizations",
-        payment: "/v1/payments",
-        payment_status: "/v1/payments/{payment_id}",
-        order: "/v1/orders/{order_id}",
-      },
-      policy: {
-        policy_version: "1.0",
-        allowed_categories: [
-          "laptop",
-          "smartphone",
-          "audio",
-          "camera",
-          "monitor",
-          "computer_accessory",
-          "phone_accessory",
-          "home_electronics",
-          "appliance",
-        ],
-        blocked_categories: ["weapons", "tobacco", "adult"],
-        explicit_approval_required: true,
-      },
-      payment_provider: "razorpay",
-      test_mode: true,
-      external_protocol_certification: "none",
-      protocol_notice: "APCP/1.0 - Razorpay Agentic Autonomous Commerce Protocol",
-    });
+  // GET /api/v1/capability, /api/v1/agent/capability
+  // (/.well-known/agent-capability.json is served by its own route handler,
+  // because it is not under /api/* and so never reaches this fallback. Both
+  // call the same builder, which is the point: the discovery document and the
+  // API document have to be the same document.)
+  if (pathStr === "v1/capability" || pathStr === "v1/agent/capability") {
+    return NextResponse.json(buildCapabilityDocument(getMerchantRules()));
   }
 
   // GET /api/v1/catalog/products/:id
@@ -922,6 +1229,7 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
       checkoutId: url.searchParams.get("checkout_id") || `chk_${Date.now().toString(36)}`,
       returnUrl: url.searchParams.get("return_url") || "",
       receipt: url.searchParams.get("receipt") || `rcpt_${Date.now()}`,
+      requestOrigin: url.origin,
     });
   }
 
@@ -936,24 +1244,10 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     if (memOrder) {
       return envelope({ order: memOrder });
     }
-    // Fallback order for test mode transactions
-    return envelope({
-      order: {
-        schema_version: "1.0",
-        order_id: orderId,
-        order_number: `ORD-${orderId.slice(-6)}`,
-        checkout_id: `chk_${orderId.replace("ord_", "")}`,
-        payment_id: `pay_${orderId.replace("ord_", "")}`,
-        buyer_id: "buy_shopper_demo",
-        merchant_id: "merchant_demo",
-        amount_minor: 4999900,
-        total_minor: 4999900,
-        currency: "INR",
-        status: "confirmed",
-        confirmed_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      },
-    });
+    // An unknown id is an unknown order. This used to synthesise a "confirmed"
+    // 4999900-minor order for any id at all, which made every mistyped or
+    // replayed link look like a settled payment.
+    return errorEnvelope("NOT_FOUND", "The requested order does not exist.", 404);
   }
 
   // GET /api/v1/orders
@@ -986,24 +1280,9 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     if (dbPayment) {
       return envelope({ payment: dbPayment });
     }
-    // Resilient fallback for newly authorized payments
-    return envelope({
-      payment: {
-        schema_version: "1.0",
-        payment_id: paymentId,
-        checkout_id: `chk_${paymentId.replace("pay_", "")}`,
-        authorization_id: `ath_${paymentId.replace("pay_", "")}`,
-        provider: "razorpay",
-        provider_order_id: `order_${paymentId.replace("pay_", "")}`,
-        provider_payment_id: paymentId,
-        public_key: null,
-        amount_minor: 4999900,
-        currency: "INR",
-        status: "verified",
-        test_mode: true,
-        created_at: new Date().toISOString(),
-      },
-    });
+    // Same reasoning as orders: an id with no stored payment must not read back
+    // as a verified 4999900-minor charge.
+    return errorEnvelope("NOT_FOUND", "The requested payment does not exist.", 404);
   }
 
   // GET /api/v1/recommendations/metrics — same shape as the live gateway
@@ -1094,8 +1373,8 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
             return_period_days: o.return_period_days || 10,
           },
           agentic_contract: {
-            autonomous_checkout_allowed: o.unit_price_minor <= (merchantRules.max_transaction_ceiling_minor || 7000000),
-            bounding_ceiling_minor: merchantRules.max_transaction_ceiling_minor || 7000000,
+            autonomous_checkout_allowed: o.unit_price_minor <= publishedCeiling(),
+            bounding_ceiling_minor: publishedCeiling(),
             spec_summary: o.title,
             technical_specs: o.specifications || {},
           },
@@ -1126,8 +1405,8 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
           return_period_days: p.returnDays || 14,
         },
         agentic_contract: {
-          autonomous_checkout_allowed: p.priceMinor <= (merchantRules.max_transaction_ceiling_minor || 7000000),
-          bounding_ceiling_minor: merchantRules.max_transaction_ceiling_minor || 7000000,
+          autonomous_checkout_allowed: p.priceMinor <= publishedCeiling(),
+          bounding_ceiling_minor: publishedCeiling(),
           spec_summary: p.shortSpecs,
           why_fits_summary: p.whyFitsYou?.summary || "",
           technical_specs: p.specsGrouped?.performance || {},
@@ -1147,7 +1426,7 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
         name: "AgentPay Flagship Store",
         currency: "INR",
         payment_rails: ["Razorpay Test Mode", "UPI", "AP2"],
-        policy_ceiling_minor: merchantRules.max_transaction_ceiling_minor || 7000000,
+        policy_ceiling_minor: publishedCeiling(),
       },
       count: items.length,
       items,
@@ -1156,7 +1435,7 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
 
   // GET /api/v1/merchant/rules
   if (pathStr === "v1/merchant/rules") {
-    return envelope({ rules: merchantRules });
+    return envelope({ rules: merchantRulesView() });
   }
 
   // GET /api/v1/audit/aggregates/:type/:id
@@ -1174,233 +1453,20 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
       );
     }
 
+    // An aggregate with no recorded events does not exist. Synthesising a
+    // plausible trail here would write invented POLICY_EVALUATED and
+    // ORDER_CONFIRMED rows into a surface the merchant reads as the
+    // append-only ledger, so the honest answer is 404.
     if (events.length === 0) {
-      // Synthesize realistic causal audit trail
-      const now = Date.now();
-      const inputHash = crypto.createHash("sha256").update(aggId).digest("hex");
-
-      if (aggType === "checkout" || aggId.startsWith("chk_")) {
-        events = [
-          {
-            event_id: `evt_chk_init_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: "agent_runner_alpha",
-            actor_type: "buyer",
-            actor_id: "buy_shopper_demo",
-            event_type: "CHECKOUT_CREATED",
-            aggregate_type: "checkout",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "CHECKOUT_INITIALIZED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", items_count: 1, flow: "standard_gated_checkout" },
-            created_at: new Date(now - 120000).toISOString(),
-          },
-          {
-            event_id: `evt_chk_freeze_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: "agent_runner_alpha",
-            actor_type: "system",
-            actor_id: "pricing_guardrail",
-            event_type: "PRICE_FROZEN",
-            aggregate_type: "checkout",
-            aggregate_id: aggId,
-            input_hash: `sha256:${crypto.createHash("sha256").update(inputHash).digest("hex")}`,
-            decision: "allow",
-            reason_code: "PRICE_GUARANTEE_LOCKED_15M",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", ttl_seconds: 900, nonce: aggId },
-            created_at: new Date(now - 110000).toISOString(),
-          },
-          {
-            event_id: `evt_chk_policy_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: "agent_runner_alpha",
-            actor_type: "policy_engine",
-            actor_id: "policy_guardrail",
-            event_type: "POLICY_EVALUATED",
-            aggregate_type: "checkout",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "BOUNDED_CEILING_CHECK_PASSED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: "gemini-2.5-flash",
-            amount_minor: 4999900,
-            metadata: { currency: "INR", ceiling_limit_minor: 7000000, autonomous_approved: true },
-            created_at: new Date(now - 90000).toISOString(),
-          },
-          {
-            event_id: `evt_chk_auth_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: "agent_runner_alpha",
-            actor_type: "policy_engine",
-            actor_id: "ap2_mandate_service",
-            event_type: "AUTHORIZATION_GRANTED",
-            aggregate_type: "checkout",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "AP2_MANDATE_VERIFIED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", rails: "razorpay_test_mode" },
-            created_at: new Date(now - 60000).toISOString(),
-          },
-          {
-            event_id: `evt_chk_complete_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "merchant_admin",
-            actor_id: "order_fulfillment",
-            event_type: "ORDER_CONFIRMED",
-            aggregate_type: "checkout",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "ORDER_LOCKED_STOCK_ALLOCATED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", status: "confirmed" },
-            created_at: new Date(now - 30000).toISOString(),
-          },
-        ];
-      } else if (aggType === "order" || aggId.startsWith("ord_")) {
-        events = [
-          {
-            event_id: `evt_ord_init_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "system",
-            actor_id: "order_gateway",
-            event_type: "ORDER_CREATED",
-            aggregate_type: "order",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "ORDER_PENDING_CONFIRMATION",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", order_id: aggId },
-            created_at: new Date(now - 60000).toISOString(),
-          },
-          {
-            event_id: `evt_ord_pay_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "payment_service",
-            actor_id: "razorpay_gateway",
-            event_type: "PAYMENT_VERIFIED",
-            aggregate_type: "order",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "HMAC_SHA256_VERIFIED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", provider: "razorpay_test_mode" },
-            created_at: new Date(now - 45000).toISOString(),
-          },
-          {
-            event_id: `evt_ord_conf_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "merchant_admin",
-            actor_id: "order_fulfillment",
-            event_type: "ORDER_CONFIRMED",
-            aggregate_type: "order",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "ORDER_LOCKED_STOCK_ALLOCATED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", delivery_days: 2, stock_deducted: true },
-            created_at: new Date(now - 30000).toISOString(),
-          },
-        ];
-      } else if (aggType === "payment" || aggId.startsWith("pay_")) {
-        events = [
-          {
-            event_id: `evt_pay_init_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "system",
-            actor_id: "razorpay_gateway",
-            event_type: "PAYMENT_CREATED",
-            aggregate_type: "payment",
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "RAZORPAY_ORDER_CREATED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", provider: "razorpay" },
-            created_at: new Date(now - 60000).toISOString(),
-          },
-          {
-            event_id: `evt_pay_sig_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: null,
-            actor_type: "system",
-            actor_id: "razorpay_webhook",
-            event_type: "PAYMENT_VERIFIED",
-            aggregate_type: "payment",
-            aggregate_id: aggId,
-            input_hash: `sha256:${crypto.createHash("sha256").update(inputHash).digest("hex")}`,
-            decision: "allow",
-            reason_code: "HMAC_SHA256_VERIFIED",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", confirmed: true, provider: "razorpay_test_mode" },
-            created_at: new Date(now - 30000).toISOString(),
-          },
-        ];
-      } else {
-        events = [
-          {
-            event_id: `evt_${aggType}_${aggId.slice(-6)}`,
-            request_id: `req_${aggId}`,
-            trace_id: `trc_${aggId}`,
-            agent_run_id: "agent_runner_alpha",
-            actor_type: "system",
-            actor_id: "agentpay_ledger",
-            event_type: `${aggType.toUpperCase()}_AUDIT_RECORDED`,
-            aggregate_type: aggType,
-            aggregate_id: aggId,
-            input_hash: `sha256:${inputHash}`,
-            decision: "allow",
-            reason_code: "AUDIT_APPENDED_TO_IMMUTABLE_LOG",
-            policy_version: "pol_v2_agentic_commerce",
-            model_version: null,
-            amount_minor: 4999900,
-            metadata: { currency: "INR", aggregate_type: aggType },
-            created_at: new Date(now - 30000).toISOString(),
-          },
-        ];
-      }
+      // An aggregate with no recorded events does not exist. Synthesising a
+      // plausible trail here would write invented POLICY_EVALUATED and
+      // ORDER_CONFIRMED rows into a surface the merchant reads as the
+      // append-only ledger, so the honest answer is 404.
+      return errorEnvelope(
+        "NOT_FOUND",
+        "No audit events are recorded for that aggregate.",
+        404
+      );
     }
 
     return envelope({ events });
@@ -1463,11 +1529,20 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     return errorEnvelope("NOT_FOUND", "The requested checkout does not exist.", 404);
   }
 
-  return envelope({ message: `API GET endpoint '${pathStr}' ok` });
+  // A typo'd path must not answer 200 ok:true, and an unauthenticated POST to
+  // an endpoint that does not exist must not be reported as applied.
+  return errorEnvelope("NOT_FOUND", `No API route matches ${req.method} /api/${pathStr}.`, 404);
 }
 
 export async function POST(req: NextRequest, { params }: { params: { path: string[] } }) {
   const pathStr = (params.path || []).join("/");
+
+  // Same gate as GET, and here it matters more: a write accepted into the local
+  // SQLite file and reported as applied is indistinguishable from a real payment.
+  if (!localBackendAllowed() && !isExemptWhenLocalBackendDisabled(pathStr)) {
+    return localBackendDisabledResponse(pathStr);
+  }
+
   let body: any = {};
   try {
     body = await req.json();
@@ -1630,6 +1705,7 @@ export async function POST(req: NextRequest, { params }: { params: { path: strin
             max_tokens: 800,
             temperature: 0.2,
           }),
+          signal: AbortSignal.timeout(GROQ_TIMEOUT_MS),
         });
 
         if (aiRes.ok) {
@@ -1764,6 +1840,7 @@ Buyer Question / Research Inquiry: "${question}"`,
             max_tokens: 850,
             temperature: 0.2,
           }),
+          signal: AbortSignal.timeout(GROQ_TIMEOUT_MS),
         });
 
         if (aiRes.ok) {
@@ -1835,17 +1912,46 @@ Buyer Question / Research Inquiry: "${question}"`,
   // POST /api/v1/checkout
   if (pathStr === "v1/checkout") {
     const checkoutId = `chk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    const offerId = body.offer_id || "";
-    const cleanId = offerId.startsWith("off_") ? offerId.replace("off_", "") : offerId;
-    const dbProduct = getDbProductById(cleanId);
-    const product = dbProduct || findProduct(cleanId);
 
-    const unitPrice = dbProduct?.offer?.unit_price_minor
-      ? dbProduct.offer.unit_price_minor
-      : (product && "priceMinor" in product ? (product as any).priceMinor : (body.total_minor || 100000));
-    const quantity = typeof body.quantity === "number" ? body.quantity : 1;
-    const subtotal = unitPrice * quantity;
+    // Either a single `offer_id` + `quantity`, or a full `items` line list so a
+    // multi-line cart freezes one authoritative total instead of only its first
+    // line. Never a price from the request body: the unit price below is read
+    // from the catalog only.
+    const rawLines: any[] =
+      Array.isArray(body.items) && body.items.length > 0
+        ? body.items.slice(0, 25)
+        : [{ offer_id: body.offer_id || "", quantity: body.quantity }];
+
+    const lines: Array<{ offer_id: string; product_id: string; unit_price_minor: number; quantity: number }> = [];
+    for (const raw of rawLines) {
+      const rawOfferId = typeof raw?.offer_id === "string" ? raw.offer_id : "";
+      if (!rawOfferId) {
+        return errorEnvelope("VALIDATION_ERROR", "Every checkout line requires an offer_id.", 400);
+      }
+      const resolved = resolveOfferUnitPrice(rawOfferId);
+      if (!resolved) {
+        return errorEnvelope("OFFER_NOT_FOUND", `No catalog offer is priced for '${rawOfferId}'.`, 404);
+      }
+      const qty = Number(raw?.quantity);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 100) {
+        return errorEnvelope("VALIDATION_ERROR", "Line quantity must be an integer between 1 and 100.", 400);
+      }
+      lines.push({
+        offer_id: rawOfferId,
+        product_id: resolved.productId,
+        unit_price_minor: resolved.unitPriceMinor,
+        quantity: qty,
+      });
+    }
+
+    if (lines.length === 0) {
+      return errorEnvelope("VALIDATION_ERROR", "A checkout requires at least one line.", 400);
+    }
+
+    const subtotal = lines.reduce((acc, l) => acc + l.unit_price_minor * l.quantity, 0);
     const totalMinor = subtotal;
+    const primary = lines[0];
+    const offerId = primary.offer_id;
     const priceHash = crypto.createHash("sha256").update(`${checkoutId}:${totalMinor}`).digest("hex");
 
     const record = {
@@ -1853,13 +1959,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       checkout_id: checkoutId,
       buyer_id: "buy_shopper_demo",
       merchant_id: "merchant_demo",
-      offer_id: offerId || `off_${cleanId}`,
+      offer_id: offerId,
       offer_version: 1,
-      product_id: dbProduct?.product_id || (product as any)?.id || cleanId,
+      product_id: primary.product_id,
       status: "created",
       pricing: {
-        unit_price_minor: unitPrice,
-        quantity: quantity,
+        // Describes the primary line; `total_minor` below covers every line and
+        // is the only figure the payment path may use.
+        unit_price_minor: primary.unit_price_minor,
+        quantity: primary.quantity,
         subtotal_minor: subtotal,
         shipping_minor: 0,
         tax_minor: 0,
@@ -1867,6 +1975,7 @@ Buyer Question / Research Inquiry: "${question}"`,
         total_minor: totalMinor,
         currency: "INR",
       },
+      line_items: lines,
       price_hash: priceHash,
     };
 
@@ -1881,6 +1990,13 @@ Buyer Question / Research Inquiry: "${question}"`,
       total_minor: totalMinor,
       currency: "INR",
       price_hash: priceHash,
+      // Persisted so a reader can recover the bag instead of dividing the
+      // total by one line's unit price.
+      line_items: lines.map((l) => ({
+        offer_id: l.offer_id,
+        quantity: l.quantity,
+        unit_price_minor: l.unit_price_minor,
+      })),
     });
 
     saveAuditEvent({
@@ -1894,7 +2010,7 @@ Buyer Question / Research Inquiry: "${question}"`,
       input_hash: `sha256:${priceHash}`,
       policy_version: "pol_v2_agentic_commerce",
       amount_minor: totalMinor,
-      metadata: { offer_id: offerId, quantity, total_minor: totalMinor, currency: "INR" },
+      metadata: { offer_id: offerId, line_count: lines.length, total_minor: totalMinor, currency: "INR" },
     });
 
     saveAuditEvent({
@@ -1911,13 +2027,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       metadata: { ttl_seconds: 900, price_hash: priceHash, currency: "INR" },
     });
 
-    auditEvents.unshift({
-      event_id: `evt_${Date.now().toString(36)}`,
-      timestamp: new Date().toISOString(),
-      action: "CHECKOUT_CREATED",
-      actor: "buyer",
-      details: { checkout_id: checkoutId, total_minor: totalMinor },
-    });
+    auditEvents.unshift(canonicalAuditEvent({
+      event_type: "CHECKOUT_CREATED",
+      aggregate_type: "checkout",
+      aggregate_id: checkoutId,
+      actor_type: "buyer",
+      actor_id: "buy_shopper_demo",
+      amount_minor: totalMinor,
+      metadata: { checkout_id: checkoutId, total_minor: totalMinor },
+    }));
 
     return envelope({ checkout: record });
   }
@@ -1999,13 +2117,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       metadata: { authorization_id: authId, currency: body.currency || "INR" },
     });
 
-    auditEvents.unshift({
-      event_id: `evt_${Date.now().toString(36)}`,
-      timestamp: new Date().toISOString(),
-      action: "AUTHORIZATION_GRANTED",
-      actor: "policy_engine",
-      details: { authorization_id: authId, amount_minor: body.amount_minor },
-    });
+    auditEvents.unshift(canonicalAuditEvent({
+      event_type: "AUTHORIZATION_GRANTED",
+      aggregate_type: "authorization",
+      aggregate_id: authId,
+      actor_type: "policy_engine",
+      actor_id: "ap2_mandate_service",
+      amount_minor: typeof body.amount_minor === "number" ? body.amount_minor : undefined,
+      metadata: { authorization_id: authId, amount_minor: body.amount_minor },
+    }));
 
     return envelope({ authorization: record });
   }
@@ -2086,13 +2206,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       metadata: { payment_id: paymentId, currency },
     });
 
-    auditEvents.unshift({
-      event_id: `evt_${Date.now().toString(36)}`,
-      timestamp: new Date().toISOString(),
-      action: "PAYMENT_CAPTURED",
-      actor: "razorpay_gateway",
-      details: { payment_id: paymentId, amount_minor: amountMinor },
-    });
+    auditEvents.unshift(canonicalAuditEvent({
+      event_type: "PAYMENT_CAPTURED",
+      aggregate_type: "payment",
+      aggregate_id: paymentId,
+      actor_type: "razorpay_gateway",
+      actor_id: "razorpay_gateway",
+      amount_minor: amountMinor,
+      metadata: { payment_id: paymentId, amount_minor: amountMinor },
+    }));
 
     return envelope({ payment: record });
   }
@@ -2101,14 +2223,22 @@ Buyer Question / Research Inquiry: "${question}"`,
   if (pathStr === "v1/payments/razorpay/verify-signature") {
     const razorpayOrderId = body.razorpay_order_id || `order_${Date.now()}`;
     const razorpayPaymentId = body.razorpay_payment_id || `pay_${Date.now()}`;
+    const replay = replayedVerification(razorpayPaymentId);
+    if (replay) return replay;
     const check = verifyPaymentSignature(razorpayOrderId, body.razorpay_payment_id, body.razorpay_signature);
     if (!check.ok) {
       return errorEnvelope(check.code, check.message, 400);
     }
     const confirmedOrderId = body.confirmed_order_id || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    // The resolver gets the caller's id, not the generated fallback, so an id
+    // that names no frozen checkout is refused instead of priced from the body.
+    const settled = authoritativeAmountMinor(body.checkout_id, body.amount ?? body.amount_minor);
+    if (!settled.ok) {
+      return errorEnvelope("VALIDATION_ERROR", settled.message, 400);
+    }
+    const amountMinor = settled.amountMinor;
+    const currency = body.currency || settled.currency || "INR";
     const checkoutId = body.checkout_id || `chk_${Date.now().toString(36)}`;
-    const amountMinor = body.amount || body.amount_minor || 4999900;
-    const currency = body.currency || "INR";
 
     saveDbPayment({
       payment_id: razorpayPaymentId,
@@ -2175,13 +2305,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       metadata: { order_id: confirmedOrderId, payment_id: razorpayPaymentId, currency },
     });
 
-    auditEvents.unshift({
-      event_id: `evt_${Date.now().toString(36)}`,
-      timestamp: new Date().toISOString(),
-      action: "RAZORPAY_PAYMENT_VERIFIED",
-      actor: "payment_service",
-      details: { confirmed_order_id: confirmedOrderId, razorpay_payment_id: razorpayPaymentId },
-    });
+    auditEvents.unshift(canonicalAuditEvent({
+      event_type: "PAYMENT_VERIFIED",
+      aggregate_type: "payment",
+      aggregate_id: razorpayPaymentId,
+      actor_type: "system",
+      actor_id: "razorpay_webhook",
+      amount_minor: amountMinor,
+      metadata: { confirmed_order_id: confirmedOrderId, razorpay_payment_id: razorpayPaymentId },
+    }));
 
     return NextResponse.json({
       ok: true,
@@ -2458,9 +2590,12 @@ Buyer Question / Research Inquiry: "${question}"`,
   }
 
   // POST /api/v1/merchant/rules
+  //
+  // The clamping and allow-listing live in `lib/merchantRules` because the
+  // `/.well-known/agent-capability.json` discovery route reads the same state.
   if (pathStr === "v1/merchant/rules") {
-    merchantRules = { ...merchantRules, ...body };
-    return envelope({ rules: merchantRules });
+    applyMerchantRulesPatch(body);
+    return envelope({ rules: merchantRulesView() });
   }
 
   // POST /api/v1/connectors/register
@@ -2610,15 +2745,17 @@ Buyer Question / Research Inquiry: "${question}"`,
         403
       );
     }
-    const amountMinor = body.amount || body.amount_minor;
-    if (typeof amountMinor !== "number" || !Number.isFinite(amountMinor) || amountMinor <= 0) {
-      return errorEnvelope("VALIDATION_ERROR", "A positive integer amount (minor units) is required.", 400);
-    }
     const currency = body.currency || "INR";
     const checkoutId = body.checkout_id;
     if (!checkoutId) {
       return errorEnvelope("VALIDATION_ERROR", "checkout_id is required.", 400);
     }
+    const settled = authoritativeAmountMinor(checkoutId, body.amount ?? body.amount_minor);
+    if (!settled.ok) {
+      return errorEnvelope("VALIDATION_ERROR", settled.message, 400);
+    }
+    const amountMinor = settled.amountMinor;
+    const settledCurrency = settled.currency || currency;
     const orderId = `order_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     const paymentId = `pay_sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     const signature = signSimPayment(orderId, paymentId);
@@ -2688,22 +2825,43 @@ Buyer Question / Research Inquiry: "${question}"`,
   // POST /api/v1/payments/razorpay/checkout-url (canonical; mirrors the live
   // gateway, which only accepts POST because building the URL mints records)
   if (pathStr === "v1/payments/razorpay/checkout-url") {
-    const amount = typeof body.amount === "number" ? body.amount : 10000;
+    const settled = authoritativeAmountMinor(body.checkout_id, body.amount ?? body.amount_minor);
+    if (!settled.ok) {
+      return errorEnvelope("VALIDATION_ERROR", settled.message, 400);
+    }
     return await buildRazorpayCheckoutUrl({
-      amount,
-      currency: body.currency || "INR",
+      amount: settled.amountMinor,
+      currency: body.currency || settled.currency || "INR",
       checkoutId: body.checkout_id || `chk_${Date.now().toString(36)}`,
       returnUrl: body.return_url || "",
       receipt: body.receipt || `rcpt_${Date.now()}`,
+      requestOrigin: new URL(req.url).origin,
     });
   }
 
   // POST /api/create-order or /api/v1/payments/razorpay/create-order (Razorpay standard modal)
   if (pathStr === "create-order" || pathStr === "v1/payments/razorpay/create-order") {
-    const amount = body.amount || body.amount_minor || 10000;
-    const currency = body.currency || "INR";
+    // The amount the provider will charge is the frozen checkout total, not the
+    // number the browser posted. Otherwise a tampered request charges ₹1 for a
+    // ₹50,000 cart.
+    const settled = authoritativeAmountMinor(
+      body.checkout_id,
+      body.amount ?? body.amount_minor
+    );
+    if (!settled.ok) {
+      return errorEnvelope("VALIDATION_ERROR", settled.message, 400);
+    }
+    const amount = settled.amountMinor;
+    const currency = body.currency || settled.currency || "INR";
     const receipt = body.receipt || `rcpt_${Date.now()}`;
-    const orderId = await createRazorpayOrderRemote(amount, currency, receipt);
+
+    let orderId: string;
+    try {
+      orderId = await createRazorpayOrderRemote(amount, currency, receipt);
+    } catch (e: any) {
+      // Fail closed: never hand the client an order id the provider never made.
+      return errorEnvelope("PROVIDER_ERROR", e?.message || "The payment provider could not create an order.", 502);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -2724,14 +2882,22 @@ Buyer Question / Research Inquiry: "${question}"`,
   ) {
     const paymentId = body.razorpay_payment_id || `pay_${Date.now().toString(36)}`;
     const orderId = body.razorpay_order_id || `order_${Date.now().toString(36)}`;
+    const replay = replayedVerification(paymentId);
+    if (replay) return replay;
     const sigCheck = verifyPaymentSignature(orderId, body.razorpay_payment_id, body.razorpay_signature);
     if (!sigCheck.ok) {
       return errorEnvelope(sigCheck.code, sigCheck.message, 400);
     }
     const confirmedOrderId = body.confirmed_order_id || `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    // The resolver gets the caller's id, not the generated fallback, so an id
+    // that names no frozen checkout is refused instead of priced from the body.
+    const settled = authoritativeAmountMinor(body.checkout_id, body.amount ?? body.amount_minor);
+    if (!settled.ok) {
+      return errorEnvelope("VALIDATION_ERROR", settled.message, 400);
+    }
+    const amountMinor = settled.amountMinor;
+    const currency = body.currency || settled.currency || "INR";
     const checkoutId = body.checkout_id || `chk_${Date.now().toString(36)}`;
-    const amountMinor = body.amount || body.amount_minor || 4999900;
-    const currency = body.currency || "INR";
 
     saveDbPayment({
       payment_id: paymentId,
@@ -2798,13 +2964,15 @@ Buyer Question / Research Inquiry: "${question}"`,
       metadata: { order_id: confirmedOrderId, payment_id: paymentId, currency },
     });
 
-    auditEvents.unshift({
-      event_id: `evt_${Date.now().toString(36)}`,
-      timestamp: new Date().toISOString(),
-      action: "RAZORPAY_MODAL_PAYMENT_VERIFIED",
-      actor: "payment_service",
-      details: { confirmed_order_id: confirmedOrderId, razorpay_payment_id: paymentId, razorpay_order_id: orderId },
-    });
+    auditEvents.unshift(canonicalAuditEvent({
+      event_type: "PAYMENT_VERIFIED",
+      aggregate_type: "payment",
+      aggregate_id: paymentId,
+      actor_type: "system",
+      actor_id: "razorpay_modal",
+      amount_minor: amountMinor,
+      metadata: { confirmed_order_id: confirmedOrderId, razorpay_payment_id: paymentId, razorpay_order_id: orderId },
+    }));
 
     return NextResponse.json({
       ok: true,
@@ -2815,14 +2983,19 @@ Buyer Question / Research Inquiry: "${question}"`,
         payment_id: paymentId,
         confirmed_order_id: confirmedOrderId,
         status: "paid",
+        // The amount actually recorded, so the caller can detect a mismatch
+        // rather than assuming its own cart total was the one charged.
+        amount_minor: amountMinor,
+        currency,
       },
       verified: true,
       order_id: orderId,
       payment_id: paymentId,
       confirmed_order_id: confirmedOrderId,
+      amount_minor: amountMinor,
       status: "paid",
     });
   }
 
-  return envelope({ acknowledged: true, endpoint: pathStr, body });
+  return errorEnvelope("NOT_FOUND", `No API route matches POST /api/${pathStr}.`, 404);
 }

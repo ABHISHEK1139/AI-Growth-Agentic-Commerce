@@ -16,7 +16,12 @@ from services.authorization.models import Authorization
 from services.authorization.repository import AuthorizationRepository
 from services.catalog.models import Product
 from services.checkout.models import Checkout
-from services.checkout.transitions import TransitionContext, TransitionEvent, transition
+from services.checkout.transitions import (
+    TransitionContext,
+    TransitionEvent,
+    price_hashes_match,
+    transition,
+)
 from services.inventory.service import InventoryService
 from services.offers.models import Offer
 from services.policy.models import PolicyDecisionRecord
@@ -515,7 +520,7 @@ class AuthorizationService:
             )
 
         # 5. Price hash integrity check
-        if auth.price_hash != current_price_hash:
+        if not price_hashes_match(auth.price_hash, current_price_hash):
             raise DomainError(
                 "The price changed after approval, so no charge was made.",
                 code=ErrorCode.PRICE_CHANGED,

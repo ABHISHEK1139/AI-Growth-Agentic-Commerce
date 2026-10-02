@@ -123,7 +123,21 @@ def _sweep_expired_checkouts() -> None:
             expired_checkouts = (
                 session.query(Checkout)
                 .filter(
-                    Checkout.status.in_(["created", "policy_checked", "authorization_pending"]),
+                    # Every state that still holds an inventory reservation and
+                    # from which EXPIRE_CHECKOUT is a legal edge. "authorized"
+                    # was missing: a buyer who approved and then abandoned the
+                    # flow kept its hold forever, because create_payment's
+                    # expiry branch runs in the API's transaction and is
+                    # rolled back when it raises.
+                    Checkout.status.in_(
+                        [
+                            "created",
+                            "policy_checked",
+                            "authorization_pending",
+                            "requires_approval",
+                            "authorized",
+                        ]
+                    ),
                     Checkout.expires_at <= now,
                 )
                 .order_by(Checkout.expires_at)

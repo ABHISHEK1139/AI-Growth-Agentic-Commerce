@@ -34,7 +34,7 @@ export function ProductCard({ product, highlightReason, isBestMatch }: { product
     setTimeout(() => setAddedToCart(false), 1500);
   };
 
-  return <article className={`group relative flex h-full flex-col overflow-hidden rounded-[22px] border bg-white transition-all duration-300 hover:-translate-y-1.5 hover:shadow-hover ${isBestMatch ? "border-[#174c3c] ring-1 ring-[#174c3c] shadow-soft" : "border-[#e6e8df] hover:border-[#c8d4cc]"}`}>
+  return <article data-product-id={product.id} className={`group relative flex h-full flex-col overflow-hidden rounded-[22px] border bg-white transition-all duration-300 hover:-translate-y-1.5 hover:shadow-hover ${isBestMatch ? "border-[#174c3c] ring-1 ring-[#174c3c] shadow-soft" : "border-[#e6e8df] hover:border-[#c8d4cc]"}`}>
     {/* Image Section */}
     <div className="relative aspect-[1.1] overflow-hidden bg-[#eef1eb]">
       {/* Skeleton shimmer while image loads */}

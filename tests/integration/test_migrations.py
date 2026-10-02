@@ -50,7 +50,10 @@ EXPECTED_TABLES = {
 
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
-    eng = create_engine(get_settings().database_url)
+    # `resolved_database_url`, not `database_url`: the latter is now only the
+    # explicit override and is `None` when the datastore is configured through
+    # the discrete `DB_*` parts, which is how the compose stack configures it.
+    eng = create_engine(get_settings().resolved_database_url)
     try:
         with eng.connect() as connection:
             connection.execute(text("SELECT 1"))

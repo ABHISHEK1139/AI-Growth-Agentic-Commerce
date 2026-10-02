@@ -66,7 +66,8 @@ const STATUS_COPY: Record<string, { heading: string; detail: string }> = {
   },
 };
 
-function formatTimestamp(raw: string): string {
+function formatTimestamp(raw: string | null | undefined): string {
+  if (typeof raw !== "string" || raw.length === 0) return "—";
   const parsed = new Date(raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });

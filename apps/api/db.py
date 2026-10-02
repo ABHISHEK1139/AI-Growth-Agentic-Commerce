@@ -71,21 +71,38 @@ def _install_sqlite_compat(engine: Engine) -> Engine:
 def get_engine() -> Engine:
     """Process-wide SQLAlchemy engine with seamless local SQLite fallback."""
     settings = get_settings()
-    db_url = settings.database_url
-    is_sqlite = db_url.startswith("sqlite")
+    db_url = settings.resolved_database_url
+    is_sqlite = settings.is_sqlite_url
 
     if not is_sqlite:
         try:
-            test_engine = create_engine(db_url, connect_args={"connect_timeout": 1})
+            test_engine = create_engine(
+                db_url, connect_args={"connect_timeout": settings.db_connect_timeout_seconds}
+            )
             with test_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             test_engine.dispose()
-        except Exception:
+        except Exception as exc:
+            settings.validate_datastore_for_env()
             import logging
             from pathlib import Path
 
-            logging.getLogger("apps.api.db").info(
-                "PostgreSQL unreachable at %s; operating with local SQLite datastore", db_url
+            from packages.observability.logging import redact
+
+            # Never the URL itself: it carries the database password, and this
+            # line lands in whatever ships the container logs. Host and database
+            # are enough to diagnose "wrong host" or "wrong database".
+            #
+            # This is a WARNING, not INFO, and it names the file that now holds
+            # the data. Every row in the configured database is invisible to this
+            # process from here on, so an operator has to be able to find the line
+            # in a log without knowing that the fallback exists.
+            logging.getLogger("apps.api.db").warning(
+                "PostgreSQL unreachable at %s (%s); FALLING BACK to local SQLite at "
+                "data/local_dev.db. This process will serve an empty catalog and any "
+                "writes are not durable.",
+                redact(db_url),
+                type(exc).__name__,
             )
             db_path = Path(__file__).resolve().parents[2] / "data" / "local_dev.db"
             db_url = f"sqlite:///{db_path.as_posix()}"
@@ -95,8 +112,9 @@ def get_engine() -> Engine:
     engine = create_engine(
         db_url,
         pool_pre_ping=True,  # reconnect transparently after an idle drop
-        pool_size=10 if not is_sqlite else 5,
-        max_overflow=5,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        pool_size=5 if is_sqlite else settings.db_pool_size,
+        max_overflow=0 if is_sqlite else settings.db_max_overflow,
         future=True,
         connect_args=connect_args,
         # Never echo SQL: bound parameters can contain buyer data.
