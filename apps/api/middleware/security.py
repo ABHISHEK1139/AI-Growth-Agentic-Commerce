@@ -82,9 +82,26 @@ _PRIVATE_PATH_PREFIXES: tuple[str, ...] = (
 
 _HSTS_MAX_AGE_SECONDS = 31_536_000  # one year, the threshold for preload eligibility
 
+#: Browser features this API never needs. Restricting them here is cheap defence
+#: in depth for any HTML error page a proxy might wrap around a JSON envelope.
+_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
+
 
 def _is_private_path(path: str) -> bool:
     return any(path == prefix or path.startswith(prefix) for prefix in _PRIVATE_PATH_PREFIXES)
+
+
+def _arrived_over_https(request: Request) -> bool:
+    """True when the client connection was TLS, including behind a terminator.
+
+    The app often sees plain HTTP from a reverse proxy. ``X-Forwarded-Proto`` is
+    the value that proxy sets; only the first hop is trusted so a client cannot
+    append a spoofed token after a real ``http``.
+    """
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -107,10 +124,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", _PERMISSIONS_POLICY)
 
         # Only meaningful once the connection is already TLS. Sending it over HTTP is
         # ignored, so gating avoids claiming protection that is not there.
-        if request.url.scheme == "https":
+        if _arrived_over_https(request):
             response.headers.setdefault(
                 "Strict-Transport-Security",
                 f"max-age={_HSTS_MAX_AGE_SECONDS}",

@@ -28,6 +28,7 @@ UNCONDITIONAL_HEADERS = {
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
 }
 
 
@@ -127,6 +128,18 @@ def test_hsts_is_not_sent_over_plain_http(app: FastAPI) -> None:
         "HSTS was sent over a plain HTTP request. Browsers ignore it there, so it is "
         "a claim of protection that is not actually in effect."
     )
+
+
+def test_hsts_is_sent_when_proxy_forwards_https(app: FastAPI) -> None:
+    """TLS terminators speak HTTP to the app and set X-Forwarded-Proto."""
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    with TestClient(app, base_url="http://testserver", raise_server_exceptions=False) as c:
+        response = c.get("/health", headers={"X-Forwarded-Proto": "https"})
+    app.dependency_overrides.clear()
+
+    hsts = response.headers.get("strict-transport-security")
+    assert hsts is not None
+    assert "max-age=31536000" in hsts
 
 
 def test_no_content_security_policy_on_api_responses(client: TestClient) -> None:

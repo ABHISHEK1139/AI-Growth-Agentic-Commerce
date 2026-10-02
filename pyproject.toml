@@ -24,7 +24,9 @@ dependencies = [
     "redis==5.2.1",
     "httpx==0.28.1",
     "jsonschema==4.23.0",
-    "python-multipart==0.0.20",
+    # 0.0.20 carried six advisories (PYSEC-2026-1852/3036/3037/3038/3039/3040) in the
+    # multipart parser used by every file-upload endpoint. 0.0.31 clears all of them.
+    "python-multipart==0.0.31",
 ]
 
 [project.optional-dependencies]

@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatCompletionsEndpoint, checkOutboundUrl } from "@/lib/outboundUrl";
+import { clientRateLimitKey, isRateLimited } from "@/lib/simpleRateLimit";
 
 /** Cached per-URL so hammering this endpoint cannot exhaust the outbound pool. */
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 30;
-const recentCalls = new Map<string, number[]>();
-
-function rateLimitedFor(clientKey: string): boolean {
-  const now = Date.now();
-  const hits = (recentCalls.get(clientKey) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-  hits.push(now);
-  recentCalls.set(clientKey, hits);
-  return hits.length > RATE_LIMIT_MAX;
-}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   try {
-    const clientKey = req.headers.get("x-forwarded-for") || "local";
-    if (rateLimitedFor(clientKey)) {
+    const clientKey = clientRateLimitKey(req);
+    if (isRateLimited(`ai-test:${clientKey}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
       return NextResponse.json(
         { ok: false, error: "Too many connection tests. Please wait a moment and try again." },
         { status: 429 }
@@ -74,10 +66,10 @@ export async function POST(req: NextRequest) {
       const latencyMs = Date.now() - startTime;
 
       if (!pingRes.ok) {
-        const errText = await pingRes.text();
+        await pingRes.text().catch(() => "");
         return NextResponse.json({
           ok: false,
-          error: `Endpoint returned HTTP ${pingRes.status}: ${errText.slice(0, 200)}`,
+          error: `Endpoint returned HTTP ${pingRes.status}.`,
           status: pingRes.status,
           latencyMs,
         });
@@ -97,11 +89,12 @@ export async function POST(req: NextRequest) {
       const isConnectionRefused =
         fetchErr.message?.includes("ECONNREFUSED") || fetchErr.message?.includes("fetch failed");
 
-      let userMsg = fetchErr.message || "Failed to connect to endpoint";
+      let userMsg = "Failed to connect to endpoint.";
       if (isAbort) {
         userMsg = "Connection timed out after 8 seconds. Check if server is running.";
       } else if (isConnectionRefused) {
-        userMsg = `Connection refused at ${trimmedBase}. If using Ollama, run 'ollama serve'. If using LM Studio, ensure 'Local Server' is started.`;
+        userMsg =
+          "Connection refused. If using Ollama, run 'ollama serve'. If using LM Studio, ensure 'Local Server' is started.";
       }
 
       return NextResponse.json({
@@ -112,7 +105,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: error?.message || "Internal test error" },
+      { ok: false, error: "The connection test could not be completed." },
       { status: 500 }
     );
   }

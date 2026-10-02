@@ -284,6 +284,11 @@ def test_the_demo_path_is_refused_outside_local(app: FastAPI, settings) -> None:
             # test about the thing it is named after. See TestDatastoreSafety in
             # test_config.py for the policy itself.
             database_url="sqlite+pysqlite:///:memory:",
+            # Likewise for the test-double providers: a staging environment refuses
+            # PAYMENT_PROVIDER=fake and MODEL_PROVIDER=mock unless told it is
+            # deliberately a demo, which this is -- the test needs an app it can drive
+            # without Razorpay or an LLM. See test_test_double_providers.py.
+            allow_test_double_providers=True,
             jwt_secret="real",
             session_secret="real",
             channel_encryption_key="real-channel-key",

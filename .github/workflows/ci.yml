@@ -268,6 +268,28 @@ jobs:
         run: |
           pip-audit --strict --requirement <(python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))")
 
+      - name: Frontend Dependency Vulnerability Scan (npm audit)
+        # Non-blocking, and deliberately so.
+        #
+        # It is here because before this step existed the scan could not run at all:
+        # the root package.json declares workspaces, npm requires a lockfile at the
+        # root, and only apps/web had one -- so every audit invocation failed with
+        # ENOLOCK and the 35k-line frontend had no CVE gate whatsoever. That is worse
+        # than a red gate.
+        #
+        # It stays advisory because the remaining findings are a Next.js major
+        # upgrade (next@16 for a critical request-smuggling advisory plus postcss,
+        # eslint-config-next and glob). See docs/production/security-review.md. It
+        # becomes blocking the day that upgrade lands; leaving it blocking now would
+        # mean a permanently red pipeline, which gets ignored and then stops being read.
+        #
+        # `--audit-level=high` matches what is worth failing over: a critical or high
+        # frontend CVE should never be invisible, and low/moderate noise is what makes
+        # people stop looking.
+        run: |
+          npm audit --audit-level=high || \
+            echo "::warning::npm audit reported advisories. See docs/production/security-review.md"
+
   browser-e2e:
     name: Browser End-to-End (Smoke)
     runs-on: ubuntu-latest

@@ -19,6 +19,8 @@ import apps.api.db
 from apps.api.config import Settings
 from apps.api.db import Base, get_db
 from apps.api.main import create_app
+from apps.api.routers.razorpay_checkout import resolve_checkout_return_url
+from packages.errors.exceptions import DomainError
 from packages.errors.registry import ErrorCode
 from services.catalog.models import CatalogVersion, Merchant, Product
 from services.inventory.models import Inventory
@@ -291,8 +293,8 @@ def test_verify_razorpay_signature_valid(mock_payment_service_class):
             Payment(
                 payment_id=payment_id,
                 checkout_id="chk_1",
-                merchant_id="mrc_1",
-                buyer_id="buyer_1",
+                merchant_id="mer_demo_electronics",
+                buyer_id="buyer_test_123",
                 authorization_id="auth_1",
                 provider_order_id=order_id,
                 amount_minor=1000,
@@ -510,3 +512,164 @@ def test_create_razorpay_order_rejects_unverified_offer():
     assert res_off.status_code == 404
     assert res_off.json()["ok"] is False
     assert res_off.json()["error"]["code"] == "NOT_FOUND"
+
+
+def _seed_payment_for_verification(app, *, merchant_id: str, buyer_id: str):
+    """Insert a payment that the mocked PaymentService can verify successfully.
+
+    Mirrors ``test_verify_razorpay_signature_valid`` exactly, so the *only*
+    variable between the positive and negative case is who owns the payment.
+    """
+    import uuid
+
+    order_id = f"order_scope_{uuid.uuid4().hex[:8]}"
+    payment_id = f"pay_scope_{uuid.uuid4().hex[:8]}"
+    signature = hmac.new(
+        TEST_KEY_SECRET.encode("utf-8"),
+        f"{order_id}|{payment_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    db = next(app.dependency_overrides[get_db]())
+    from services.payments.models import Payment
+
+    db.add(
+        Payment(
+            payment_id=payment_id,
+            checkout_id="chk_1",
+            merchant_id=merchant_id,
+            buyer_id=buyer_id,
+            authorization_id="auth_1",
+            provider_order_id=order_id,
+            amount_minor=1000,
+            currency="INR",
+        )
+    )
+    db.commit()
+    return order_id, payment_id, signature
+
+
+def _verify(client, order_id: str, payment_id: str, signature: str):
+    return client.post(
+        "/api/verify-payment",
+        json={
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature,
+        },
+    )
+
+
+@patch("apps.api.routers.razorpay_checkout.PaymentService")
+def test_verify_payment_accepts_the_callers_own_payment(mock_payment_service_class):
+    """Positive control for the tenant-isolation tests below.
+
+    Without this, a 404 in the negative tests proves nothing: it could come from
+    any unconfigured dependency. This asserts the identical fixture, in the
+    identical shape, is accepted when the caller owns it.
+    """
+    mock_service_instance = mock_payment_service_class.return_value
+    mock_order = MagicMock()
+    mock_order.order_id = "ord_1"
+    mock_order.amount_minor = 1000
+    mock_service_instance.verify_payment.return_value = (None, mock_order)
+
+    app = _app_with_razorpay_keys()
+    client = _authenticated_client(app)  # buyer_test_123 / mer_demo_electronics
+    order_id, payment_id, signature = _seed_payment_for_verification(
+        app,
+        merchant_id="mer_demo_electronics",
+        buyer_id="buyer_test_123",
+    )
+
+    res = _verify(client, order_id, payment_id, signature)
+    assert res.status_code == 200, res.text
+    assert res.json()["data"]["verified"] is True
+
+
+@patch("apps.api.routers.razorpay_checkout.PaymentService")
+def test_verify_payment_rejects_another_buyers_payment(mock_payment_service_class):
+    """Same merchant, different buyer: the HMAC is valid and the order is real.
+
+    Reverting the ``buyer_id`` predicate makes this return 200.
+    """
+    mock_service_instance = mock_payment_service_class.return_value
+    mock_order = MagicMock()
+    mock_order.order_id = "ord_1"
+    mock_order.amount_minor = 1000
+    mock_service_instance.verify_payment.return_value = (None, mock_order)
+
+    app = _app_with_razorpay_keys()
+    client = _authenticated_client(app)
+    order_id, payment_id, signature = _seed_payment_for_verification(
+        app,
+        merchant_id="mer_demo_electronics",
+        buyer_id="buyer_someone_else",
+    )
+
+    res = _verify(client, order_id, payment_id, signature)
+    assert res.status_code == 404, res.text
+    assert res.json()["error"]["code"] == ErrorCode.NOT_FOUND
+
+
+@patch("apps.api.routers.razorpay_checkout.PaymentService")
+def test_verify_payment_rejects_another_merchants_payment(mock_payment_service_class):
+    """Different merchant entirely. Reverting the ``merchant_id`` predicate returns 200."""
+    mock_service_instance = mock_payment_service_class.return_value
+    mock_order = MagicMock()
+    mock_order.order_id = "ord_1"
+    mock_order.amount_minor = 1000
+    mock_service_instance.verify_payment.return_value = (None, mock_order)
+
+    app = _app_with_razorpay_keys()
+    client = _authenticated_client(app)
+    order_id, payment_id, signature = _seed_payment_for_verification(
+        app,
+        merchant_id="mer_attacker_supplied",
+        buyer_id="buyer_test_123",
+    )
+
+    res = _verify(client, order_id, payment_id, signature)
+    assert res.status_code == 404, res.text
+    assert res.json()["error"]["code"] == ErrorCode.NOT_FOUND
+
+
+def test_checkout_url_rejects_off_origin_return_url():
+    app = _app_with_razorpay_keys()
+    client = _authenticated_client(app)
+    res = client.post(
+        "/api/v1/payments/razorpay/checkout-url",
+        json={
+            "amount": 10000,
+            "currency": "INR",
+            "return_url": "https://evil.example/capture",
+        },
+    )
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == ErrorCode.VALIDATION_ERROR
+
+
+def test_resolve_checkout_return_url_same_origin_only():
+    allowed = {"http://localhost:3000"}
+    assert (
+        resolve_checkout_return_url("/checkout/razorpay-return", allowed_origins=allowed)
+        == "/checkout/razorpay-return"
+    )
+    assert (
+        resolve_checkout_return_url(
+            "http://localhost:3000/checkout/razorpay-return",
+            allowed_origins=allowed,
+        )
+        == "http://localhost:3000/checkout/razorpay-return"
+    )
+    assert resolve_checkout_return_url(None, allowed_origins=allowed) is None
+    try:
+        resolve_checkout_return_url("https://evil.example/capture", allowed_origins=allowed)
+        raise AssertionError("off-origin return_url must be rejected")
+    except DomainError as exc:
+        assert exc.code == ErrorCode.VALIDATION_ERROR
+    try:
+        resolve_checkout_return_url("//evil.example/path", allowed_origins=allowed)
+        raise AssertionError("protocol-relative return_url must be rejected")
+    except DomainError as exc:
+        assert exc.code == ErrorCode.VALIDATION_ERROR

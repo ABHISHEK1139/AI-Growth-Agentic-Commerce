@@ -7,6 +7,7 @@ import {
   AI_ASSISTANT_BUDGET,
   type AssistantPersonaRole,
 } from "@/catalog/assistantConfig";
+import { clientRateLimitKey, isRateLimited } from "@/lib/simpleRateLimit";
 
 function getAiClient(): GoogleGenAI | null {
   const apiKey = (process.env.GEMINI_API_KEY || "").trim();
@@ -37,6 +38,8 @@ const MAX_MESSAGE_CHARS = 8000;
 const MAX_HISTORY_TURNS = 40;
 const MAX_CUSTOM_INSTRUCTION_CHARS = 2000;
 const UPSTREAM_TIMEOUT_MS = 45000;
+const CHAT_RATE_LIMIT_MAX = 40;
+const CHAT_RATE_LIMIT_WINDOW_MS = 60_000;
 
 
 function detectTaskModel(
@@ -180,6 +183,13 @@ function generateCatalogFallback(
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   try {
+    if (isRateLimited(`gemini-chat:${clientRateLimitKey(req)}`, CHAT_RATE_LIMIT_MAX, CHAT_RATE_LIMIT_WINDOW_MS)) {
+      return NextResponse.json(
+        { ok: false, error: "Too many assistant requests. Please wait a moment and try again." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const {
       message,

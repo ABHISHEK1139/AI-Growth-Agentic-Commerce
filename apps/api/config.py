@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -312,7 +312,14 @@ class Settings(BaseSettings):
     # Layer 1 (the length bound and the injection patterns) runs first in every
     # mode regardless, because it is free.
     guard_provider: GuardProviderName = "heuristic"
-    # Ollama's OpenAI-compatible route. Configuration only, never request-derived.
+
+    # Permits PAYMENT_PROVIDER=fake / MODEL_PROVIDER=mock / SEARCH_PROVIDER=null in a
+    # non-local deployment, for a staging environment that is deliberately a demo (a
+    # judge running the stack, a load test). Off by default, because the failure it
+    # prevents is silent: a live deployment that forgot PAYMENT_PROVIDER would report
+    # successful payments that never moved money, and would accept webhooks signed with
+    # a secret published in this repository. See validate_providers_for_env.
+    allow_test_double_providers: bool = False
     guard_base_url: str = "http://localhost:11434/v1"
     guard_model_name: str = "llama-guard3:1b"
     # Used by the `remote` provider only. When empty, no Authorization header is
@@ -552,6 +559,70 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError(
                 f"Unsafe configuration for APP_ENV={self.app_env}: " + "; ".join(problems)
+            )
+
+    #: Provider values that are *test doubles* rather than real integrations. Each one
+    #: is a valid default for local development and a silent lie in a deployment that is
+    #: supposed to be taking real money or serving real customers.
+    _TEST_DOUBLE_PROVIDERS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "PAYMENT_PROVIDER": ("fake",),
+        "MODEL_PROVIDER": ("mock",),
+        "SEARCH_PROVIDER": ("null",),
+    }
+
+    #: Escape hatch for the deliberate demo deployment. A staging environment that
+    #: genuinely is a demo -- a judge running the stack, a load test -- can set this and
+    #: get the test doubles deliberately rather than by omission.
+    ALLOW_TEST_DOUBLE_PROVIDERS_VAR: ClassVar[str] = "ALLOW_TEST_DOUBLE_PROVIDERS"
+
+    def validate_providers_for_env(self) -> None:
+        """Refuse test-double providers outside ``local``.
+
+        Why this is separate from :meth:`validate_for_env`
+        ------------------------------------------------
+        That method checks providers in one direction only: "is ``razorpay`` configured?"
+        It never asks the question that actually bites — "is this deployment running the
+        *fake* provider?"
+
+        An operator who sets ``APP_ENV=staging`` and
+        ``ALLOW_LIVE_CREDENTIALS=1`` but forgets ``PAYMENT_PROVIDER`` gets the
+        ``"fake"`` default, ``validate_for_env`` passes, and the deployment runs
+        :class:`~services.payments.provider.FakePaymentProvider`. Consequences, none of
+        which raise:
+
+        * every payment "succeeds" without moving money;
+        * webhooks are verified against a secret published in this repository, so a
+          forged ``payment.captured`` callback is accepted;
+        * the console reports healthy orders that do not exist at the provider.
+
+        The same shape applies to ``MODEL_PROVIDER=mock`` (the agent reasons against a
+        deterministic stub) and ``SEARCH_PROVIDER=null`` (research silently returns
+        nothing). All three are correct defaults for a laptop and wrong anywhere else.
+        """
+        if self.is_local or self.allow_test_double_providers:
+            return
+
+        selected = {
+            "PAYMENT_PROVIDER": self.payment_provider,
+            "MODEL_PROVIDER": self.model_provider,
+            "SEARCH_PROVIDER": self.search_provider,
+        }
+
+        problems = [
+            f"{name}={selected[name]} is a test double, not a real integration"
+            for name, doubles in self._TEST_DOUBLE_PROVIDERS.items()
+            if selected[name] in doubles
+        ]
+
+        if problems:
+            raise ValueError(
+                f"APP_ENV={self.app_env} is not 'local', but " + "; ".join(problems) + ". "
+                "A deployment that is meant to be live must not answer with fixtures: "
+                "payments would report success without moving money, and an attacker "
+                "could forge webhooks against a secret published in this repository. "
+                f"Set the real provider values, or set "
+                f"{self.ALLOW_TEST_DOUBLE_PROVIDERS_VAR}=1 if this deployment is "
+                "deliberately a demo."
             )
 
     @property

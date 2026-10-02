@@ -77,6 +77,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     # Fail fast rather than serving traffic with template placeholder secrets.
     settings.validate_for_env()
+
+    # Refuses test-double providers outside `local`. Deliberately separate from the
+    # check above, which asks "is the *real* provider configured?" and this one asks "is
+    # the *fake* provider running?" -- the failure that yields a deployment reporting
+    # successful payments that never moved money, and accepting webhooks signed with a
+    # secret published in this repository.
+    settings.validate_providers_for_env()
+
     # A SQLite URL is a legitimate explicit choice, so this only refuses the
     # case that is dangerous rather than the case that is unusual: Postgres
     # configured, not reachable, and the fallback would quietly serve an empty

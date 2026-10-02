@@ -46,7 +46,15 @@ function LoginForm() {
    */
   const next = useMemo(() => {
     const raw = searchParams.get("next");
-    if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+    if (
+      !raw ||
+      !raw.startsWith("/") ||
+      raw.startsWith("//") ||
+      raw.includes("\\") ||
+      raw.includes("://")
+    ) {
+      return null;
+    }
     return raw;
   }, [searchParams]);
   const reason = searchParams.get("reason");

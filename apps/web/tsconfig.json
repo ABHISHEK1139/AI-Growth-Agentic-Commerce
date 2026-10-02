@@ -1,6 +1,12 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    // es5 was an anachronism for a Next.js 14 App Router application, and `lib: esnext`
+    // already declared that modern APIs were available -- so the setting only served to
+    // forbid syntax the codebase was free to use. It also required `downlevelIteration`
+    // to iterate a Map, which is neither enabled nor wanted: TS 5.9 (what `^5.7.3`
+    // resolves to, and what `npm ci` installs) turns that into error TS2802. Next.js 14
+    // requires a modern baseline regardless, so the target is stated honestly here.
+    "target": "es2022",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,

@@ -13,6 +13,24 @@ const nextConfig = {
   //
   // Unset stays unset, so a build outside compose keeps the relative-proxy
   // behaviour instead of inheriting an in-network hostname.
+  async headers() {
+    // These headers apply to the HTML document that loads Razorpay checkout.js.
+    // A strict CSP is still deferred: that script injects inline code at runtime.
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+        ],
+      },
+    ];
+  },
   ...(process.env.AGENTPAY_API_INTERNAL_URL
     ? { env: { AGENTPAY_API_INTERNAL_URL: process.env.AGENTPAY_API_INTERNAL_URL } }
     : {}),

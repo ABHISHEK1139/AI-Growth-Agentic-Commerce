@@ -7,6 +7,7 @@ import hmac
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -36,6 +37,49 @@ CheckoutMoneyPrincipal = Annotated[
 PaymentMoneyPrincipal = Annotated[Principal, Depends(require_scopes(Scope.PAYMENT_WRITE))]
 
 logger = logging.getLogger(__name__)
+
+
+def _allowed_return_origins(settings: Any, http_request: Request) -> set[str]:
+    origins = {o.rstrip("/") for o in settings.cors_origins if o and o != "*"}
+    origins.add(str(http_request.base_url).rstrip("/"))
+    return origins
+
+
+def resolve_checkout_return_url(raw: str | None, *, allowed_origins: set[str]) -> str | None:
+    """Accept only a root-relative path or an absolute URL on a known origin.
+
+    This value is sent to Razorpay as ``callback_url`` and is also returned as
+    ``checkout_url``. An unvalidated host would bounce the buyer (and the signed
+    payment query string) off-site after they complete checkout.
+    """
+    if raw is None or not str(raw).strip():
+        return None
+    candidate = str(raw).strip()
+    if "\\" in candidate or candidate.startswith("//"):
+        raise DomainError(
+            "return_url must be a root-relative path or an absolute URL on this origin.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    if candidate.startswith("/"):
+        if "://" in candidate:
+            raise DomainError(
+                "return_url must be a root-relative path or an absolute URL on this origin.",
+                code=ErrorCode.VALIDATION_ERROR,
+            )
+        return candidate
+    parsed = urlparse(candidate)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise DomainError(
+            "return_url must be a root-relative path or an absolute URL on this origin.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin not in allowed_origins:
+        raise DomainError(
+            "return_url must be a root-relative path or an absolute URL on this origin.",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    return candidate
 
 
 class CreateOrderRequest(BaseModel):
@@ -315,7 +359,11 @@ def verify_razorpay_payment(
     if session is not None:
         payment = (
             session.query(Payment)
-            .filter(Payment.provider_order_id == request.razorpay_order_id)
+            .filter(
+                Payment.provider_order_id == request.razorpay_order_id,
+                Payment.merchant_id == principal.merchant_id,
+                Payment.buyer_id == principal.buyer_id,
+            )
             .first()
         )
         # A valid signature proves the provider signed these identifiers, not
@@ -354,6 +402,7 @@ def verify_razorpay_payment(
 @router.post("/api/v1/payments/razorpay/checkout-url")
 def get_razorpay_checkout_url(
     request: RazorpayCheckoutUrlRequest,
+    http_request: Request,
     principal: PaymentMoneyPrincipal,
     settings: AppSettings,
     session: DatabaseSession,
@@ -390,7 +439,10 @@ def get_razorpay_checkout_url(
     amount = request.amount
     currency = request.currency
     offer_id = request.offer_id
-    return_url = request.return_url
+    return_url = resolve_checkout_return_url(
+        request.return_url,
+        allowed_origins=_allowed_return_origins(settings, http_request),
+    )
     # Resolve checkout / offer like create_razorpay_order does
     resolved_checkout_id = request.checkout_id
     if not resolved_checkout_id:
@@ -607,7 +659,8 @@ async def razorpay_webhook(
     except DomainError:
         raise
     except Exception as exc:
+        logger.error("webhook_processing_failed", extra={"error": str(exc)}, exc_info=True)
         raise DomainError(
-            f"Webhook processing failed: {exc}",
+            "Webhook processing failed.",
             code=ErrorCode.INTERNAL_ERROR,
         ) from exc
