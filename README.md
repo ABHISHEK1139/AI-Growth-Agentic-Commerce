@@ -1,6 +1,28 @@
 # 🛡️ AgentPay — Autonomous Agentic Commerce Gateway
 ### *Making Merchants Discoverable, Sellable, and Transactable to AI Buyers on Razorpay*
 
+<p align="center">
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce">
+    <img src="https://img.shields.io/github/stars/ABHISHEK1139/AI-Growth-Agentic-Commerce?style=social" alt="GitHub stars" />
+  </a>
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce/forks">
+    <img src="https://img.shields.io/github/forks/ABHISHEK1139/AI-Growth-Agentic-Commerce?style=social" alt="GitHub forks" />
+  </a>
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce/watchers">
+    <img src="https://img.shields.io/github/watchers/ABHISHEK1139/AI-Growth-Agentic-Commerce?style=social" alt="GitHub watchers" />
+  </a>
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce/commits/main">
+    <img src="https://img.shields.io/github/last-commit/ABHISHEK1139/AI-Growth-Agentic-Commerce?style=flat-square" alt="Last commit" />
+  </a>
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce">
+    <img src="https://img.shields.io/badge/Repository-ABHISHEK1139%2FAI--Growth--Agentic--Commerce-informational?style=flat-square" alt="Repository" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce"><strong>Source, issues and releases → github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce</strong></a>
+</p>
+
 [![Track](https://img.shields.io/badge/Track-01%20AI%20Growth%20%26%20Agentic%20Commerce-blueviolet?style=for-the-badge)](https://github.com/ABHISHEK1139/AI-Growth-Agentic-Commerce)
 [![Build](https://img.shields.io/badge/Next.js-14%20(App%20Router)-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
@@ -10,6 +32,34 @@
 [![mypy](https://img.shields.io/badge/mypy-strict-2A6DB5?style=for-the-badge)](https://mypy-lang.org)
 [![TypeScript](https://img.shields.io/badge/tsc-strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org)
 [![Protocol](https://img.shields.io/badge/Protocol-NPCI%20UAP%20%2F%20ACP%20%2F%20AP2%20Ready-orange?style=for-the-badge)](#)
+
+---
+
+## ✨ Why this project is worth a look
+
+Most agentic-commerce demos stop at "the AI can find a product." AgentPay is built around
+the part that is actually hard — **an AI that can spend someone's money**, which means
+every action has to be bounded, priced, and provable afterwards.
+
+| | |
+|---|---|
+| 🤖 **Real autonomous buyer, not a chatbot** | A standalone agent (`buyer-agent/`) uses only the public API — exactly as an external integrator would — to search priced offers, create a checkout (which reserves inventory atomically), request human authorization bound to a price hash, and initiate a payment against Razorpay. |
+| 🔐 **Money movement fails closed** | Payments are HMAC-verified *and* re-fetched from the provider (exact amount, currency, capture) before anything is confirmed. Unknown payments 404 rather than minting phantom orders. |
+| 🧾 **Append-only audit ledger** | Every agent action, policy decision and money movement is recorded with correlation IDs, actor, reason code and model version. It is the record, not a byproduct. |
+| 🔒 **Tenant isolation enforced in the data layer** | A scoped repository **refuses to execute** a query that carries no tenant filter, so an unscoped read is a crash rather than a leak. A cross-tenant write raises `CrossTenantWriteError`; a scoped read for someone else's row simply finds nothing and the endpoint answers *not found*. |
+| 🧱 **Architecture boundaries in CI** | Four `lint-imports` contracts keep the agent layer away from the database, keep domain services out of the delivery layer, and stop the pipeline importing domain code. Breaks fail the build. |
+| 🔁 **Replay-safe webhooks** | Signature verification, deterministic event IDs and deduplication mean a provider retry storm cannot double-charge or silently swallow a captured payment. |
+| 📏 **Throughput is measured, not estimated** | A k6 harness with a seeded fixture reports a capacity ladder — currently ~500 req/s clean on a 2-worker container. The first estimate was wrong by 3.5×; measuring it is how that was found. |
+| 🧭 **Schema drift cannot hide** | An integration test compares the ORM against the live database on every mapped table, because a suite that builds its tables *from* the ORM cannot detect them disagreeing. |
+
+**Verification:** 1,968 unit/security/contract tests · 64 integration tests against live
+PostgreSQL and Redis · 30 browser end-to-end specs · ruff, mypy, tsc and all four
+architecture contracts. Every fix in recent history carries a test verified to fail when
+the fix is reverted.
+
+> Full production-readiness analysis, including measured capacity and the honest
+> remaining gaps, is in [`docs/production/READINESS_PLAN.md`](docs/production/READINESS_PLAN.md)
+> and [`docs/production/capacity-report.md`](docs/production/capacity-report.md).
 
 ---
 
