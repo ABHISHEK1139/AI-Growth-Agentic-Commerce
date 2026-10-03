@@ -5,7 +5,8 @@ running stack. Every finding below was reproduced, not inferred. Where a control
 that is recorded too — a report that only lists problems does not tell you what was
 actually checked.
 
-Reviewed: 2026-10-02. Commit `cd063a3` plus the fixes described here.
+Reviewed: 2026-10-02 (commit `cd063a3`) and 2026-10-03 (commit `cff3229` plus the
+component walkthrough below).
 
 ## Summary
 
@@ -16,9 +17,11 @@ Reviewed: 2026-10-02. Commit `cd063a3` plus the fixes described here.
 | pip-audit | 26 → **14** advisories |
 | npm audit | **unrunnable → 7 found**, 2 fixed, 5 need a major upgrade |
 | Test-double providers in non-local | **Vulnerable → fixed** |
-| Application-level code review | **4 vulnerabilities found and fixed** |
+| Application-level code review | **5 vulnerabilities found and fixed** |
+| Component walkthrough (102 routes × 5 identities) | **0 × 5xx, 0 cross-tenant leaks, 0 anonymous mutations** |
+| Agent commerce flow, end to end | **Broken → fixed, then a policy gap found** |
 
-Three of the four application-level findings below were found by reading code, not by
+Three of the five application-level findings below were found by reading code, not by
 scanning. No scanner reports them, because they are not patterns — they are logic errors.
 
 Every fix here was verified the same way: revert the fix, watch the test fail, restore,
@@ -319,6 +322,99 @@ So the passing probe table is evidence about **input handling** (injection, trav
 authn, forgery): those controls genuinely hold. It is not evidence about **authorization
 logic**, and A is the proof. Authorization needs reading, or a test per trust boundary,
 not a payload list.
+
+---
+
+## Component walkthrough — 2026-10-03
+
+Every route in the OpenAPI document (102 paths) called as five identities
+(`platform_admin`, `merchant_admin`, `merchant_operator`, `buyer`, and a second
+merchant's admin) plus anonymous, with schema-valid bodies generated from the spec.
+
+| Check | Result |
+|---|---|
+| 5xx responses | **none**, across ~600 calls |
+| Cross-tenant leakage (tenant B seeing tenant A's ids) | **none** |
+| Mutations reachable without a credential | **none** — every one returns 401/403 |
+| Credential lifecycle (issue → exchange → use → revoke) | holds; scope narrowing, revocation, and brute-force rate limiting all correct |
+
+Driving this from the schema mattered. A hand-written first pass produced 40
+"failures" that were almost entirely my own bad payloads, and three of my own probe
+bugs looked like product bugs:
+
+- a 404 that was really a wrong response key (`offers`, not `candidates`);
+- an "agent key authenticates nowhere" conclusion that was really the response being
+  nested under `data.key`;
+- a "merchant B can delete merchant A's agent key" finding that was a status-code-only
+  check — the endpoint returns 200 with `revoked: false` by design, and A's key survived.
+
+The last one is the most useful lesson here: **check the body, not the status.**
+
+### Fixed — agent and console buyers could not check out at all
+
+`checkout`, `order` and `payment` all carry a foreign key to `buyer`. Nothing
+provisioned that row on demand:
+
+- `signup` creates an `OperatorAccount`, not a `Buyer`;
+- an exchanged agent token carries a synthetic `buyer_akc_...` that exists only as a string.
+
+So `POST /api/v1/checkout` died on `checkout_buyer_id_fkey` and returned
+**503 SERVICE_UNAVAILABLE** — for every signing-up console buyer and every external
+agent. 503 is the worst possible answer, because it says "retry later" for a condition
+that can never resolve.
+
+Fixed in two places: `CheckoutService._ensure_buyer` provisions the row at the insert
+that needs it (so every caller is covered at once rather than one route at a time), and
+`register_agent_key` provisions it in the same transaction as the credential, so a valid
+key can never exist without a buyer behind it. Live: agent checkout 503 → 200, human
+buyer checkout 503 → 200.
+
+### Fixed — an agent could approve its own spending (finding E)
+
+`approve`/`reject` were gated on `require_scopes(CHECKOUT_WRITE)`. An exchanged agent
+token holds exactly that scope — it must, to build a cart — so the agent approved its own
+authorization and then drew money. The capability document advertises
+`explicit_approval_required`, and this deleted that control in exactly the place it
+matters: above the auto-approval limit, where the point is that a person looks at it.
+
+Requirement 20.5 in `apps/api/auth.py` already says a session-only administrative action
+must not be performable with a long-lived agent credential. This was that action, and
+the gate simply was not applied. Fixed with `require_session_scopes`, and five tests in
+`tests/security/test_agent_cannot_self_approve.py` — including one proving a session is
+*still* allowed to approve, so the fix cannot be "reject everyone".
+
+### Open — agent payments cannot complete, and this needs a policy decision
+
+With self-approval closed, an agent purchase above the auto-approval limit has **no
+approver at all**, and I did not fix this because the fix is a policy choice, not a bug:
+
+1. `auto_approval_limit_minor` is stored on merchant rules and buyer policy and
+   advertised in the capability document, but **the authorization service never reads
+   it**. Nothing auto-approves. Every authorization is created `pending`.
+2. Approval requires `checkout:write` **and** a matching `buyer_id`. Only the `buyer`
+   role holds `checkout:write`; `merchant_admin` and `merchant_operator` are capped at
+   `catalog:read` — deliberately, per the comment in `principals.py`: a merchant-side
+   credential that can create a payment can charge a buyer.
+3. An agent's `buyer_id` is `buyer_akc_...`, which no human session holds.
+
+Net effect: **agent search, checkout, and authorization all work; the payment step always
+returns 403 "The approval has not been granted."** The seeded catalog's cheapest item is
+₹7,990 against a ₹5,000 ceiling, so even the smallest purchase dead-ends.
+
+I prototyped the obvious fix — a merchant-scoped `approve_authorization_as_merchant` —
+and then **removed it**. With current role scopes it is unreachable dead code, and making
+it reachable means widening `merchant_admin`, which contradicts a deliberate documented
+decision. The options, for whoever owns that policy:
+
+- give a merchant role an approve-only scope (no payment creation), or
+- make the approver a merchant-side role rather than the buyer identity, or
+- implement the auto-approval the capability document already promises.
+
+Until one is chosen, `explicit_approval_required` should be read as "no agent purchase can
+complete" rather than "a human reviews agent spending".
+
+`tests/security/test_agent_cannot_self_approve.py` pins the current behaviour with a test
+named for the limitation, so it cannot drift unnoticed.
 
 ---
 

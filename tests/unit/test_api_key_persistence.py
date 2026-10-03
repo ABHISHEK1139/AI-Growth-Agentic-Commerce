@@ -319,3 +319,90 @@ def test_count_active_counts_only_live_keys(factory: sessionmaker) -> None:
         repository.revoke(client_id, "merchant_demo")
         session.commit()
         assert repository.count_active("merchant_demo") == 1
+
+
+# ---------------------------------------------------------------------------
+# The issued key must be usable as a buyer, not merely present in the registry.
+# ---------------------------------------------------------------------------
+
+
+def test_issuing_a_key_provisions_its_buyer_row(factory: sessionmaker) -> None:
+    """An exchanged token presents ``buyer_id = f"buyer_{key_id}"``.
+
+    ``checkout``, ``order`` and ``payment`` all carry a foreign key to ``buyer``.
+    When the buyer row was only ever a string, an agent could search the catalog
+    and then every checkout failed on ``checkout_buyer_id_fkey`` and returned 503 --
+    which reads as "retry later" rather than "this can never work".
+    """
+    from services.catalog.models import Buyer
+
+    app = _app(factory)
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/auth/session",
+            json={"role": "merchant_admin", "merchant_id": "merchant_demo"},
+        )
+        res = client.post(
+            "/api/v1/agent/keys",
+            json={"label": "agent-alpha", "requested_scopes": ["catalog:read", "checkout:write"]},
+        )
+    assert res.status_code == 201, res.text
+    issued = res.json()["data"]["key"]
+
+    with factory() as session:
+        row = session.get(Buyer, f"buyer_{issued['key_id']}")
+        assert row is not None, "no buyer row was created for the issued agent key"
+        assert row.tenant_id == "merchant_demo"
+        assert row.status == "active"
+
+
+def test_issuing_two_keys_provisions_two_distinct_buyers(factory: sessionmaker) -> None:
+    """The provisioning is per key, not a shared singleton row."""
+    from services.catalog.models import Buyer
+
+    app = _app(factory)
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/auth/session",
+            json={"role": "merchant_admin", "merchant_id": "merchant_demo"},
+        )
+        first = client.post(
+            "/api/v1/agent/keys",
+            json={"label": "a", "requested_scopes": ["catalog:read"]},
+        ).json()["data"]["key"]
+        second = client.post(
+            "/api/v1/agent/keys",
+            json={"label": "b", "requested_scopes": ["catalog:read"]},
+        ).json()["data"]["key"]
+
+    assert first["key_id"] != second["key_id"]
+    with factory() as session:
+        for issued in (first, second):
+            buyer_id = f"buyer_{issued['key_id']}"
+            assert session.get(Buyer, buyer_id) is not None, buyer_id
+        buyers = session.query(Buyer).all()
+        assert len({b.buyer_id for b in buyers}) == len(buyers)
+
+
+def test_reissuing_the_same_label_does_not_collide(factory: sessionmaker) -> None:
+    """Labels are free-form and not unique, so they cannot key the buyer row."""
+    from services.catalog.models import Buyer
+
+    app = _app(factory)
+    with TestClient(app) as client:
+        client.post(
+            "/api/v1/auth/session",
+            json={"role": "merchant_admin", "merchant_id": "merchant_demo"},
+        )
+        one = client.post(
+            "/api/v1/agent/keys",
+            json={"label": "same", "requested_scopes": ["catalog:read"]},
+        ).json()["data"]["key"]
+        two = client.post(
+            "/api/v1/agent/keys",
+            json={"label": "same", "requested_scopes": ["catalog:read"]},
+        ).json()["data"]["key"]
+
+    with factory() as session:
+        assert session.get(Buyer, f"buyer_{one['key_id']}") is not None
+        assert session.get(Buyer, f"buyer_{two['key_id']}") is not None

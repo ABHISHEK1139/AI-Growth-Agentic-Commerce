@@ -37,6 +37,7 @@ from packages.observability.context import new_id
 from packages.observability.logging import get_logger
 from packages.security.apikeys import ApiClient, generate_api_key, hash_api_key
 from packages.security.principals import Principal, Role, Scope
+from services.catalog.models import Buyer
 from services.connectors.api_clients import ApiClientRepository
 
 logger = get_logger(__name__)
@@ -197,6 +198,28 @@ def register_agent_key(
     # database error and return 201 anyway, which handed the merchant a key that
     # could never authenticate -- a credential that looks real and is not.
     ApiClientRepository(db).add(client)
+
+    # The buyer row has to exist in the same transaction as the credential.
+    #
+    # `checkout`, `order` and `payment` all carry a foreign key to `buyer`, and an
+    # exchanged token presents `buyer_id = f"buyer_{key_id}"`. Provisioning that row
+    # only as a string meant an agent could search the catalog but every checkout
+    # died on `checkout_buyer_id_fkey` and returned 503 -- the headline agentic
+    # commerce flow was non-functional end to end, and 503 reads as "try again
+    # later" rather than "this was never going to work".
+    #
+    # Done here, at issuance, rather than lazily on first checkout: the credential
+    # and the identity it acts as are created together, so there is no window in
+    # which a valid key exists with no buyer behind it.
+    if db.query(Buyer).filter(Buyer.buyer_id == buyer_id).first() is None:
+        db.add(
+            Buyer(
+                buyer_id=buyer_id,
+                tenant_id=principal.merchant_id,
+                display_name=body.label or f"Agent {key_id}",
+                status="active",
+            )
+        )
     db.commit()
 
     response = IssuedKeyResponse(

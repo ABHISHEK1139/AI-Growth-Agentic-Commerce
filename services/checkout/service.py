@@ -98,6 +98,40 @@ class CheckoutService:
         self._offer_service = offer_service or OfferService()
         self._inventory_service = inventory_service or InventoryService()
 
+    @staticmethod
+    def _ensure_buyer(session: Session, *, buyer_id: str, merchant_id: str) -> None:
+        """Make sure the ``buyer`` row exists before anything references it.
+
+        ``checkout``, ``order`` and ``payment`` all carry a foreign key to ``buyer``.
+        Nothing upstream creates that row on demand: ``signup`` creates an operator
+        account, not a buyer, and an exchanged agent key gets a synthetic
+        ``buyer_akc_...``. So any buyer id that had not been provisioned by some other
+        route reached the insert and died on ``checkout_buyer_id_fkey`` -- which
+        surfaced as ``503 SERVICE_UNAVAILABLE``.
+
+        A 503 is the worst possible answer here, because it says "retry later" for a
+        condition that can never resolve on its own. The console signup-to-checkout
+        journey was broken this way for every new buyer.
+
+        Provisioning here, at the insert that needs it, fixes every caller at once
+        instead of one route at a time. The id comes from an already-authenticated
+        principal, and this row is an identity record rather than a grant: every
+        authorisation decision is still made against ``merchant_id`` downstream.
+        """
+        from services.catalog.models import Buyer
+
+        if session.query(Buyer).filter(Buyer.buyer_id == buyer_id).first() is not None:
+            return
+        session.add(
+            Buyer(
+                buyer_id=buyer_id,
+                tenant_id=merchant_id,
+                display_name=None,
+                status="active",
+            )
+        )
+        session.flush()
+
     def create_checkout(
         self,
         session: Session,
@@ -166,6 +200,7 @@ class CheckoutService:
         snapshot_dict["product_id"] = offer.product_id
 
         # 4. Persist checkout entity first so reservation foreign key is satisfied
+        self._ensure_buyer(session, buyer_id=buyer_id, merchant_id=merchant_id)
         checkout = Checkout(
             checkout_id=checkout_id,
             buyer_id=buyer_id,

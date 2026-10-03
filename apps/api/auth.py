@@ -388,9 +388,32 @@ def require_session_roles(*roles: Role) -> PrincipalDependency:
     return dependency
 
 
-# ---------------------------------------------------------------------------
-# API key exchange
-# ---------------------------------------------------------------------------
+def require_session_scopes(*scopes: Scope) -> PrincipalDependency:
+    """Dependency requiring a signed-in session *and* every scope in ``scopes``.
+
+    This is the human-gate dependency (Requirement 20.5). ``require_scopes`` alone
+    is satisfied by an exchanged agent token, because an external agent is issued
+    ``checkout:write`` so it can build a cart. That is fine for creating a cart and
+    wrong for approving one: approval exists precisely so that spending above the
+    auto-approval limit needs a person, and a credential that can approve its own
+    authorization removes the human from the loop entirely.
+
+    Both halves are required. The scope check stops a session without the grant; the
+    session check stops an agent token that happens to hold the same scope.
+    """
+    if not scopes:
+        raise ValueError("require_session_scopes needs at least one scope")
+
+    async def dependency(request: Request) -> Principal:
+        principal = await session_principal(request)
+        try:
+            authorization.require_scopes(principal, *scopes)
+        except ForbiddenError as exc:
+            _log_denied(request, principal, exc)
+            raise
+        return principal
+
+    return dependency
 
 
 def exchange_api_key(
