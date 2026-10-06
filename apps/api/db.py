@@ -84,6 +84,31 @@ def get_engine() -> Engine:
             test_engine.dispose()
         except Exception as exc:
             settings.validate_datastore_for_env()
+            # An explicitly configured server that is unreachable is not a case
+            # for the fallback, whatever the environment. The validator above
+            # refuses it outside ``local``; inside ``local`` with an explicit
+            # ``DATABASE_URL`` the situation is identical and the same refusal
+            # applies here, at the point of use.
+            #
+            # The failure this prevents happened for real: Docker Desktop
+            # restarted, an API worker started before PostgreSQL was accepting
+            # connections, and the single probe above failed. The fallback below
+            # substituted a local file, and the ``lru_cache`` on this function
+            # froze that choice for the life of the worker. PostgreSQL came back,
+            # the health probe - which tests the URL, not the cached engine -
+            # reported it reachable, and the worker served an empty catalog from
+            # a SQLite file while its sibling served Postgres. Identical
+            # requests got different databases depending on which worker the
+            # load balancer happened to pick.
+            #
+            # Raising here keeps the request honest: the existing error mapping
+            # turns the probe exception into SERVICE_UNAVAILABLE, and because
+            # ``lru_cache`` never caches an exception, the next request re-probes
+            # instead of inheriting a dead database. A laptop with no Postgres
+            # configured at all still falls back below, which is the entire
+            # reason the fallback exists.
+            if settings.database_url and not settings.database_url.startswith("sqlite"):
+                raise
             import logging
             from pathlib import Path
 

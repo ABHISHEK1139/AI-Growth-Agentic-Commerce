@@ -27,7 +27,7 @@
 [![Build](https://img.shields.io/badge/Next.js-14%20(App%20Router)-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Razorpay](https://img.shields.io/badge/Razorpay-Standard%20Checkout%20%26%20Links-0C2340?style=for-the-badge&logo=razorpay)](https://razorpay.com)
-[![Tests](https://img.shields.io/badge/Tests-1968%20Unit%20%2B%2064%20Integration%20%2B%2030%20E2E-success?style=for-the-badge&logo=pytest)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Tests-2007%20Unit%20%2B%2064%20Integration%20%2B%2030%20E2E-success?style=for-the-badge&logo=pytest)](https://pytest.org)
 [![Ruff](https://img.shields.io/badge/Ruff-clean-46A758?style=for-the-badge)](https://docs.astral.sh/ruff)
 [![mypy](https://img.shields.io/badge/mypy-strict-2A6DB5?style=for-the-badge)](https://mypy-lang.org)
 [![TypeScript](https://img.shields.io/badge/tsc-strict-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org)
@@ -277,7 +277,7 @@ The result is a platform designed around two complementary directions:
 
 ## 🧪 Reliability & Testing
 
-AgentPay ships an automated test suite of **1,968 unit/security/contract tests, 64
+AgentPay ships an automated test suite of **2,007 unit/security/contract tests, 64
 integration tests against live PostgreSQL and Redis, and 30 browser end-to-end specs** —
 all green. Coverage spans:
 

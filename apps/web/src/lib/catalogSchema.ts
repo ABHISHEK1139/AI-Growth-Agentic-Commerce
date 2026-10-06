@@ -10,6 +10,21 @@
  * same data `scripts/dev_bootstrap.py` loads locally.
  */
 export const CATALOG_SCHEMA_SQL = `
+CREATE TABLE api_client (
+	api_client_id VARCHAR NOT NULL, 
+	merchant_id VARCHAR NOT NULL, 
+	key_hash VARCHAR NOT NULL, 
+	scopes JSON NOT NULL, 
+	status VARCHAR NOT NULL, 
+	label VARCHAR NOT NULL, 
+	role VARCHAR NOT NULL, 
+	buyer_id VARCHAR, 
+	created_at DATETIME NOT NULL, 
+	expires_at DATETIME, 
+	PRIMARY KEY (api_client_id), 
+	FOREIGN KEY(merchant_id) REFERENCES merchant (merchant_id), 
+	UNIQUE (key_hash)
+);
 CREATE TABLE audit_event (
                     event_id TEXT PRIMARY KEY,
                     merchant_id TEXT,
@@ -127,6 +142,48 @@ CREATE TABLE category_pairing (
 	enabled BOOLEAN NOT NULL, 
 	PRIMARY KEY (pairing_id), 
 	FOREIGN KEY(merchant_id) REFERENCES merchant (merchant_id)
+);
+CREATE TABLE channel_connection (
+	connection_id VARCHAR NOT NULL, 
+	merchant_id VARCHAR NOT NULL, 
+	platform_type VARCHAR NOT NULL, 
+	store_domain VARCHAR NOT NULL, 
+	access_token_encrypted TEXT NOT NULL, 
+	label VARCHAR NOT NULL, 
+	status VARCHAR NOT NULL, 
+	product_count INTEGER NOT NULL, 
+	offer_count INTEGER NOT NULL, 
+	last_sync_status VARCHAR, 
+	last_synced_at DATETIME, 
+	last_error TEXT, 
+	created_at DATETIME NOT NULL, 
+	PRIMARY KEY (connection_id), 
+	FOREIGN KEY(merchant_id) REFERENCES merchant (merchant_id)
+);
+CREATE TABLE channel_order_push (
+	push_id VARCHAR NOT NULL, 
+	connection_id VARCHAR NOT NULL, 
+	merchant_id VARCHAR NOT NULL, 
+	order_id VARCHAR NOT NULL, 
+	status VARCHAR NOT NULL, 
+	remote_reference VARCHAR, 
+	error_message TEXT, 
+	created_at DATETIME NOT NULL, 
+	PRIMARY KEY (push_id), 
+	FOREIGN KEY(connection_id) REFERENCES channel_connection (connection_id)
+);
+CREATE TABLE channel_sync_run (
+	sync_run_id VARCHAR NOT NULL, 
+	connection_id VARCHAR NOT NULL, 
+	merchant_id VARCHAR NOT NULL, 
+	status VARCHAR NOT NULL, 
+	product_count INTEGER NOT NULL, 
+	offer_count INTEGER NOT NULL, 
+	error_message TEXT, 
+	started_at DATETIME NOT NULL, 
+	finished_at DATETIME, 
+	PRIMARY KEY (sync_run_id), 
+	FOREIGN KEY(connection_id) REFERENCES channel_connection (connection_id)
 );
 CREATE TABLE checkout (
 	checkout_id VARCHAR NOT NULL, 
@@ -260,6 +317,24 @@ CREATE TABLE offer (
 	FOREIGN KEY(product_id) REFERENCES product (product_id), 
 	FOREIGN KEY(variant_id) REFERENCES variant (variant_id), 
 	FOREIGN KEY(merchant_id) REFERENCES merchant (merchant_id)
+);
+CREATE TABLE operator_account (
+	operator_id VARCHAR NOT NULL, 
+	merchant_id VARCHAR NOT NULL, 
+	email VARCHAR NOT NULL, 
+	display_name VARCHAR NOT NULL, 
+	password_hash VARCHAR NOT NULL, 
+	role VARCHAR NOT NULL, 
+	status VARCHAR NOT NULL, 
+	must_change_password BOOLEAN NOT NULL, 
+	failed_login_count INTEGER NOT NULL, 
+	last_failed_login_at DATETIME, 
+	locked_until DATETIME, 
+	last_login_at DATETIME, 
+	created_at DATETIME NOT NULL, 
+	PRIMARY KEY (operator_id), 
+	FOREIGN KEY(merchant_id) REFERENCES merchant (merchant_id), 
+	UNIQUE (email)
 );
 CREATE TABLE "order" (
 	order_id VARCHAR NOT NULL, 
@@ -397,5 +472,13 @@ CREATE TABLE variant (
 	PRIMARY KEY (variant_id), 
 	FOREIGN KEY(product_id) REFERENCES product (product_id)
 );
-CREATE INDEX IF NOT EXISTS  idx_pi_pid_pos ON product_image(product_id, position)
+CREATE INDEX IF NOT EXISTS  ix_api_client_merchant ON api_client (merchant_id);
+CREATE INDEX IF NOT EXISTS  ix_api_client_merchant_status ON api_client (merchant_id, status);
+CREATE INDEX IF NOT EXISTS  ix_channel_connection_merchant ON channel_connection (merchant_id);
+CREATE INDEX IF NOT EXISTS  ix_channel_order_push_connection ON channel_order_push (connection_id, created_at);
+CREATE INDEX IF NOT EXISTS  ix_channel_sync_run_connection ON channel_sync_run (connection_id, started_at);
+CREATE INDEX IF NOT EXISTS  ix_operator_account_email ON operator_account (email);
+CREATE INDEX IF NOT EXISTS  ix_operator_account_merchant ON operator_account (merchant_id);
+CREATE UNIQUE INDEX uq_channel_connection_store ON channel_connection (merchant_id, platform_type, store_domain);
+CREATE UNIQUE INDEX uq_channel_order_push_once ON channel_order_push (connection_id, order_id)
 `;
