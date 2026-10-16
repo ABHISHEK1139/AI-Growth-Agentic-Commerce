@@ -22,6 +22,7 @@ from services.campaigns.repository import CampaignRepository
 from services.catalog.models import CategoryPairing, Product
 from services.inventory.models import Inventory
 from services.offers.models import Offer
+from services.policy.repository import MerchantRulesRepository
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,30 @@ class CampaignService:
     def __init__(self, repository: CampaignRepository | None = None) -> None:
         self.policy_engine = CampaignPolicyEngine()
         self._repo = repository or CampaignRepository()
+
+    def _merchant_discount_ceiling_pct(
+        self, session: Session | None, merchant_id: str
+    ) -> float:
+        """The merchant's configured discount ceiling, from their MerchantRules.
+
+        Falls back to the policy engine's default (10.0%) when there is no
+        session or no rules row; the gate then behaves exactly as before.
+        """
+        if session is None:
+            return 10.0
+        try:
+            rules = MerchantRulesRepository(session, merchant_id).get_by_merchant_id(
+                merchant_id
+            )
+            if rules is not None and rules.max_discount_basis_points:
+                return rules.max_discount_basis_points / 100.0
+        except Exception:
+            logger.warning(
+                "campaign_merchant_rules_lookup_failed",
+                extra={"merchant_id": merchant_id},
+                exc_info=True,
+            )
+        return 10.0
 
     def propose_campaign(
         self,
@@ -62,6 +87,11 @@ class CampaignService:
                 target_cat = "audio"
 
         items: list[CampaignProductItem] = []
+
+        # ── Step 0: Merchant's configured discount ceiling ──
+        # The gate below must enforce the ceiling the merchant set at
+        # /merchant/policy, not a hardcoded 10%.
+        merchant_policy_max_discount = self._merchant_discount_ceiling_pct(session, merchant_id)
 
         # ── Step 1: Database Catalog & Inventory Discovery ──
         if session is not None:
@@ -120,7 +150,7 @@ class CampaignService:
                     )
                     pairing_names = [p.target_category_id for p in pairings] or ["accessories"]
 
-                    discount = min(max_discount_pct, 10.0)
+                    discount = min(max_discount_pct, 10.0, merchant_policy_max_discount)
                     orig_price = offer.unit_price_minor
                     promo_price = int(orig_price * (1 - (discount / 100)))
 
@@ -134,9 +164,12 @@ class CampaignService:
                             discount_pct=discount,
                             promotional_price_minor=promo_price,
                             available_inventory=avail_qty,
-                            margin_pct_preserved=round(35.0 - discount, 1),
+                            # No cost data is modeled: margin is unknown, not
+                            # 35%-minus-discount. The policy engine marks it
+                            # unverifiable and forces merchant review.
+                            margin_pct_preserved=None,
                             cross_sell_pairings=pairing_names,
-                            selection_rationale=f"High catalog fit for '{target_cat}', {avail_qty} units in stock, preserved gross margin.",
+                            selection_rationale=f"High catalog fit for '{target_cat}', {avail_qty} units in stock; margin unverified (no cost data modeled).",
                         )
                     )
             except Exception:
@@ -150,7 +183,7 @@ class CampaignService:
         if not items:
             if target_cat == "audio":
                 orig_price = 799000
-                discount = min(max_discount_pct, 10.0)
+                discount = min(max_discount_pct, 10.0, merchant_policy_max_discount)
                 items.append(
                     CampaignProductItem(
                         product_id="prd_seed_aud_01",
@@ -161,18 +194,18 @@ class CampaignService:
                         discount_pct=discount,
                         promotional_price_minor=int(orig_price * (1 - (discount / 100))),
                         available_inventory=24,
-                        margin_pct_preserved=32.5,
+                        margin_pct_preserved=None,
                         cross_sell_pairings=[
                             "Nothing Phone (2a)",
                             "Dell XPS 15",
                             "Keychron K2 Pro",
                         ],
-                        selection_rationale="High warehouse inventory (24 units), steady 4.4★ rating, sufficient 32.5% gross margin headroom.",
+                        selection_rationale="Sample catalog entry (offline fallback): 24 units assumed in stock. Rating and margin are not verified — merchant review required.",
                     )
                 )
             elif target_cat == "laptops":
                 orig_price = 5499000
-                discount = min(max_discount_pct, 8.0)
+                discount = min(max_discount_pct, 8.0, merchant_policy_max_discount)
                 items.append(
                     CampaignProductItem(
                         product_id="prd_seed_lap_02",
@@ -183,18 +216,18 @@ class CampaignService:
                         discount_pct=discount,
                         promotional_price_minor=int(orig_price * (1 - (discount / 100))),
                         available_inventory=12,
-                        margin_pct_preserved=24.0,
+                        margin_pct_preserved=None,
                         cross_sell_pairings=[
                             "USB-C 7-in-1 Hub",
                             "Logitech MX Master 3S",
                             "Laptop Sleeve",
                         ],
-                        selection_rationale="Targeted coding demographic, 12 available units, excellent dual-channel performance fit.",
+                        selection_rationale="Sample catalog entry (offline fallback): targeted coding demographic, 12 units assumed in stock. Margin is not verified — merchant review required.",
                     )
                 )
             elif target_cat == "smartphone":
                 orig_price = 2399900
-                discount = min(max_discount_pct, 7.5)
+                discount = min(max_discount_pct, 7.5, merchant_policy_max_discount)
                 items.append(
                     CampaignProductItem(
                         product_id="prd_seed_phn_01",
@@ -205,18 +238,18 @@ class CampaignService:
                         discount_pct=discount,
                         promotional_price_minor=int(orig_price * (1 - (discount / 100))),
                         available_inventory=18,
-                        margin_pct_preserved=21.0,
+                        margin_pct_preserved=None,
                         cross_sell_pairings=[
                             "Samsung 45W Charger",
                             "Sony WH-CH720N",
                             "Armor Case with Kickstand",
                         ],
-                        selection_rationale="High search demand, pairs naturally with fast charger and headphones for basket expansion.",
+                        selection_rationale="Sample catalog entry (offline fallback): pairs naturally with fast charger and headphones for basket expansion. Margin is not verified — merchant review required.",
                     )
                 )
             else:
                 orig_price = 99900
-                discount = min(max_discount_pct, 12.0)
+                discount = min(max_discount_pct, 12.0, merchant_policy_max_discount)
                 items.append(
                     CampaignProductItem(
                         product_id="prd_seed_acc_01",
@@ -227,9 +260,9 @@ class CampaignService:
                         discount_pct=discount,
                         promotional_price_minor=int(orig_price * (1 - (discount / 100))),
                         available_inventory=45,
-                        margin_pct_preserved=40.0,
+                        margin_pct_preserved=None,
                         cross_sell_pairings=["UltraBook Pro 16", "Dell XPS 15"],
-                        selection_rationale="High margin (40%), massive stock (45 units), ideal universal laptop attach item.",
+                        selection_rationale="Sample catalog entry (offline fallback): 45 units assumed in stock, universal laptop attach item. Margin is not verified — merchant review required.",
                     )
                 )
 
@@ -239,7 +272,7 @@ class CampaignService:
             max_discount_pct=max_discount_pct,
             duration_days=duration_days,
             products=items,
-            merchant_policy_max_discount=10.0,
+            merchant_policy_max_discount=merchant_policy_max_discount,
             active_campaigns=active_list,
         )
 
@@ -363,7 +396,12 @@ class CampaignService:
         self._repo.save(approved)
         return approved
 
-    def activate_campaign(self, campaign_id: str, merchant_id: str | None = None) -> Campaign:
+    def activate_campaign(
+        self,
+        campaign_id: str,
+        merchant_id: str | None = None,
+        session: Session | None = None,
+    ) -> Campaign:
         c = self.get_campaign(campaign_id, merchant_id)
         if not c:
             raise DomainError(f"Campaign {campaign_id} not found.", code=ErrorCode.NOT_FOUND)
@@ -378,12 +416,16 @@ class CampaignService:
             )
 
         # Policy is re-evaluated at activation: a rules change between propose
-        # and activate must block the campaign that no longer complies.
+        # and activate must block the campaign that no longer complies. The
+        # recheck uses the merchant's current configured ceiling, not a
+        # hardcoded 10%.
         recheck = self.policy_engine.evaluate_campaign(
             max_discount_pct=c.max_discount_pct,
             duration_days=c.duration_days,
             products=c.products,
-            merchant_policy_max_discount=10.0,
+            merchant_policy_max_discount=self._merchant_discount_ceiling_pct(
+                session, c.merchant_id
+            ),
             active_campaigns=[
                 x for x in self.list_campaigns(c.merchant_id) if x.campaign_id != c.campaign_id
             ],

@@ -804,7 +804,16 @@ class PaymentService:
             reason: Human-readable reason for the audit log.
             merchant_id: When supplied, the payment must belong to this tenant.
         """
-        payment = session.query(Payment).filter(Payment.payment_id == payment_id).first()
+        payment = (
+            session.query(Payment)
+            .filter(Payment.payment_id == payment_id)
+            # Row lock: the refundable ceiling is summed from the ledger below,
+            # so two concurrent refunds must not both read the same ceiling
+            # before either appends its PAYMENT_REFUNDED event. Same pattern as
+            # create_payment and verify_payment.
+            .with_for_update()
+            .first()
+        )
         if payment is None:
             raise DomainError("The payment does not exist.", code=ErrorCode.NOT_FOUND)
 

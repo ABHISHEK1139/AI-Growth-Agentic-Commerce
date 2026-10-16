@@ -40,6 +40,11 @@ class CrossSellItem:
     available_quantity: int | None = None
     savings_minor: int | None = None
     alternative_title: str | None = None
+    # True when this item is offline/sample data rather than a real catalog
+    # recommendation (synthetic IDs, heuristic prices and quantities). The API
+    # surface serializes this flag so consumers never mistake samples for
+    # merchant offers.
+    is_sample: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +288,9 @@ class RecommendationService:
                         available_quantity=10,
                         savings_minor=pat.get("savings_minor"),
                         alternative_title=pat.get("alternative"),
+                        # Offline sample data: heuristic price and quantity,
+                        # not a real merchant offer. Labeled, never silent.
+                        is_sample=True,
                     )
                 )
 
