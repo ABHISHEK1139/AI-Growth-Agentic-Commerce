@@ -75,11 +75,20 @@ class AgentLoopRunner:
         buyer_id: str | None = None,
         confirmed: bool = False,
     ) -> ToolExecutionResult:
-        """Execute a single validated tool call through the deterministic service layer."""
+        """Execute a single validated tool call through the deterministic service layer.
+
+        The ``confirmed`` flag is advisory, not an authorization: it is asserted
+        by the caller and carries no signature, so it guards against accidental
+        invocation, not against a malicious caller. Access control on this path
+        is the scope check at the API surface; money safety is the domain
+        revalidation inside each state-changing service (e.g. the
+        authorization-mandate revalidation in ``create_payment``).
+        """
         # 1. Strict tool argument validation & schema conformance
         validated_args = validate_tool_arguments(tool_name, arguments)
 
-        # 2. Confirmation gate for state-mutating operations
+        # 2. Confirmation gate for state-mutating operations. Advisory only
+        #    (see docstring): ``confirmed=True`` is a client assertion.
         is_mutating = tool_name in STATE_CHANGING_TOOLS
         if is_mutating and not confirmed:
             with contextlib.suppress(Exception):
@@ -153,6 +162,21 @@ class AgentLoopRunner:
                 "offers": [o.model_dump(mode="json") for o in offers],
             }
 
+        elif tool_name == "check_payment":
+            if not validated_args.payment_id:
+                raise DomainError(
+                    "payment_id is required for check_payment",
+                    code=ErrorCode.VALIDATION_ERROR,
+                )
+            # A real status read through the facade: this tool must never
+            # answer from a hardcoded success, so there is no fallback here.
+            payment = self._commerce.get_payment(
+                merchant_id=merchant_id,
+                payment_id=validated_args.payment_id,
+                buyer_id=buyer_id,
+            )
+            result_data = {"payment": payment.model_dump(mode="json")}
+
         elif tool_name == "check_inventory":
             if not validated_args.offer_id:
                 raise DomainError(
@@ -160,15 +184,19 @@ class AgentLoopRunner:
                     code=ErrorCode.VALIDATION_ERROR,
                 )
             # No fallback: an unreadable offer is reported through the error,
-            # never as a confident in-stock verdict.
+            # never as a confident in-stock verdict. The offer's
+            # available_quantity is already net of reservations (see
+            # services/offers/service.py), so it is the real sellable stock.
             offer = self._commerce.get_offer(
                 merchant_id=merchant_id,
                 offer_id=validated_args.offer_id,
             )
+            available = int(offer.available_quantity)
             result_data = {
                 "offer_id": validated_args.offer_id,
-                "in_stock": True,
-                "status": "available",
+                "in_stock": available > 0,
+                "available_quantity": available,
+                "status": "available" if available > 0 else "out_of_stock",
                 "unit_price_minor": offer.unit_price_minor,
                 "currency": offer.currency,
             }
@@ -182,11 +210,17 @@ class AgentLoopRunner:
             offer = self._commerce.get_offer(
                 merchant_id=merchant_id, offer_id=validated_args.offer_id
             )
+            # Only the catalog's delivery_days is real merchant configuration;
+            # guarantees, shipping cost, and carrier options are not modeled,
+            # so they are reported as unknown rather than invented.
             result_data = {
-                "delivery_days": offer.delivery_days or 2,
-                "guaranteed": True,
-                "shipping_cost_minor": 0,
-                "options": ["standard_express_courier"],
+                "delivery_days": offer.delivery_days,
+                "guaranteed": None,
+                "guarantee_unknown": True,
+                "shipping_cost_minor": None,
+                "shipping_cost_unknown": True,
+                "options": [],
+                "note": "Merchant shipping guarantees, costs, and carrier options are not configured; only the catalog delivery_days is reported.",
             }
 
         elif tool_name == "get_return_policy":
@@ -198,10 +232,16 @@ class AgentLoopRunner:
             offer = self._commerce.get_offer(
                 merchant_id=merchant_id, offer_id=validated_args.offer_id
             )
+            # Only the catalog's return_period_days is real merchant
+            # configuration; the policy text and eligibility rules are not
+            # modeled, so they are reported as unknown rather than invented.
             result_data = {
-                "return_period_days": offer.return_period_days or 10,
-                "policy": "10-day verified return with Razorpay source refund and scheduled courier pickup",
-                "eligible": True,
+                "return_period_days": offer.return_period_days,
+                "policy": None,
+                "policy_unknown": True,
+                "eligible": None,
+                "eligibility_unknown": True,
+                "note": "Merchant return policy text and eligibility rules are not configured; only the catalog return_period_days is reported.",
             }
 
         elif tool_name == "create_checkout":

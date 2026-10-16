@@ -65,6 +65,20 @@ class CommerceFacade(Protocol):
         """Several offers resolved in a single read, for side-by-side comparison."""
         ...
 
+    def get_payment(
+        self,
+        *,
+        merchant_id: str,
+        payment_id: str,
+        buyer_id: str | None = None,
+    ) -> PaymentV1:
+        """One payment's current status, tenant-scoped (and buyer-scoped when given).
+
+        A pure read with no ledger write: status checks must never invent a
+        verdict, so this is the only way the agent layer learns payment state.
+        """
+        ...
+
     # -- state-changing capabilities ------------------------------------------
     #
     # Each of these writes its aggregate and that aggregate's audit event inside

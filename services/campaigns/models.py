@@ -43,9 +43,13 @@ class CampaignProductItem:
     discount_pct: float
     promotional_price_minor: int
     available_inventory: int
-    margin_pct_preserved: float
     cross_sell_pairings: list[str]
     selection_rationale: str
+    # Preserved gross-margin percent, or None when unknown. No cost data is
+    # modeled on offers/products, so the service must pass None rather than
+    # invent a baseline; the policy engine treats None as unverifiable and
+    # forces merchant review instead of emitting a fabricated margin verdict.
+    margin_pct_preserved: float | None = None
 
 
 @dataclass

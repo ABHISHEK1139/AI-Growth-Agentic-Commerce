@@ -147,6 +147,23 @@ class SessionScopedCommerceFacade:
                 for offer_id in offer_ids
             ]
 
+    def get_payment(
+        self,
+        *,
+        merchant_id: str,
+        payment_id: str,
+        buyer_id: str | None = None,
+    ) -> PaymentV1:
+        # Read-only: the agent's check_payment tool must report the payment's
+        # real status, never a fabricated success.
+        with self._unit_of_work() as session:
+            return self._payments.get_payment_by_id(
+                session,
+                payment_id=payment_id,
+                merchant_id=merchant_id,
+                buyer_id=buyer_id,
+            )
+
     # -- state-changing capabilities ------------------------------------------
 
     def create_checkout(

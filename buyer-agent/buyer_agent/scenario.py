@@ -211,13 +211,26 @@ def run_buyer_purchase_scenario(
             log(
                 f"Order successfully verified: {ord_data.get('order_id')} (Status: {ord_data.get('status')})"
             )
+            order_confirmed = True
+        else:
+            log(f"Order {order_id} could not be verified via get_order.")
+            order_confirmed = False
+    else:
+        order_confirmed = False
 
+    # Success means a confirmed order, not merely an initiated payment: the
+    # runner previously reported success as soon as a payment_id existed, even
+    # when no order was ever confirmed.
     return PurchaseResult(
-        is_success=True,
+        is_success=order_confirmed,
         checkout_id=checkout_id,
         authorization_id=authorization_id,
         payment_id=payment_id,
         order_id=order_id,
         total_minor=total_minor,
-        message="Purchase scenario completed successfully.",
+        message=(
+            "Purchase scenario completed successfully."
+            if order_confirmed
+            else "Payment initiated; order confirmation pending."
+        ),
     )

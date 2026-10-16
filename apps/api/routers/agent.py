@@ -77,6 +77,7 @@ TOOL_REQUIRED_SCOPES: dict[str, Scope] = {
     "check_inventory": Scope.CATALOG_READ,
     "get_delivery_options": Scope.CATALOG_READ,
     "get_return_policy": Scope.CATALOG_READ,
+    "check_payment": Scope.PAYMENT_WRITE,
     "get_payment_status": Scope.PAYMENT_WRITE,
     "get_order": Scope.CHECKOUT_WRITE,
 }
@@ -115,6 +116,10 @@ class AgentConverseRequest(BaseModel):
 class AgentToolExecuteRequest(BaseModel):
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    # Advisory only: asserted by the caller, not a signed authorization. It
+    # guards against accidental invocation of state-changing tools, not against
+    # a malicious caller. Access control here is the scope check below; money
+    # safety is the domain revalidation inside each state-changing service.
     confirmed: bool = False
 
 

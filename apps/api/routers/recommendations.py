@@ -88,6 +88,7 @@ def get_cross_sell_recommendations(
                     "savings_minor": r.savings_minor,
                     "alternative_title": r.alternative_title,
                     "available_quantity": r.available_quantity,
+                    "is_sample": r.is_sample,
                 }
                 for r in outcome.recommendations
             ],

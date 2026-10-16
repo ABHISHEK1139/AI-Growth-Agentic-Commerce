@@ -212,10 +212,14 @@ def reject_campaign(
 def activate_campaign(
     campaign_id: str,
     principal: MerchantPrincipal,
+    session: OptionalDatabaseSession = None,
 ) -> dict[str, Any]:
     """Activate an approved campaign into live merchant production."""
     service = CampaignService()
-    c = service.activate_campaign(campaign_id, merchant_id=principal.merchant_id)
+    # The session lets the activation recheck read the merchant's current
+    # discount ceiling from MerchantRules; without one the gate falls back to
+    # the policy engine default.
+    c = service.activate_campaign(campaign_id, merchant_id=principal.merchant_id, session=session)
     return success(_campaign_to_dict(c))
 
 

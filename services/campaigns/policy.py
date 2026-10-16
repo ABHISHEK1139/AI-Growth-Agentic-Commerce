@@ -32,6 +32,7 @@ class CampaignPolicyEngine:
     ) -> PolicyCheckResult:
         passed: list[str] = []
         violated: list[str] = []
+        margin_unknown: list[str] = []
 
         # 1. Discount Ceiling Check
         if max_discount_pct > merchant_policy_max_discount:
@@ -60,7 +61,12 @@ class CampaignPolicyEngine:
                 violated.append(
                     f"INSUFFICIENT_INVENTORY ({p.product_id}): {p.available_inventory} units < {self.MIN_INVENTORY_THRESHOLD}"
                 )
-            if p.margin_pct_preserved < self.MIN_MARGIN_FLOOR_PCT:
+            if p.margin_pct_preserved is None:
+                # No cost data is modeled, so the margin floor cannot be
+                # checked: this is a caveat that forces merchant review, not a
+                # fabricated verdict in either direction.
+                margin_unknown.append(p.product_id)
+            elif p.margin_pct_preserved < self.MIN_MARGIN_FLOOR_PCT:
                 violated.append(
                     f"MARGIN_FLOOR_BREACH ({p.product_id}): Preserved margin {p.margin_pct_preserved}% < {self.MIN_MARGIN_FLOOR_PCT}%"
                 )
@@ -73,8 +79,14 @@ class CampaignPolicyEngine:
             passed.append("ITEM_DISCOUNTS_VALID: All items within limit")
         if not any("INSUFFICIENT_INVENTORY" in v for v in violated):
             passed.append("INVENTORY_ADEQUATE: All items meet minimum stock threshold")
-        if not any("MARGIN_FLOOR_BREACH" in v for v in violated):
+        if not any("MARGIN_FLOOR_BREACH" in v for v in violated) and not margin_unknown:
             passed.append("MARGIN_FLOORS_PRESERVED: All items preserve >= 15% unit margin")
+        if margin_unknown:
+            passed.append(
+                "MARGIN_UNVERIFIABLE: No cost data modeled for "
+                + ", ".join(margin_unknown)
+                + "; margin floor cannot be checked — merchant review required"
+            )
         if not any("CAMPAIGN_CONFLICT" in v for v in violated):
             passed.append("NO_CONFLICTS: No overlap with existing active campaigns")
 

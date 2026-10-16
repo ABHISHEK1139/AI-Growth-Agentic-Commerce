@@ -71,6 +71,11 @@ def validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> ToolAr
     defaults["schema_version"] = "1.0"
     defaults["tool_name"] = tool_name
 
+    # NOTE: `confirmation_token` is accepted into the closed schema so callers
+    # can carry one, but no surface verifies it today: the `confirmed` boolean
+    # on the /tools/execute request is advisory (see services/agent/loop.py).
+    # Do not treat the presence of a token as proof of a signed confirmation.
+
     try:
         validated = ToolArgumentsV1.model_validate(defaults)
     except Exception as exc:
@@ -97,6 +102,11 @@ def validate_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> ToolAr
     ):
         raise DomainError(
             "checkout_id and authorization_id are required for create_payment",
+            code=ErrorCode.VALIDATION_ERROR,
+        )
+    if tool_name == "check_payment" and not validated.payment_id:
+        raise DomainError(
+            "payment_id is required for check_payment",
             code=ErrorCode.VALIDATION_ERROR,
         )
 
