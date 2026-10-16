@@ -161,12 +161,15 @@ class ResearchWorker:
 
             for source_url, snippet in web_results:
                 page_fetches += 1
+                # Third-party search snippets, not verified official
+                # documents: label them as inference at modest confidence so
+                # the provenance never overstates their authority.
                 evidence.append(
                     ResearchEvidence(
                         claim=snippet[:300],
-                        citation_type="official_doc",
+                        citation_type="inference",
                         source_url=source_url,
-                        confidence=0.95,
+                        confidence=0.5,
                     )
                 )
                 if len(evidence) >= 2:

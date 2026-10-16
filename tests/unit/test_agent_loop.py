@@ -79,6 +79,41 @@ def test_agent_tool_reaches_commerce_once_confirmed():
     ) in commerce.calls
 
 
+def test_check_payment_reports_real_status_through_facade():
+    """check_payment must read the payment's real status, never fabricate success."""
+    commerce = FakeCommerceFacade()
+    runner = AgentLoopRunner(commerce)
+
+    res = runner.execute_tool(
+        tool_name="check_payment",
+        arguments={"payment_id": "pay_1"},
+        merchant_id="merch_1",
+        buyer_id="buy_1",
+    )
+    assert res.result["payment"]["payment_id"] == "pay_1"
+    assert res.result["payment"]["status"] == "pending"
+    assert (
+        "get_payment",
+        {"merchant_id": "merch_1", "payment_id": "pay_1", "buyer_id": "buy_1"},
+    ) in commerce.calls
+
+
+def test_check_inventory_reports_real_stock():
+    """check_inventory must report the offer's actual net stock, not hardcoded True."""
+    commerce = FakeCommerceFacade()
+    runner = AgentLoopRunner(commerce)
+
+    res = runner.execute_tool(
+        tool_name="check_inventory",
+        arguments={"offer_id": "off_1"},
+        merchant_id="merch_1",
+    )
+    # The fake offer carries available_quantity=5 (net of reservations).
+    assert res.result["in_stock"] is True
+    assert res.result["available_quantity"] == 5
+    assert res.result["status"] == "available"
+
+
 def test_agent_loop_bounded_execution():
     commerce = FakeCommerceFacade(offers=[make_offer("off_1"), make_offer("off_2")])
     runner = AgentLoopRunner(commerce)

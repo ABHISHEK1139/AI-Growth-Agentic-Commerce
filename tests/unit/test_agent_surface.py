@@ -128,6 +128,8 @@ def test_allowlisted_tool_arguments_validation():
             args = {"checkout_id": "chk_1"}
         elif tool_name == "create_payment":
             args = {"checkout_id": "chk_1", "authorization_id": "ath_1"}
+        elif tool_name == "check_payment":
+            args = {"payment_id": "pay_1"}
         elif tool_name in ("open_url", "extract_page"):
             args = {"url": "https://example.com/product/docs"}
 
@@ -145,6 +147,9 @@ def test_unallowlisted_tool_is_blocked():
 def test_missing_required_arguments_rejected():
     with pytest.raises(DomainError) as exc_info:
         validate_tool_arguments("create_checkout", {})
+    assert exc_info.value.code == ErrorCode.VALIDATION_ERROR
+    with pytest.raises(DomainError) as exc_info:
+        validate_tool_arguments("check_payment", {})
     assert exc_info.value.code == ErrorCode.VALIDATION_ERROR
 
 

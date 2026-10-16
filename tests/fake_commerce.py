@@ -183,6 +183,21 @@ class FakeCommerceFacade:
         self._record("compare_offers", merchant_id=merchant_id, offer_ids=list(offer_ids))
         return [make_offer(offer_id=oid, merchant_id=merchant_id) for oid in offer_ids]
 
+    def get_payment(
+        self,
+        *,
+        merchant_id: str,
+        payment_id: str,
+        buyer_id: str | None = None,
+    ) -> PaymentV1:
+        self._record(
+            "get_payment",
+            merchant_id=merchant_id,
+            payment_id=payment_id,
+            buyer_id=buyer_id,
+        )
+        return make_payment(payment_id=payment_id)
+
     # -- state-changing capabilities ------------------------------------------
 
     def create_checkout(

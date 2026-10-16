@@ -44,9 +44,17 @@ def test_propose_campaign_audio_picks():
     assert len(campaign.products) > 0
     assert campaign.products[0].discount_pct <= 10.0
     assert campaign.products[0].available_inventory >= 5
-    assert campaign.products[0].margin_pct_preserved >= 15.0
+    # No cost data is modeled, so margins are reported unknown rather than
+    # fabricated; the gate must caveat instead of claiming a preserved margin.
+    assert campaign.products[0].margin_pct_preserved is None
     assert campaign.policy_check.decision == PolicyDecision.REQUIRE_APPROVAL
     assert not campaign.policy_check.violated_rules
+    assert any(
+        "MARGIN_UNVERIFIABLE" in rule for rule in campaign.policy_check.passed_rules
+    )
+    assert not any(
+        "MARGIN_FLOORS_PRESERVED" in rule for rule in campaign.policy_check.passed_rules
+    )
     assert campaign.estimated_sales_lift_pct > 0
 
 
